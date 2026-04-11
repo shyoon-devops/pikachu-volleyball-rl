@@ -45,6 +45,13 @@ async def _dispatch(
 ) -> None:
     """Route incoming messages to the appropriate handler."""
     if msg_type == "training:start":
+        current = training_service.status()
+        if current["state"] == "running":
+            await ws.send_json({
+                "type": "training:error",
+                "payload": {"message": "Training is already running"},
+            })
+            return
         experiment_id = await training_service.start(
             hyperparams=payload.get("hyperparams"),
             bot_level=payload.get("bot_level", 1),
