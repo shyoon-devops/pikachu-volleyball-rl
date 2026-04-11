@@ -91,6 +91,15 @@ async def _test_lifespan(app):
 
 
 @pytest.fixture
+def rl_env():
+    from backend.rl.env import PikachuVolleyballEnv
+
+    env = PikachuVolleyballEnv(bot_level=1, max_steps=3000)
+    yield env
+    env.close()
+
+
+@pytest.fixture
 def app_instance():
     from backend.app.main import app
 

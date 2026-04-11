@@ -398,7 +398,7 @@ class TestEnvAutopower:
 
         # Action 3 = jump (y_dir=-1), but since already jumping, the auto power-hit triggers
         obs, reward, _, _, _ = env.step(3)
-        assert obs.shape == (12,)
+        assert obs.shape == (18,)
         env.close()
 
 
@@ -406,7 +406,7 @@ class TestActionMap:
     """Cover all entries in ACTION_MAP."""
 
     def test_all_actions_are_valid(self) -> None:
-        assert len(ACTION_MAP) == 6
+        assert len(ACTION_MAP) == 12
         for action_id, inp in ACTION_MAP.items():
             assert isinstance(inp, PlayerInput)
             assert inp.x_dir in (-1, 0, 1)

@@ -29,7 +29,7 @@ class TestReset:
 
     def test_reset_obs_shape(self, env: PikachuVolleyballEnv) -> None:
         obs, info = env.reset()
-        assert obs.shape == (12,)
+        assert obs.shape == (18,)
         assert obs.dtype == np.float32
 
     def test_reset_obs_range(self, env: PikachuVolleyballEnv) -> None:
@@ -45,19 +45,19 @@ class TestReset:
 class TestStep:
     """step() should return valid obs/reward/done for each action."""
 
-    @pytest.mark.parametrize("action", [0, 1, 2, 3, 4, 5])
+    @pytest.mark.parametrize("action", list(range(12)))
     def test_step_valid_output(self, env: PikachuVolleyballEnv, action: int) -> None:
         env.reset()
         obs, reward, terminated, truncated, info = env.step(action)
 
-        assert obs.shape == (12,)
+        assert obs.shape == (18,)
         assert obs.dtype == np.float32
         assert isinstance(reward, float)
         assert isinstance(terminated, bool)
         assert isinstance(truncated, bool)
         assert isinstance(info, dict)
 
-    @pytest.mark.parametrize("action", [0, 1, 2, 3, 4, 5])
+    @pytest.mark.parametrize("action", list(range(12)))
     def test_step_obs_in_range(self, env: PikachuVolleyballEnv, action: int) -> None:
         env.reset()
         obs, *_ = env.step(action)
@@ -80,35 +80,31 @@ class TestRewardShaping:
         # At least one frame should have had a scoring reward (+10)
         assert max_reward >= 5.0, f"No scoring reward detected, max was {max_reward}"
 
-    def test_conceding_gives_negative_reward(self, env: PikachuVolleyballEnv) -> None:
+    def test_conceding_gives_negative_reward(self) -> None:
         """Conceding should produce a large negative reward."""
+        env = PikachuVolleyballEnv(bot_level=1, max_steps=20000)
         env.reset()
         min_reward = float("inf")
-        for _ in range(5000):
+        for _ in range(20000):
             obs, reward, terminated, truncated, info = env.step(0)  # noop
             min_reward = min(min_reward, reward)
             if terminated or truncated:
                 break
         assert min_reward <= -5.0, f"No concede penalty detected, min was {min_reward}"
+        env.close()
 
     def test_approach_reward_fires_when_moving_toward_ball(
         self, env: PikachuVolleyballEnv
     ) -> None:
         """Moving toward the ball on own side should give small positive reward."""
         env.reset()
-        # Ball starts at x=108 (P1's position), move left to create distance
         for _ in range(5):
             env.step(1)  # move left
-        # Now move right toward ball
         _, reward_toward, *_ = env.step(2)  # move right
-        # Move left away from ball
         env.reset()
         for _ in range(5):
             env.step(2)  # move right first
-        _, reward_away, *_ = env.step(1)  # move left (away from predicted position)
-        # Toward should generally >= away (may not hold every single frame
-        # due to ball movement, but the signal exists)
-        # Just verify reward is a finite float
+        _, reward_away, *_ = env.step(1)  # move left
         assert isinstance(reward_toward, float)
         assert isinstance(reward_away, float)
 
@@ -117,7 +113,7 @@ class TestRewardShaping:
         env.reset()
         for _ in range(3000):
             _, reward, terminated, truncated, _ = env.step(env.action_space.sample())
-            # Max possible: score(10) + win(20) + touch(1) + cross(0.5) + approach(0.02) + control(0.01)
+            # Max: score(10) + win(20) + touch(3) + cross(1) + approach(0.05) + ready(0.01)
             assert -35.0 <= reward <= 35.0, f"Reward out of bounds: {reward}"
             if terminated or truncated:
                 break
@@ -144,7 +140,7 @@ class TestEpisodeTermination:
         env.reset()
         truncated = False
         for _ in range(200):
-            _, _, terminated, truncated, _ = env.step(0)  # noop
+            _, _, terminated, truncated, _ = env.step(0)
             if terminated or truncated:
                 break
         assert truncated or terminated
