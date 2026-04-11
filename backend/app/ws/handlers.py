@@ -154,6 +154,7 @@ async def results_push_loop(
     while True:
         data = await queue.get()
         record = GameRecord(
+            game_id=data.get("game_id", ""),
             experiment_id=data.get("experiment_id", ""),
             bot_level=data.get("bot_level", 1),
             score1=data["score1"],
