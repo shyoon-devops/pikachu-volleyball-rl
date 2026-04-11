@@ -1,36 +1,3 @@
-<<<<<<< HEAD
-.eval-panel {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.eval-panel-title {
-  margin: 0;
-}
-
-.eval-panel-error {
-}
-
-.eval-panel-loading {
-  padding: 24px;
-  text-align: center;
-}
-
-.eval-form {
-}
-
-.eval-form-title {
-  margin: 0 0 12px;
-}
-
-.eval-form-row {
-  display: flex;
-  gap: 12px;
-=======
 /*
  * ═══════════════════════════════════════════════════════════
  *  EvalPanel.css — 모델 평가 패널
@@ -91,65 +58,10 @@
 .eval-panel__form-fields {
   display: flex;
   gap: var(--space-3);
->>>>>>> github/yoon/designer
   align-items: flex-end;
   flex-wrap: wrap;
 }
 
-<<<<<<< HEAD
-.eval-form-label {
-  display: block;
-  margin-bottom: 2px;
-}
-
-.eval-form-select {
-}
-
-.eval-form-select--model {
-  min-width: 200px;
-}
-
-.eval-form-input {
-  width: 80px;
-}
-
-.eval-form-submit {
-}
-
-.eval-form-submit:disabled {
-  cursor: not-allowed;
-}
-
-.eval-filter {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.eval-filter-label {
-}
-
-.eval-filter-btn {
-}
-
-.eval-filter-btn[data-active="true"] {
-}
-
-.eval-results-table-wrapper {
-  overflow: hidden;
-}
-
-.eval-results-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.eval-results-empty {
-  text-align: center;
-}
-
-.eval-results-winrate {
-=======
 .eval-panel__field label {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
@@ -236,5 +148,4 @@
   gap: var(--space-3);
   padding: var(--space-12);
   color: var(--color-text-muted);
->>>>>>> github/yoon/designer
 }

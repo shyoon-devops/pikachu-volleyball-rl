@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { TrainingControls } from './TrainingControls'
-import type { TrainingStatus, ConnectionState, WSClientMessageType, Hyperparams } from '../../lib/types'
+import type { TrainingStatus, ConnectionState } from '../../lib/types'
 
 function renderControls(overrides: {
   status?: Partial<TrainingStatus>

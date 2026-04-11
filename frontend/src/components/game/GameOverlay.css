@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-=======
 /*
  * ═══════════════════════════════════════════════════════════
  *  GameOverlay.css — 게임 점수판 오버레이
@@ -23,7 +21,6 @@
  * ═══════════════════════════════════════════════════════════
  */
 
->>>>>>> github/yoon/designer
 .game-overlay {
   position: absolute;
   top: 0;
@@ -32,17 +29,6 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-<<<<<<< HEAD
-  padding: 8px 0;
-}
-
-.game-overlay-score {
-  letter-spacing: 4px;
-}
-
-.game-overlay-status {
-  margin-top: 4px;
-=======
   padding: var(--space-2) 0;
   z-index: 2;
 }
@@ -112,5 +98,4 @@
   margin-top: var(--space-1);
   letter-spacing: 0.05em;
   text-transform: uppercase;
->>>>>>> github/yoon/designer
 }

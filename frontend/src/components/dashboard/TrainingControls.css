@@ -1,75 +1,3 @@
-<<<<<<< HEAD
-.training-controls {
-}
-
-.training-controls-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.training-controls-title {
-  margin: 0;
-}
-
-.training-controls-status {
-}
-
-.training-controls-status[data-state="running"] {
-}
-
-.training-controls-status[data-state="stopped"] {
-}
-
-.training-controls-status[data-state="paused"] {
-}
-
-.training-controls-status[data-state="disconnected"] {
-}
-
-.training-controls-actions {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.training-controls-btn {
-}
-
-.training-controls-btn--start {
-}
-
-.training-controls-btn--stop {
-}
-
-.training-controls-btn--resume {
-}
-
-.training-controls-level {
-  margin-bottom: 12px;
-}
-
-.training-controls-level-label {
-  display: block;
-  margin-bottom: 4px;
-}
-
-.training-controls-level-buttons {
-  display: flex;
-  gap: 4px;
-}
-
-.training-controls-level-btn {
-}
-
-.training-controls-counters {
-  display: flex;
-  gap: 16px;
-}
-
-.training-controls-counter-value {
-=======
 /*
  * ═══════════════════════════════════════════════════════════
  *  TrainingControls.css — 훈련 제어 패널
@@ -147,5 +75,4 @@
 .training-controls__stats strong {
   color: var(--color-text-primary);
   font-weight: var(--weight-semibold);
->>>>>>> github/yoon/designer
 }
