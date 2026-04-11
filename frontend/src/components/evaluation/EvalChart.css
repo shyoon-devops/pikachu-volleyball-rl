@@ -2,19 +2,8 @@
  * ═══════════════════════════════════════════════════════════
  *  EvalChart.css — 평가 차트
  * ═══════════════════════════════════════════════════════════
- *
- *  Designer: FE에게 EvalChart.tsx에 아래 변경 요청:
- *
- *  1. import './EvalChart.css' 추가
- *  2. 루트 <div>에 className="eval-chart card" 추가
- *  3. <h3>에 className="eval-chart__title" 추가
- *  4. 빈 상태 <div>에 className="eval-chart__empty" 추가
- *  5. Recharts 컴포넌트의 inline 색상을 디자인 토큰으로 교체:
- *     - CartesianGrid stroke → "rgba(255,255,255,0.04)"
- *     - XAxis/YAxis fill → "var(--color-text-muted)"
- *     - Tooltip background → "var(--color-bg-primary)"
- *  6. 위 요소들의 inline style={{}} 제거
- *
+ *  FE className 매핑:
+ *    .eval-chart.card, .eval-chart-title, .eval-chart-empty
  * ═══════════════════════════════════════════════════════════
  */
 
@@ -22,7 +11,7 @@
   padding: var(--space-4) var(--space-2) var(--space-2);
 }
 
-.eval-chart__title {
+.eval-chart-title {
   margin: 0 0 var(--space-2) var(--space-3);
   font-size: var(--text-sm);
   color: var(--color-text-muted);
@@ -32,7 +21,7 @@
   letter-spacing: 0.05em;
 }
 
-.eval-chart__empty {
+.eval-chart-empty {
   text-align: center;
   color: var(--color-text-muted);
   font-size: var(--text-sm);

@@ -2,18 +2,9 @@
  * ═══════════════════════════════════════════════════════════
  *  Dashboard.css — 대시보드 레이아웃
  * ═══════════════════════════════════════════════════════════
- *
- *  Designer: FE에게 Dashboard.tsx에 아래 변경 요청:
- *
- *  1. import './Dashboard.css' 추가
- *  2. 루트 grid <div>에 className="dashboard" 추가
- *  3. 좌측 컬럼 <div>에 className="dashboard__left" 추가
- *  4. 게임 캔버스 wrapper <div>에 className="dashboard__game-wrapper" 추가
- *  5. 우측 차트 <div>에 className="dashboard__right" 추가
- *  6. 하단 게임 히스토리 <div>에 className="dashboard__recent-games" 추가
- *  7. 히스토리 카드 <div>에 className="card recent-games-card" 추가
- *  8. 위 요소들의 inline style={{}} 제거
- *
+ *  FE className 매핑:
+ *    .dashboard, .dashboard-left, .dashboard-game-wrapper,
+ *    .dashboard-right, .dashboard-bottom
  * ═══════════════════════════════════════════════════════════
  */
 
@@ -26,42 +17,89 @@
   margin: 0 auto;
 }
 
-.dashboard__left {
+.dashboard-left {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
 
-.dashboard__game-wrapper {
+.dashboard-game-wrapper {
   position: relative;
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
-.dashboard__right {
+.dashboard-game-wrapper canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+.dashboard-right {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
 
-.dashboard__recent-games {
+.dashboard-bottom {
   grid-column: 1 / -1;
 }
 
-.recent-games-card h3 {
+/* ── Recent Games ──────────────────────────────────────── */
+.card-title {
   margin: 0 0 var(--space-3);
   font-size: var(--text-base);
   color: var(--color-text-secondary);
   font-weight: var(--weight-medium);
 }
 
+.recent-games-empty {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.recent-games {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.recent-games-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  min-width: 500px;
+}
+
+.recent-games-table th {
+  text-align: left;
+  padding: var(--space-3);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.recent-games-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.recent-games-table tbody tr:hover {
+  background: var(--color-bg-hover);
+}
+
+/* ── Responsive ────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .dashboard {
     grid-template-columns: 1fr;
     padding: var(--space-4);
   }
 
-  .dashboard__recent-games {
+  .dashboard-bottom {
     grid-column: 1;
   }
 }
@@ -71,45 +109,4 @@
     padding: var(--space-3);
     gap: var(--space-3);
   }
-}
-
-/* ── 게임 캔버스 반응형 ────────────────────────────────── */
-.dashboard__game-wrapper canvas {
-  max-width: 100%;
-  height: auto;
-}
-
-/* ── Recent Games 테이블 모바일 대응 ───────────────────── */
-.recent-games-card {
-  overflow: hidden;
-}
-
-.recent-games-card table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-sm);
-}
-
-.recent-games-card th {
-  text-align: left;
-  padding: var(--space-3) var(--space-3);
-  color: var(--color-text-muted);
-  font-weight: var(--weight-medium);
-  font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 1px solid var(--color-border-strong);
-}
-
-.recent-games-card td {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.recent-games-card tbody tr:hover {
-  background: var(--color-bg-hover);
-}
-
-.recent-games-card .table-scroll table {
-  min-width: 500px;
 }

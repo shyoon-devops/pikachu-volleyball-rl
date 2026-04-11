@@ -2,20 +2,12 @@
  * ═══════════════════════════════════════════════════════════
  *  ReplayList.css — 게임 히스토리 테이블
  * ═══════════════════════════════════════════════════════════
- *
- *  Designer: FE에게 ReplayList.tsx에 아래 변경 요청:
- *
- *  1. import './ReplayList.css' 추가
- *  2. 루트 <div>에 className="replay-list" 추가
- *  3. <h2>에 className="replay-list__title" 추가
- *  4. 에러 <div>에 className="replay-list__error" 추가
- *  5. 테이블 wrapper <div>에 className="replay-list__table-wrapper card" 추가
- *  6. Replay 버튼에 className="btn btn-primary" 추가
- *  7. 페이지네이션 <div>에 className="replay-list__pagination" 추가
- *  8. Prev/Next 버튼에 className="btn btn-ghost" 추가
- *  9. 페이지 정보 <span>에 className="replay-list__page-info" 추가
- *  10. 위 요소들의 inline style={{}} 제거
- *
+ *  FE className 매핑:
+ *    .replay-list, .replay-list-title, .replay-list-error,
+ *    .replay-list-table-wrapper, .replay-list-table,
+ *    .replay-list-empty, .replay-list-btn,
+ *    .replay-list-pagination, .replay-list-page-btn,
+ *    .replay-list-page-info
  * ═══════════════════════════════════════════════════════════
  */
 
@@ -25,14 +17,14 @@
   padding: var(--space-6);
 }
 
-.replay-list__title {
+.replay-list-title {
   font-size: var(--text-xl);
   color: var(--color-text-secondary);
   margin-bottom: var(--space-4);
   font-weight: var(--weight-medium);
 }
 
-.replay-list__error {
+.replay-list-error {
   padding: var(--space-3);
   background: var(--color-danger-dim);
   border: 1px solid rgba(248, 113, 113, 0.3);
@@ -42,19 +34,18 @@
   margin-bottom: var(--space-4);
 }
 
-.replay-list__table-wrapper {
+.replay-list-table-wrapper {
   overflow: hidden;
   padding: 0;
 }
 
-/* Table element selectors — 글로벌 table 스타일이 적용되지 않을 경우 대비 */
-.replay-list__table-wrapper table {
+.replay-list-table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--text-sm);
 }
 
-.replay-list__table-wrapper th {
+.replay-list-table th {
   text-align: left;
   padding: var(--space-3) var(--space-4);
   color: var(--color-text-muted);
@@ -65,24 +56,48 @@
   border-bottom: 1px solid var(--color-border-strong);
 }
 
-.replay-list__table-wrapper td {
+.replay-list-table td {
   padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--color-border);
 }
 
-.replay-list__table-wrapper tbody tr:hover {
+.replay-list-table tbody tr:hover {
   background: var(--color-bg-hover);
 }
 
-.replay-list__table-wrapper tbody tr:nth-child(even) {
+.replay-list-table tbody tr:nth-child(even) {
   background: rgba(255, 255, 255, 0.015);
 }
 
-.replay-list__table-wrapper tbody tr:nth-child(even):hover {
+.replay-list-table tbody tr:nth-child(even):hover {
   background: var(--color-bg-hover);
 }
 
-.replay-list__pagination {
+.replay-list-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: var(--space-6);
+}
+
+.replay-list-btn {
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-blue);
+  color: var(--color-text-inverse);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.replay-list-btn:hover {
+  box-shadow: 0 0 12px rgba(79, 195, 247, 0.25);
+  transform: translateY(-1px);
+}
+
+.replay-list-pagination {
   display: flex;
   justify-content: center;
   align-items: center;
@@ -90,7 +105,30 @@
   margin-top: var(--space-4);
 }
 
-.replay-list__page-info {
+.replay-list-page-btn {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.replay-list-page-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
+.replay-list-page-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.replay-list-page-info {
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-sm);
   color: var(--color-text-muted);
@@ -103,16 +141,16 @@
     padding: var(--space-4);
   }
 
-  .replay-list__table-wrapper {
+  .replay-list-table-wrapper {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
 
-  .replay-list__table-wrapper table {
+  .replay-list-table {
     min-width: 550px;
   }
 
-  .replay-list__pagination {
+  .replay-list-pagination {
     flex-wrap: wrap;
   }
 }
@@ -122,7 +160,7 @@
     padding: var(--space-3);
   }
 
-  .replay-list__title {
+  .replay-list-title {
     font-size: var(--text-lg);
   }
 }

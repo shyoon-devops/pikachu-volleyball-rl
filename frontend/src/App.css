@@ -2,21 +2,8 @@
  * ═══════════════════════════════════════════════════════════
  *  App.css — 네비게이션 바 & 레이아웃
  * ═══════════════════════════════════════════════════════════
- *
- *  Designer: FE에게 App.tsx에 아래 변경 요청:
- *
- *  1. import './App.css' 추가
- *  2. 루트 <div>에 className="app" 추가
- *  3. <header>에 className="navbar" 추가
- *  4. <h1>에 className="navbar__logo-text" 추가
- *  5. <nav>에 className="navbar__nav" 추가
- *  6. 각 <NavLink>에 className 콜백 추가:
- *     className={({isActive}) =>
- *       `navbar__link ${isActive ? 'navbar__link--active' : ''}`
- *     }
- *  7. <Routes> 감싸는 <main className="main-content"> 추가
- *  8. 위 요소들의 inline style={{}} 제거
- *
+ *  FE className 매핑:
+ *    .app, .app-header, .app-title, .app-nav, .app-nav-link, .active
  * ═══════════════════════════════════════════════════════════
  */
 
@@ -25,7 +12,7 @@
 }
 
 /* ── Navbar ────────────────────────────────────────────── */
-.navbar {
+.app-header {
   position: sticky;
   top: 0;
   z-index: 100;
@@ -39,7 +26,7 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.navbar__logo-text {
+.app-title {
   font-size: var(--text-lg);
   font-weight: var(--weight-bold);
   color: var(--color-accent);
@@ -48,12 +35,12 @@
   margin: 0;
 }
 
-.navbar__nav {
+.app-nav {
   display: flex;
   gap: var(--space-1);
 }
 
-.navbar__link {
+.app-nav-link {
   position: relative;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
@@ -65,17 +52,17 @@
               background var(--duration-fast) var(--ease-out);
 }
 
-.navbar__link:hover {
+.app-nav-link:hover {
   color: var(--color-text-primary);
   background: var(--color-bg-hover);
 }
 
-.navbar__link--active {
+.app-nav-link.active {
   color: var(--color-accent);
   background: var(--color-accent-dim);
 }
 
-.navbar__link--active::after {
+.app-nav-link.active::after {
   content: '';
   position: absolute;
   bottom: -1px;
@@ -86,25 +73,20 @@
   border-radius: 1px;
 }
 
-/* ── Main content ──────────────────────────────────────── */
-.main-content {
-  padding-top: var(--space-2);
-}
-
 /* ── Responsive ────────────────────────────────────────── */
 @media (max-width: 1024px) {
-  .navbar {
+  .app-header {
     padding: 0 var(--space-4);
     gap: var(--space-4);
   }
 
-  .navbar__logo-text {
+  .app-title {
     font-size: var(--text-base);
   }
 }
 
 @media (max-width: 480px) {
-  .navbar {
+  .app-header {
     padding: 0 var(--space-3);
     gap: var(--space-3);
     height: auto;
@@ -114,16 +96,16 @@
     padding-bottom: var(--space-2);
   }
 
-  .navbar__logo-text {
+  .app-title {
     font-size: var(--text-sm);
     width: 100%;
   }
 
-  .navbar__nav {
+  .app-nav {
     width: 100%;
   }
 
-  .navbar__link {
+  .app-nav-link {
     font-size: var(--text-xs);
     padding: var(--space-1) var(--space-2);
   }
