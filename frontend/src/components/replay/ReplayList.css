@@ -24,6 +24,47 @@
   font-weight: var(--weight-medium);
 }
 
+.replay-list-available {
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+}
+
+.replay-list-subtitle {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.replay-list-replay-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-2);
+}
+
+.replay-list-replay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+}
+
+.replay-list-replay-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-blue);
+}
+
+.replay-list-replay-meta {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 .replay-list-error {
   padding: var(--space-3);
   background: var(--color-danger-dim);
