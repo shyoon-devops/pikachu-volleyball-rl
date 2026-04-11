@@ -2,35 +2,29 @@
  * ═══════════════════════════════════════════════════════════
  *  HyperparamForm.css — 하이퍼파라미터 입력 폼
  * ═══════════════════════════════════════════════════════════
- *
- *  Designer: FE에게 HyperparamForm.tsx에 아래 변경 요청:
- *
- *  1. import './HyperparamForm.css' 추가
- *  2. <form>에 className="hyperparam-form card" 추가
- *  3. grid <div>에 className="hyperparam-form__grid" 추가
- *  4. 각 필드 wrapper <div>에 className="hyperparam-form__field" 추가
- *  5. submit <button>에 className="btn btn-success hyperparam-form__submit" 추가
- *  6. 위 요소들의 inline style={{}} 제거
- *     (label, input, select의 inline style 포함)
- *
+ *  FE className 매핑:
+ *    .hyperparam-form.card, .hyperparam-form-title,
+ *    .hyperparam-form-grid, .hyperparam-form-label,
+ *    .hyperparam-form-input, .hyperparam-form-select,
+ *    .hyperparam-form-submit
  * ═══════════════════════════════════════════════════════════
  */
 
-.hyperparam-form h3 {
+.hyperparam-form-title {
   margin: 0 0 var(--space-3);
   font-size: var(--text-base);
   color: var(--color-text-secondary);
   font-weight: var(--weight-medium);
 }
 
-.hyperparam-form__grid {
+.hyperparam-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
 }
 
-.hyperparam-form__field label {
+.hyperparam-form-label {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   display: block;
@@ -38,8 +32,8 @@
   font-family: var(--font-mono);
 }
 
-.hyperparam-form__field input,
-.hyperparam-form__field select {
+.hyperparam-form-input,
+.hyperparam-form-select {
   width: 100%;
   padding: var(--space-2) var(--space-3);
   background: var(--color-bg-input);
@@ -50,20 +44,40 @@
   font-size: var(--text-sm);
 }
 
-.hyperparam-form__field input:focus,
-.hyperparam-form__field select:focus {
+.hyperparam-form-input:focus,
+.hyperparam-form-select:focus {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-dim);
   outline: none;
 }
 
-.hyperparam-form__submit {
+.hyperparam-form-submit {
   width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-success);
+  color: var(--color-text-inverse);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.hyperparam-form-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 0 16px rgba(74, 222, 128, 0.25);
+}
+
+.hyperparam-form-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* ── Responsive ────────────────────────────────────────── */
 @media (max-width: 480px) {
-  .hyperparam-form__grid {
+  .hyperparam-form-grid {
     grid-template-columns: 1fr;
   }
 }

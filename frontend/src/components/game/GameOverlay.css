@@ -2,22 +2,8 @@
  * ═══════════════════════════════════════════════════════════
  *  GameOverlay.css — 게임 점수판 오버레이
  * ═══════════════════════════════════════════════════════════
- *
- *  Designer: FE에게 GameOverlay.tsx에 아래 변경 요청:
- *
- *  1. import './GameOverlay.css' 추가
- *  2. 루트 <div>에 className="game-overlay" 추가
- *  3. 점수 표시 <div>에 className="scoreboard" 추가
- *  4. 점수 {score1} 부분을:
- *     <div className="score-side">
- *       <span className="score-label score-label--p1">P1</span>
- *       <span className="score-value score-value--p1">{score1 padded}</span>
- *     </div>
- *  5. 구분자 ':'를 <span className="score-separator">:</span>
- *  6. score2도 동일 구조 (--p2 변형)
- *  7. statusText <div>에 className="game-status-text" 추가
- *  8. 위 요소들의 inline style={{}} 제거
- *
+ *  FE className 매핑:
+ *    .game-overlay, .game-overlay-score, .game-overlay-status
  * ═══════════════════════════════════════════════════════════
  */
 
@@ -33,7 +19,7 @@
   z-index: 2;
 }
 
-.scoreboard {
+.game-overlay-score {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -42,55 +28,15 @@
   padding: var(--space-1) var(--space-4);
   border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.score-side {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.score-label {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-bold);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-
-.score-label--p1 {
-  color: var(--color-player1);
-}
-
-.score-label--p2 {
-  color: var(--color-player2);
-}
-
-.score-value {
   font-family: var(--font-mono);
   font-size: 28px;
   font-weight: var(--weight-bold);
   letter-spacing: 0.15em;
+  color: var(--color-text-primary);
   text-shadow: 0 0 10px currentColor;
 }
 
-.score-value--p1 {
-  color: var(--color-player1);
-}
-
-.score-value--p2 {
-  color: var(--color-player2);
-}
-
-.score-separator {
-  font-family: var(--font-mono);
-  font-size: 22px;
-  font-weight: var(--weight-bold);
-  color: rgba(255, 255, 255, 0.4);
-  margin: 0 var(--space-1);
-}
-
-.game-status-text {
+.game-overlay-status {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--color-accent);

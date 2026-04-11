@@ -2,19 +2,11 @@
  * ═══════════════════════════════════════════════════════════
  *  ReplayControls.css — 리플레이 컨트롤바
  * ═══════════════════════════════════════════════════════════
- *
- *  Designer: FE에게 ReplayControls.tsx에 아래 변경 요청:
- *
- *  1. import './ReplayControls.css' 추가
- *  2. 루트 <div>에 className="replay-controls card" 추가
- *  3. 상단 바 <div>에 className="replay-controls__bar" 추가
- *  4. Play/Pause 버튼에 className="btn btn-success" / "btn btn-danger" 추가
- *  5. 배속 버튼 그룹 <div>에 className="replay-controls__speeds" 추가
- *  6. 각 배속 버튼에 className="btn btn-ghost" + active 시 "active" 추가
- *  7. 프레임 카운터 <span>에 className="replay-controls__frame-counter" 추가
- *  8. <input type="range">에 className="replay-controls__seekbar" 추가
- *  9. 위 요소들의 inline style={{}} 제거
- *
+ *  FE className 매핑:
+ *    .replay-controls.card, .replay-controls-bar,
+ *    .replay-controls-play-btn, .replay-controls-speeds,
+ *    .replay-controls-speed-btn, .replay-controls-frame-info,
+ *    .replay-controls-seek
  * ═══════════════════════════════════════════════════════════
  */
 
@@ -22,19 +14,59 @@
   padding: var(--space-3);
 }
 
-.replay-controls__bar {
+.replay-controls-bar {
   display: flex;
   align-items: center;
   gap: var(--space-3);
   margin-bottom: var(--space-2);
 }
 
-.replay-controls__speeds {
+.replay-controls-play-btn {
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.replay-controls-play-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.replay-controls-speeds {
   display: flex;
   gap: var(--space-1);
 }
 
-.replay-controls__frame-counter {
+.replay-controls-speed-btn {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.replay-controls-speed-btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.replay-controls-speed-btn[data-active="true"],
+.replay-controls-speed-btn.active {
+  background: var(--color-blue);
+  color: #fff;
+  border-color: transparent;
+}
+
+.replay-controls-frame-info {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   margin-left: auto;
@@ -42,6 +74,6 @@
   letter-spacing: 0.02em;
 }
 
-.replay-controls__seekbar {
+.replay-controls-seek {
   width: 100%;
 }

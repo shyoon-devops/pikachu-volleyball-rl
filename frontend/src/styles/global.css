@@ -452,6 +452,42 @@ select option {
  *  추가 요청. 모바일에서 가로 스크롤 활성화.
  * ═══════════════════════════════════════════════════════════
  */
+/* ── Text utility classes (FE 사용 중) ─────────────────── */
+.text-muted {
+  color: var(--color-text-muted);
+}
+
+/* ── Score colors (FE 사용 중) ─────────────────────────── */
+.score-p1 {
+  color: var(--color-player1);
+}
+
+.score-p2 {
+  color: var(--color-danger);
+}
+
+/* ── Winner colors (FE 사용 중) ────────────────────────── */
+.winner-agent {
+  color: var(--color-success);
+  font-weight: var(--weight-semibold);
+}
+
+.winner-bot {
+  color: var(--color-danger);
+  font-weight: var(--weight-semibold);
+}
+
+/* ── Alert (FE 사용 중) ────────────────────────────────── */
+.alert-error {
+  padding: var(--space-3);
+  background: var(--color-danger-dim);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+/* ── Table scroll wrapper ─────────────────────────────── */
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
