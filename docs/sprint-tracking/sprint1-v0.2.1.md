@@ -1,0 +1,163 @@
+# Sprint 1 (v0.2.1) Progress Tracker
+
+> **Sprint Start**: 2026-04-12 | **Target End**: 2026-04-15 (3d dev + QA)
+> **Last Updated**: 2026-04-12 12:00
+
+---
+
+## Status Legend
+
+| Icon | Status | Description |
+|------|--------|-------------|
+| ⬜ | 미착수 | Not started |
+| 🔵 | 진행중 | In progress |
+| 🟡 | 검증중 | Code complete, under QA review |
+| ✅ | 완료 | Done and verified |
+| 🔴 | 블로커 | Blocked |
+
+---
+
+## CRITICAL Security (Backend Engineer)
+
+| # | Issue | Item | Status | Assignee | PR | Notes |
+|---|-------|------|--------|----------|-----|-------|
+| 1 | [#9](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/9) | SEC-1: Path Traversal Fix | ⬜ 미착수 | Backend | — | `routes.py` model_path 검증 |
+| 2 | [#10](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/10) | SEC-2: CORS Origin 분리 | ⬜ 미착수 | Backend + DevOps | — | env별 origin 설정 |
+| 3 | [#11](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/11) | SEC-3: Rate Limiting 추가 | ⬜ 미착수 | Backend | — | slowapi 미들웨어 |
+
+## BLOCKER (Trainer + AI Engineer)
+
+| # | Issue | Item | Status | Assignee | PR | Notes |
+|---|-------|------|--------|----------|-----|-------|
+| 4 | [#12](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/12) | TR-4: Training Session Protection | ⬜ 미착수 | Trainer + AI | — | 세션 잠금 + owner 검증 |
+
+## HIGH Bugs (Cross-team)
+
+| # | Issue | Item | Status | Assignee | PR | Notes |
+|---|-------|------|--------|----------|-----|-------|
+| 5 | [#13](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/13) | BUG-1: Queue Unbounded (OOM risk) | ⬜ 미착수 | Backend | — | BE-1에 포함 |
+| 6 | [#14](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/14) | BUG-2: Health Check False OK | ⬜ 미착수 | Backend | — | MongoDB/disk/thread 확인 |
+| 7 | [#15](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/15) | BUG-3: Training Status Incomplete | ⬜ 미착수 | Trainer | — | step/episode 실제값 |
+| 8 | [#16](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/16) | BUG-4: Heartbeat No Pong Protocol | ⬜ 미착수 | Backend + FE | — | server+client 양쪽 |
+| 9 | [#17](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/17) | BUG-5: Models/Replays No Pagination | ⬜ 미착수 | Backend | — | page/limit 추가 |
+| 10 | [#18](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/18) | BUG-6: Game Result Save Data Loss | ⬜ 미착수 | Backend | — | retry + fallback |
+| 11 | [#19](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/19) | BUG-7: WS Reconnection Missing | ⬜ 미착수 | Frontend | — | exponential backoff |
+
+## Sprint 1 Enhancement Items
+
+| # | Issue | Item | Status | Assignee | PR | Notes |
+|---|-------|------|--------|----------|-----|-------|
+| 12 | [#20](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/20) | BE-1: WS Heartbeat + Backpressure | ⬜ 미착수 | Backend | — | BUG-1,4 포함 |
+| 13 | [#21](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/21) | BE-4: Input Validation | ⬜ 미착수 | Backend | — | SEC-1/2/3 포함 |
+| 14 | [#22](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/22) | FE-3: GameCanvas Responsive | ⬜ 미착수 | Frontend | — | ResizeObserver |
+| 15 | [#23](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/23) | FE-1: Replay Keyboard Shortcuts | ⬜ 미착수 | Frontend | — | Space, arrows, etc |
+| 16 | [#24](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/24) | FE-5: A11y Accessibility | ⬜ 미착수 | Frontend | — | ARIA, contrast, motion |
+| 17 | [#25](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/25) | QA-2: CI/CD Test Pipeline | ⬜ 미착수 | QA | — | GH Actions, coverage gate |
+| 18 | [#26](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/26) | QA-4: Security Auto-Scan | ⬜ 미착수 | QA | — | bandit, npm audit |
+
+---
+
+## Team Progress Dashboard
+
+### Backend Engineer (10 items)
+
+```
+Day 1  SEC-1 [⬜] SEC-2 [⬜] SEC-3 [⬜] BUG-2 [⬜]
+Day 2  BE-1 [⬜] BUG-1 [⬜] BUG-4 [⬜] BUG-5 [⬜] BUG-6 [⬜]
+Day 3  BE-4 [⬜] 자체 테스트
+```
+
+Progress: 0/10 ████████████████████ 0%
+
+### Trainer + AI Engineer (2 items)
+
+```
+Day 1  TR-4 [⬜] (공동 작업)
+Day 2  BUG-3 [⬜] + 통합 검증
+```
+
+Progress: 0/2 ████████████████████ 0%
+
+### Frontend Engineer (5 items)
+
+```
+Day 1  BUG-7 [⬜] FE-3 [⬜]
+Day 2  FE-1 [⬜] FE-5 [⬜]
+Day 3  BUG-4/FE [⬜] 자체 테스트
+```
+
+Progress: 0/5 ████████████████████ 0%
+
+### QA Engineer (2 items + 전체 검증)
+
+```
+Day 1  QA-2 [⬜]
+Day 2  QA-4 [⬜] + SEC 검증
+Day 3  전체 검증 + QA 리포트
+```
+
+Progress: 0/2 ████████████████████ 0%
+
+### DevOps Engineer (1 item)
+
+```
+Day 1  QA Deploy [⬜] + CORS env config [⬜]
+Day 2  대기 + 이슈 대응
+```
+
+Progress: 0/1 ████████████████████ 0%
+
+---
+
+## Overall Sprint Progress
+
+```
+Total Items:   18 (14 net after overlap)
+Completed:      0
+In Progress:    0
+Under Review:   0
+Not Started:   18
+Blocked:        0
+
+Overall: ████████████████████ 0%
+```
+
+---
+
+## Daily Log
+
+### 2026-04-12
+- Sprint 1 승인, 작업 할당 문서 배포 완료
+- GitHub Issues #9~#26 생성
+- 각 팀 워크트리에 SPRINT1-ASSIGNMENT.md 전달
+
+---
+
+## Blockers & Risks
+
+| Date | Item | Issue | Impact | Resolution |
+|------|------|-------|--------|------------|
+| — | — | — | — | — |
+
+---
+
+## QA Verification Log
+
+| Date | Item | Tester | Result | Notes |
+|------|------|--------|--------|-------|
+| — | — | — | — | — |
+
+---
+
+## Release Criteria
+
+- [ ] All CRITICAL security fixes verified (SEC-1/2/3)
+- [ ] BLOCKER resolved (TR-4)
+- [ ] All HIGH bugs fixed (BUG-1~7)
+- [ ] All enhancement items complete (BE-1, BE-4, FE-1/3/5, QA-2/4)
+- [ ] Backend test coverage ≥ 80%
+- [ ] CI/CD pipeline operational
+- [ ] Security scan passing
+- [ ] QA 검증 리포트 PASS
+- [ ] PM prod 배포 승인
+- [ ] Version: 0.2.1 tagged
