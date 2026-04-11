@@ -100,6 +100,22 @@ def rl_env():
 
 
 @pytest.fixture
+def game_engine():
+    from backend.game.engine import PikachuVolleyball
+
+    game = PikachuVolleyball()
+    game.reset()
+    return game
+
+
+@pytest.fixture
+def game_state(game_engine):
+    """Reset the game engine before each test that uses it."""
+    game_engine.reset()
+    return None
+
+
+@pytest.fixture
 def app_instance():
     from backend.app.main import app
 
