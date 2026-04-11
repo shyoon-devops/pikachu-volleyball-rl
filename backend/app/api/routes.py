@@ -41,6 +41,15 @@ async def get_game(request: Request, game_id: str):
     return doc
 
 
+@router.get("/replays")
+async def list_replays(request: Request):
+    replay_service = getattr(request.app.state, "replay_service", None)
+    if replay_service is None:
+        return {"replays": []}
+    replays = await replay_service.list_replays()
+    return {"replays": replays}
+
+
 @router.get("/replays/{game_id}")
 async def get_replay(request: Request, game_id: str):
     replay_service = getattr(request.app.state, "replay_service", None)
