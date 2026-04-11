@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type { Hyperparams } from '../../lib/types'
-import './HyperparamForm.css'
 
 interface HyperparamFormProps {
   onSubmit: (params: Hyperparams, botLevel: number) => void
@@ -13,6 +12,24 @@ const DEFAULTS: Hyperparams = {
   batch_size: 64,
   gamma: 0.99,
   clip_range: 0.2,
+}
+
+const fieldStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '6px 8px',
+  background: '#0f0f1a',
+  border: '1px solid #3a3a5e',
+  borderRadius: 4,
+  color: '#e0e0e0',
+  fontFamily: 'monospace',
+  fontSize: 12,
+}
+
+const labelStyle: React.CSSProperties = {
+  fontSize: 11,
+  color: '#888',
+  display: 'block',
+  marginBottom: 2,
 }
 
 export function HyperparamForm({ onSubmit, disabled }: HyperparamFormProps) {
@@ -32,27 +49,32 @@ export function HyperparamForm({ onSubmit, disabled }: HyperparamFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="hyperparam-form">
-      <h3>Hyperparameters</h3>
+    <form
+      onSubmit={handleSubmit}
+      style={{ background: '#1a1a2e', borderRadius: 8, padding: 16, border: '1px solid #2a2a3e' }}
+    >
+      <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#ccc' }}>Hyperparameters</h3>
 
-      <div className="hyperparam-form__grid">
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
         {(Object.keys(DEFAULTS) as Array<keyof Hyperparams>).map(key => (
-          <div key={key} className="hyperparam-form__field">
-            <label>{key}</label>
+          <div key={key}>
+            <label style={labelStyle}>{key}</label>
             <input
               type="number"
               step="any"
               value={params[key]}
               onChange={e => handleChange(key, e.target.value)}
+              style={fieldStyle}
               disabled={disabled}
             />
           </div>
         ))}
-        <div className="hyperparam-form__field">
-          <label>bot_level</label>
+        <div>
+          <label style={labelStyle}>bot_level</label>
           <select
             value={botLevel}
             onChange={e => setBotLevel(Number(e.target.value))}
+            style={fieldStyle}
             disabled={disabled}
           >
             {[1, 2, 3, 4, 5].map(l => (
@@ -65,7 +87,18 @@ export function HyperparamForm({ onSubmit, disabled }: HyperparamFormProps) {
       <button
         type="submit"
         disabled={disabled}
-        className="btn btn-success hyperparam-form__submit"
+        style={{
+          width: '100%',
+          padding: '8px 16px',
+          border: 'none',
+          borderRadius: 6,
+          background: disabled ? '#2a2a3e' : '#22c55e',
+          color: disabled ? '#666' : '#000',
+          fontFamily: 'monospace',
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}
       >
         Start Training
       </button>

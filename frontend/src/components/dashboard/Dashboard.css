@@ -1,3 +1,22 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  Dashboard.css — 대시보드 레이아웃
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  Designer: FE에게 Dashboard.tsx에 아래 변경 요청:
+ *
+ *  1. import './Dashboard.css' 추가
+ *  2. 루트 grid <div>에 className="dashboard" 추가
+ *  3. 좌측 컬럼 <div>에 className="dashboard__left" 추가
+ *  4. 게임 캔버스 wrapper <div>에 className="dashboard__game-wrapper" 추가
+ *  5. 우측 차트 <div>에 className="dashboard__right" 추가
+ *  6. 하단 게임 히스토리 <div>에 className="dashboard__recent-games" 추가
+ *  7. 히스토리 카드 <div>에 className="card recent-games-card" 추가
+ *  8. 위 요소들의 inline style={{}} 제거
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
+
 .dashboard {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -29,43 +48,11 @@
   grid-column: 1 / -1;
 }
 
-.recent-games-card {
-  background: var(--color-bg-card);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  backdrop-filter: blur(12px);
-  box-shadow: var(--shadow-card);
-}
-
 .recent-games-card h3 {
   margin: 0 0 var(--space-3);
   font-size: var(--text-base);
   color: var(--color-text-secondary);
   font-weight: var(--weight-medium);
-}
-
-.recent-games-card .score-p1 {
-  color: var(--color-accent);
-  font-weight: var(--weight-semibold);
-}
-
-.recent-games-card .score-p2 {
-  color: var(--color-blue);
-  font-weight: var(--weight-semibold);
-}
-
-.recent-games-card .winner-agent {
-  color: var(--color-success);
-  font-weight: var(--weight-semibold);
-}
-
-.recent-games-card .winner-bot {
-  color: var(--color-danger);
-}
-
-.recent-games-card td.muted {
-  color: var(--color-text-muted);
 }
 
 @media (max-width: 1024px) {

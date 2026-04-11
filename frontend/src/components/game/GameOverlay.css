@@ -1,3 +1,26 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  GameOverlay.css — 게임 점수판 오버레이
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  Designer: FE에게 GameOverlay.tsx에 아래 변경 요청:
+ *
+ *  1. import './GameOverlay.css' 추가
+ *  2. 루트 <div>에 className="game-overlay" 추가
+ *  3. 점수 표시 <div>에 className="scoreboard" 추가
+ *  4. 점수 {score1} 부분을:
+ *     <div className="score-side">
+ *       <span className="score-label score-label--p1">P1</span>
+ *       <span className="score-value score-value--p1">{score1 padded}</span>
+ *     </div>
+ *  5. 구분자 ':'를 <span className="score-separator">:</span>
+ *  6. score2도 동일 구조 (--p2 변형)
+ *  7. statusText <div>에 className="game-status-text" 추가
+ *  8. 위 요소들의 inline style={{}} 제거
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
+
 .game-overlay {
   position: absolute;
   top: 0;

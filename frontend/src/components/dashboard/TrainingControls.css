@@ -1,11 +1,27 @@
-.training-controls {
-  background: var(--color-bg-card);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  backdrop-filter: blur(12px);
-  box-shadow: var(--shadow-card);
-}
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  TrainingControls.css — 훈련 제어 패널
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  Designer: FE에게 TrainingControls.tsx에 아래 변경 요청:
+ *
+ *  1. import './TrainingControls.css' 추가
+ *  2. 루트 <div>에 className="training-controls card" 추가
+ *  3. 헤더 행 <div>에 className="training-controls__header" 추가
+ *  4. <h3>에 className="training-controls__title" 추가
+ *  5. 상태 <span>에 className="badge badge-{success|warning|danger}" 추가
+ *     (running=badge-success, paused=badge-warning, stopped/disconnected=badge-danger)
+ *  6. 버튼 행 <div>에 className="training-controls__actions" 추가
+ *  7. 각 action 버튼에 className="btn btn-{success|danger|primary}" 추가
+ *  8. Bot Level 영역에 className="training-controls__bot-level" 추가
+ *  9. Bot Level 라벨에 className="training-controls__bot-label" 추가
+ *  10. 레벨 버튼 그룹에 className="training-controls__levels" 추가
+ *  11. 각 레벨 버튼에 className="btn btn-ghost" 추가
+ *  12. 통계 행에 className="training-controls__stats" 추가
+ *  13. 위 요소들의 inline style={{}} 제거
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
 
 .training-controls__header {
   display: flex;

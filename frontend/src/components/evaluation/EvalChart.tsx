@@ -1,6 +1,5 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import type { EvalResult } from '../../lib/types'
-import './EvalChart.css'
 
 interface EvalChartProps {
   results: EvalResult[]
@@ -22,46 +21,39 @@ export function EvalChart({ results, filterLevel }: EvalChartProps) {
 
   if (chartData.length === 0) {
     return (
-      <div className="eval-chart">
-        <div className="eval-chart__empty">No evaluation data to display.</div>
+      <div style={{ background: '#1a1a2e', borderRadius: 8, padding: 24, border: '1px solid #2a2a3e', textAlign: 'center', color: '#666', fontSize: 13 }}>
+        No evaluation data to display.
       </div>
     )
   }
 
   return (
-    <div className="eval-chart">
-      <h3 className="eval-chart__title">
+    <div style={{ background: '#1a1a2e', borderRadius: 8, padding: '16px 8px 8px', border: '1px solid #2a2a3e' }}>
+      <h3 style={{ margin: '0 0 8px 12px', fontSize: 13, color: '#888', fontWeight: 500 }}>
         Win Rate by Model {filterLevel !== null && `(Level ${filterLevel})`}
       </h3>
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={chartData} margin={{ top: 4, right: 12, left: 0, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3e" />
           <XAxis
             dataKey="name"
-            tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }}
-            axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
+            tick={{ fontSize: 10, fill: '#666' }}
+            axisLine={{ stroke: '#2a2a3e' }}
             tickLine={false}
             angle={-30}
             textAnchor="end"
             height={60}
           />
           <YAxis
-            tick={{ fontSize: 10, fill: 'var(--color-text-muted)' }}
-            axisLine={{ stroke: 'rgba(255,255,255,0.06)' }}
+            tick={{ fontSize: 10, fill: '#666' }}
+            axisLine={{ stroke: '#2a2a3e' }}
             tickLine={false}
             domain={[0, 100]}
             unit="%"
             width={48}
           />
           <Tooltip
-            contentStyle={{
-              background: 'var(--color-bg-primary)',
-              border: '1px solid var(--color-border-strong)',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 12,
-              fontFamily: 'var(--font-mono)',
-              boxShadow: 'var(--shadow-lg)',
-            }}
+            contentStyle={{ background: '#0f0f1a', border: '1px solid #3a3a5e', borderRadius: 4, fontSize: 12 }}
             formatter={(value) => [`${value}%`, 'Win Rate']}
           />
           <Bar dataKey="winRate" radius={[4, 4, 0, 0]}>

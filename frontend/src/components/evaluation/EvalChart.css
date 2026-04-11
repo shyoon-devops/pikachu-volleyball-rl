@@ -1,10 +1,25 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  EvalChart.css — 평가 차트
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  Designer: FE에게 EvalChart.tsx에 아래 변경 요청:
+ *
+ *  1. import './EvalChart.css' 추가
+ *  2. 루트 <div>에 className="eval-chart card" 추가
+ *  3. <h3>에 className="eval-chart__title" 추가
+ *  4. 빈 상태 <div>에 className="eval-chart__empty" 추가
+ *  5. Recharts 컴포넌트의 inline 색상을 디자인 토큰으로 교체:
+ *     - CartesianGrid stroke → "rgba(255,255,255,0.04)"
+ *     - XAxis/YAxis fill → "var(--color-text-muted)"
+ *     - Tooltip background → "var(--color-bg-primary)"
+ *  6. 위 요소들의 inline style={{}} 제거
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
+
 .eval-chart {
-  background: var(--color-bg-card);
-  border-radius: var(--radius-lg);
   padding: var(--space-4) var(--space-2) var(--space-2);
-  border: 1px solid var(--color-border);
-  backdrop-filter: blur(12px);
-  box-shadow: var(--shadow-card);
 }
 
 .eval-chart__title {

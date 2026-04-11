@@ -1,3 +1,24 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  ReplayPlayer.css — 리플레이 재생 페이지
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  Designer: FE에게 ReplayPlayer.tsx에 아래 변경 요청:
+ *
+ *  1. import './ReplayPlayer.css' 추가
+ *  2. 루트 <div>에 className="replay-player" 추가
+ *  3. 헤더 행 <div>에 className="replay-player__header" 추가
+ *  4. Back <Link>에 className="replay-player__back" 추가
+ *  5. <h2>에 className="replay-player__title" 추가
+ *  6. 캔버스 wrapper <div>에 className="replay-player__canvas" 추가
+ *  7. 로딩 <div>에 className="replay-player__loading" 추가
+ *     (spinner 사용: <div className="spinner" /> 추가)
+ *  8. 에러 <div>에 className="replay-player__error" 추가
+ *  9. 위 요소들의 inline style={{}} 제거
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
+
 .replay-player {
   max-width: 700px;
   margin: 0 auto;
