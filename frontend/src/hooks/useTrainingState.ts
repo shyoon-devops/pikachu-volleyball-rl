@@ -53,7 +53,12 @@ export function useTrainingState(): TrainingState {
   }, [])
 
   const handleStatus = useCallback((msg: WSMessage) => {
-    setStatus(snakeToCamel<TrainingStatus>(msg.payload))
+    const incoming = snakeToCamel<Partial<TrainingStatus>>(msg.payload)
+    setStatus(prev => ({
+      ...prev,
+      ...incoming,
+      state: incoming.state ?? prev.state,
+    }))
   }, [])
 
   const handleGameResult = useCallback((msg: WSMessage) => {

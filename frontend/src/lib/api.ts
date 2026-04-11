@@ -4,6 +4,7 @@ import type {
   EvalResult,
   ModelInfo,
   PaginatedResponse,
+  ReplayInfo,
   TrainingStatus,
 } from './types'
 
@@ -92,6 +93,12 @@ export async function getEvalResults(): Promise<EvalResult[]> {
   const raw = await request<Record<string, unknown>>('/api/evaluation/results')
   const data = Array.isArray(raw.data) ? raw.data : Array.isArray(raw) ? raw : []
   return snakeToCamel<EvalResult[]>(data)
+}
+
+export async function getAvailableReplays(): Promise<ReplayInfo[]> {
+  const raw = await request<Record<string, unknown>>('/api/replays')
+  const replays = Array.isArray(raw.replays) ? raw.replays : []
+  return snakeToCamel<ReplayInfo[]>(replays)
 }
 
 export async function getTrainingStatus(): Promise<TrainingStatus> {
