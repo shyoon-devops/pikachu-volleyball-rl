@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   backend-test:
     runs-on: ubuntu-latest
@@ -34,11 +38,24 @@ jobs:
         working-directory: backend
         run: ruff check .
 
-      - name: Test
+      - name: Format check
+        working-directory: backend
+        run: ruff format --check .
+
+      - name: Test with coverage
         working-directory: backend
         env:
           MONGODB_URL: mongodb://localhost:27017/pikachu_rl_test
-        run: pytest tests/ -v --tb=short
+        run: |
+          pytest tests/ -v --tb=short \
+            --cov=game --cov=rl \
+            --cov-report=xml --cov-report=term-missing
+
+      - name: Pytest coverage comment
+        uses: MishaKav/pytest-coverage-comment@main
+        if: github.event_name == 'pull_request'
+        with:
+          pytest-xml-coverage-path: backend/coverage.xml
 
   frontend-test:
     runs-on: ubuntu-latest
@@ -58,6 +75,10 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
+
+      - name: Test
+        working-directory: frontend
+        run: npx vitest run --coverage
 
       - name: Build
         working-directory: frontend

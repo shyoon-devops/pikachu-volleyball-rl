@@ -12,10 +12,13 @@ echo "  Frontend: http://localhost:5173"
 echo "  MongoDB:  localhost:27017"
 echo ""
 
-read -rp "Are you sure you want to deploy to PROD? (y/N): " confirm
-if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-    echo "Aborted."
-    exit 0
+# Skip confirmation in CI environments
+if [ -z "${CI:-}" ]; then
+    read -rp "Are you sure you want to deploy to PROD? (y/N): " confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        echo "Aborted."
+        exit 0
+    fi
 fi
 
 docker compose -f docker-compose.prod.yml up --build -d
