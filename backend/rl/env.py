@@ -15,6 +15,7 @@ from backend.game.constants import (
     GROUND_WIDTH,
     MAX_SCORE,
     NET_PILLAR_X,
+    PLAYER_HALF_LENGTH,
 )
 from backend.game.engine import PikachuVolleyball, PlayerInput
 
@@ -53,6 +54,8 @@ class PikachuVolleyballEnv(gymnasium.Env):
         self._prev_score1 = 0
         self._prev_score2 = 0
         self._prev_ball_x = 0.0
+        self._prev_ball_vy = 0.0
+        self._prev_p1_x = 0.0
 
     def reset(
         self,
@@ -68,6 +71,8 @@ class PikachuVolleyballEnv(gymnasium.Env):
         self._prev_score1 = 0
         self._prev_score2 = 0
         self._prev_ball_x = float(state.ball.x)
+        self._prev_ball_vy = float(state.ball.vy)
+        self._prev_p1_x = float(state.player1.x)
         return self._get_obs(state), {}
 
     def step(
@@ -102,6 +107,8 @@ class PikachuVolleyballEnv(gymnasium.Env):
         self._prev_score1 = new_state.score1
         self._prev_score2 = new_state.score2
         self._prev_ball_x = float(new_state.ball.x)
+        self._prev_ball_vy = float(new_state.ball.vy)
+        self._prev_p1_x = float(new_state.player1.x)
 
         info: dict[str, Any] = {
             "score1": new_state.score1,
@@ -137,35 +144,61 @@ class PikachuVolleyballEnv(gymnasium.Env):
         return np.clip(obs, -1.0, 1.0)
 
     def _compute_reward(self, state: Any) -> float:
-        """Compute reward based on game events."""
-        reward = 0.0
+        """Compute shaped reward for faster PPO convergence.
 
-        # Scoring events
+        Reward hierarchy (largest to smallest):
+          1. Game outcome:  win +20 / loss -20
+          2. Scoring:       score +10 / concede -10
+          3. Ball touch:    successful hit +1.0  (once per collision)
+          4. Net crossing:  ball sent to opponent's court +0.5
+          5. Approach ball: move toward ball on own side +0.02/frame
+          6. Court control: ball on opponent's side +0.01/frame
+          7. Time penalty:  -0.005/frame
+        """
+        reward = 0.0
+        ball = state.ball
+        p1 = state.player1
+
+        # --- PRIMARY: scoring events ---
         scored = state.score1 - self._prev_score1
         conceded = state.score2 - self._prev_score2
-
         if scored > 0:
             reward += 10.0
         if conceded > 0:
             reward -= 10.0
-
-        # Game win/loss bonus
         if state.score1 >= MAX_SCORE:
             reward += 20.0
         elif state.score2 >= MAX_SCORE:
             reward -= 20.0
 
-        # Ball touch (rally) — ball changed direction near player
-        ball = state.ball
-        p1 = state.player1
-        if abs(ball.x - p1.x) < 60 and abs(ball.y - p1.y) < 60 and ball.vy < 0:
+        # --- AUX 1: ball touch (collision) ---
+        # Detect actual hit: prev vy was downward, now vy jumped negative
+        # (engine sets vy = min(vy, -15) on collision).
+        if self._prev_ball_vy > 0 and ball.vy <= -10:
+            # Was the ball near player1 when this happened?
+            if abs(ball.x - p1.x) < PLAYER_HALF_LENGTH * 3:
+                reward += 1.0
+
+        # --- AUX 2: net crossing ---
+        # Ball moved from P1's side to P2's side = successful return/serve.
+        prev_on_p1_side = self._prev_ball_x <= NET_PILLAR_X
+        now_on_p2_side = ball.x > NET_PILLAR_X
+        if prev_on_p1_side and now_on_p2_side and ball.vx > 0:
             reward += 0.5
 
-        # Ball on opponent's side
-        if ball.x > NET_PILLAR_X:
-            reward += 0.1
+        # --- AUX 3: approach ball (gradient for early training) ---
+        # When ball is on agent's side, reward reducing horizontal distance.
+        if ball.x <= NET_PILLAR_X and not state.is_round_over:
+            prev_dist = abs(self._prev_ball_x - self._prev_p1_x)
+            curr_dist = abs(float(ball.x) - float(p1.x))
+            if curr_dist < prev_dist:
+                reward += 0.02
 
-        # Time penalty
-        reward -= 0.01
+        # --- AUX 4: court control (scaled down from 0.1 → 0.01) ---
+        if ball.x > NET_PILLAR_X:
+            reward += 0.01
+
+        # --- AUX 5: time penalty (halved to reduce noise) ---
+        reward -= 0.005
 
         return float(reward)
