@@ -39,6 +39,11 @@ class FakeGameService:
 
 
 class FakeEvalService:
+    async def run(self, model_path: str, bot_level: int = 1, n_games: int = 50):
+        if ".." in model_path or model_path.startswith("/"):
+            raise FileNotFoundError(f"Invalid model path: {model_path}")
+        raise FileNotFoundError(f"Model not found: {model_path}")
+
     async def get_results(self):
         return {"data": []}
 
