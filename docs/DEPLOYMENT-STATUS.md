@@ -20,10 +20,10 @@
 
 ## Release History
 
-| Version | QA Deploy | QA Verified | Prod Deploy | Release Note |
-|---------|-----------|-------------|-------------|--------------|
-| 0.2.0 | Pending | — | — | [v0.2.0-qa](releases/v0.2.0-qa.md) |
-| 0.1.0 | — | — | 2026-04-11 | Initial structure |
+| Version | QA Deploy | QA Verified | Prod Deploy | Main Merge | Tag | Release Note |
+|---------|-----------|-------------|-------------|------------|-----|--------------|
+| 0.2.0 | Pending | — | — | — | — | [v0.2.0-qa](releases/v0.2.0-qa.md) |
+| 0.1.0 | — | — | 2026-04-11 | — | — | Initial structure |
 
 ## Pending Actions
 
@@ -31,6 +31,7 @@
 - [ ] QA Engineer: Verify v0.2.0 on QA environment
 - [ ] PM: Approve prod deployment after QA pass
 - [ ] DevOps: Deploy to prod after PM approval
+- [ ] **PM: prod → main 머지 + 버전 태그** (prod 배포 완료 후 필수)
 
 ## Branch State
 

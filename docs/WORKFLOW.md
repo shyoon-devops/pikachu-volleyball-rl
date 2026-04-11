@@ -50,6 +50,14 @@ dev (개발) → QA (테스트) → prod (프로덕션)
   - RL 훈련 실행 & 모니터링
   - 모델 평가 & 비교
 
+### 4. Main Merge & Tag (필수 — prod 배포 후 즉시)
+- **prod 배포 완료 후 반드시 main 브랜치에 머지**
+- `git checkout main && git merge prod` 실행
+- 버전 태그 생성: `git tag v{version}` (main 위에)
+- `git push github main --tags`
+- 릴리스 노트에 main 머지 완료 기록
+- **이 단계가 완료되어야 릴리스가 최종 완료된 것으로 간주**
+
 ## Version Management
 
 ### Versioning Scheme
@@ -63,8 +71,11 @@ dev (개발) → QA (테스트) → prod (프로덕션)
 2. PM이 `scripts/release.sh {version}` 실행
 3. CHANGELOG.md 자동 업데이트
 4. VERSION 파일 업데이트
-5. Git tag 생성
-6. prod 환경 배포
+5. prod 환경 배포
+6. **prod → main 머지** (필수)
+7. **main에 버전 태그 생성** (`v{version}`)
+8. **GitHub push** (`main` + tags)
+9. 릴리스 노트에 main 머지 완료 기록
 
 ## Branch Strategy
 

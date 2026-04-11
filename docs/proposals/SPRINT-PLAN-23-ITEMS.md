@@ -124,12 +124,15 @@ Sprint 4 (v0.3.1)  █████░     2-3d dev + 1d QA         =  ~4d  | 2�
 ```
 1. PM이 스프린트 작업 할당 전달
 2. 팀별 개발 (feature branches → dev 머지)
-3. PM이 버전 생성 (VERSION, CHANGELOG, tag)
+3. PM이 버전 생성 (VERSION, CHANGELOG)
 4. DevOps가 QA 환경 배포
 5. QA Engineer가 검증 리포트 작성
 6. PM이 prod 배포 승인 판단
 7. 승인 시 DevOps → Project Manager에게 '배포 요청' → 최종 승인
-8. Prod 배포 완료 → 다음 스프린트 시작
+8. Prod 배포 완료
+9. **prod → main 머지 + 버전 태그 (v{version})** ← 필수
+10. 릴리스 노트에 main 머지 완료 기록 → 릴리스 최종 완료
+11. 다음 스프린트 시작
 ```
 
 ## 추적 규칙
