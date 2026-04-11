@@ -21,14 +21,42 @@ class ReplayService:
         await asyncio.to_thread(path.write_bytes, packed)
         await self.cleanup_old_replays()
 
+    async def list_replays(self) -> list[dict[str, Any]]:
+        files = sorted(self._dir.glob("*.msgpack"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return [
+            {
+                "game_id": f.stem,
+                "size_bytes": f.stat().st_size,
+                "created_at": f.stat().st_mtime,
+            }
+            for f in files
+        ]
+
     async def load_replay(self, game_id: str) -> list[dict[str, Any]]:
         path = self._dir / f"{game_id}.msgpack"
         if not path.exists():
             return []
         raw = await asyncio.to_thread(path.read_bytes)
-        return msgpack.unpackb(raw, raw=False)
+        frames = msgpack.unpackb(raw, raw=False)
+        return [_backfill_frame(f) for f in frames]
 
     async def cleanup_old_replays(self) -> None:
         files = sorted(self._dir.glob("*.msgpack"), key=lambda p: p.stat().st_mtime)
         while len(files) > self._max_count:
             files.pop(0).unlink()
+
+
+_PLAYER_DEFAULTS = {"is_jumping": False, "is_diving": False, "is_power_hitting": False}
+_BALL_DEFAULTS = {"rotation": 0}
+
+
+def _backfill_frame(frame: dict[str, Any]) -> dict[str, Any]:
+    """Fill missing fields in legacy replay frames for frontend compatibility."""
+    for key in ("player1", "player2"):
+        if key in frame:
+            for field, default in _PLAYER_DEFAULTS.items():
+                frame[key].setdefault(field, default)
+    if "ball" in frame:
+        for field, default in _BALL_DEFAULTS.items():
+            frame["ball"].setdefault(field, default)
+    return frame
