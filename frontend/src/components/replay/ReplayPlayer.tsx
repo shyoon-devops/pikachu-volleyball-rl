@@ -69,17 +69,58 @@ export function ReplayPlayer() {
     return clearTimer
   }, [isPlaying, speed, frames.length, clearTimer])
 
-  const handleTogglePlay = () => {
+  const handleTogglePlay = useCallback(() => {
     if (currentIndex >= frames.length - 1) {
       setCurrentIndex(0)
     }
     setIsPlaying(prev => !prev)
-  }
+  }, [currentIndex, frames.length])
 
-  const handleSeek = (frame: number) => {
+  const handleSeek = useCallback((frame: number) => {
     setCurrentIndex(frame)
     setIsPlaying(false)
-  }
+  }, [])
+
+  const stepFrame = useCallback((delta: number) => {
+    setCurrentIndex(prev => Math.max(0, Math.min(frames.length - 1, prev + delta)))
+    setIsPlaying(false)
+  }, [frames.length])
+
+  useEffect(() => {
+    if (frames.length === 0) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+
+      switch (e.code) {
+        case 'Space':
+          e.preventDefault()
+          handleTogglePlay()
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          stepFrame(e.shiftKey ? -10 : -1)
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          stepFrame(e.shiftKey ? 10 : 1)
+          break
+        case 'Digit1':
+          setSpeed(1)
+          break
+        case 'Digit2':
+          setSpeed(2)
+          break
+        case 'Digit3':
+          setSpeed(4)
+          break
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [frames.length, handleTogglePlay, stepFrame])
 
   const currentFrame = frames[currentIndex] ?? null
   const score1 = currentFrame?.score1 ?? 0
