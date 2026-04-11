@@ -3,7 +3,6 @@
 import numpy as np
 import pytest
 
-import gymnasium
 from gymnasium.utils.env_checker import check_env
 
 from backend.rl.env import PikachuVolleyballEnv
