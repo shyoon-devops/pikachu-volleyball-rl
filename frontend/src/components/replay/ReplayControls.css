@@ -1,0 +1,119 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  ReplayControls.css — 리플레이 컨트롤바
+ * ═══════════════════════════════════════════════════════════
+ *  FE className 매핑:
+ *    .replay-controls.card, .replay-controls-bar,
+ *    .replay-controls-play-btn, .replay-controls-speeds,
+ *    .replay-controls-speed-btn, .replay-controls-frame-info,
+ *    .replay-controls-seek
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.replay-controls {
+  padding: var(--space-3);
+}
+
+.replay-controls-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.replay-controls-play-btn {
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.replay-controls-play-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.replay-controls-speeds {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.replay-controls-speed-btn {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.replay-controls-speed-btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.replay-controls-speed-btn[data-active="true"],
+.replay-controls-speed-btn.active {
+  background: var(--color-blue);
+  color: var(--color-text-inverse);
+  border-color: transparent;
+}
+
+.replay-controls-frame-info {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-left: auto;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+.replay-controls-seek {
+  width: 100%;
+}
+
+.replay-controls-shortcuts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+}
+
+.replay-controls-shortcuts kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-elevated);
+}
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .replay-controls-bar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .replay-controls-frame-info {
+    width: 100%;
+    margin-left: 0;
+    text-align: right;
+    order: -1;
+  }
+
+  .replay-controls-shortcuts {
+    gap: var(--space-1);
+  }
+}
