@@ -69,8 +69,7 @@ export interface Hyperparams {
 
 export interface ModelInfo {
   path: string
-  step: number
-  timestamp: string
+  sizeBytes: number
 }
 
 export interface PaginatedResponse<T> {

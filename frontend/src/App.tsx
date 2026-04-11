@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { Dashboard } from './components/dashboard/Dashboard'
 import { ReplayList } from './components/replay/ReplayList'
 import { ReplayPlayer } from './components/replay/ReplayPlayer'
@@ -24,12 +25,14 @@ function App() {
           </nav>
         </header>
 
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/history" element={<ReplayList />} />
-          <Route path="/replay/:id" element={<ReplayPlayer />} />
-          <Route path="/evaluation" element={<EvalPanel />} />
-        </Routes>
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/history" element={<ReplayList />} />
+            <Route path="/replay/:id" element={<ReplayPlayer />} />
+            <Route path="/evaluation" element={<EvalPanel />} />
+          </Routes>
+        </ErrorBoundary>
       </div>
     </BrowserRouter>
   )

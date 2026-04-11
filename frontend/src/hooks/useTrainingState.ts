@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useWebSocket } from './useWebSocket'
+import { snakeToCamel } from '../lib/api'
 import type {
   GameState,
   TrainingMetrics,
@@ -40,7 +41,7 @@ export function useTrainingState(): TrainingState {
   const [recentGames, setRecentGames] = useState<GameRecord[]>([])
 
   const handleMetrics = useCallback((msg: WSMessage) => {
-    const payload = msg.payload as TrainingMetrics
+    const payload = snakeToCamel<TrainingMetrics>(msg.payload)
     setMetrics(prev => {
       const next = [...prev, payload]
       return next.length > MAX_METRICS_POINTS ? next.slice(-MAX_METRICS_POINTS) : next
@@ -48,15 +49,15 @@ export function useTrainingState(): TrainingState {
   }, [])
 
   const handleFrame = useCallback((msg: WSMessage) => {
-    setLatestFrame(msg.payload as GameState)
+    setLatestFrame(snakeToCamel<GameState>(msg.payload))
   }, [])
 
   const handleStatus = useCallback((msg: WSMessage) => {
-    setStatus(msg.payload as TrainingStatus)
+    setStatus(snakeToCamel<TrainingStatus>(msg.payload))
   }, [])
 
   const handleGameResult = useCallback((msg: WSMessage) => {
-    const record = msg.payload as GameRecord
+    const record = snakeToCamel<GameRecord>(msg.payload)
     setRecentGames(prev => {
       const next = [record, ...prev]
       return next.length > MAX_RECENT_GAMES ? next.slice(0, MAX_RECENT_GAMES) : next
