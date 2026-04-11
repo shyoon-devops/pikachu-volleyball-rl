@@ -46,12 +46,19 @@ async def get_game(request: Request, game_id: str):
 
 
 @router.get("/replays")
-async def list_replays(request: Request):
+async def list_replays(
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+):
     replay_service = getattr(request.app.state, "replay_service", None)
     if replay_service is None:
-        return {"replays": []}
-    replays = await replay_service.list_replays()
-    return {"replays": replays}
+        return {"replays": [], "total": 0, "page": page, "limit": limit}
+    all_replays = await replay_service.list_replays()
+    total = len(all_replays)
+    start = (page - 1) * limit
+    sliced = all_replays[start : start + limit]
+    return {"replays": sliced, "total": total, "page": page, "limit": limit}
 
 
 @router.get("/replays/{game_id}")
@@ -62,7 +69,10 @@ async def get_replay(request: Request, game_id: str):
     frames = await replay_service.load_replay(game_id)
     if not frames:
         raise HTTPException(status_code=404, detail="Replay not found")
-    return {"frames": frames}
+    # Include linked game record if available
+    game_service = request.app.state.game_service
+    game = await game_service.get_game_by_game_id(game_id)
+    return {"game_id": game_id, "frames": frames, "game": game}
 
 
 @router.get("/models")

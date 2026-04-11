@@ -37,6 +37,12 @@ class FakeGameService:
                 return g
         return None
 
+    async def get_game_by_game_id(self, game_id: str):
+        for g in self._games:
+            if g.get("game_id") == game_id:
+                return g
+        return None
+
 
 class FakeEvalService:
     async def run(self, model_path: str, bot_level: int = 1, n_games: int = 50):

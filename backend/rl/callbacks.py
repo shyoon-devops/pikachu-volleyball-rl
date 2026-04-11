@@ -84,7 +84,6 @@ class MetricsCallback(BaseCallback):
             value_loss = name_to_value.get("train/value_loss", 0.0)
 
         metrics = {
-            "type": "training:metrics",
             "step": self.num_timesteps,
             "episode": len(self._episode_rewards),
             "mean_reward": mean_reward,
@@ -160,7 +159,7 @@ class LiveFrameCallback(BaseCallback):
             self.loop.call_soon_threadsafe(
                 _safe_enqueue,
                 self.frames_queue,
-                {"type": "training:frame", **frame_data},
+                frame_data,
             )
 
             # Get agent action from model
@@ -176,7 +175,6 @@ class LiveFrameCallback(BaseCallback):
 
         game_id = str(uuid.uuid4())
         result = {
-            "type": "game:result",
             "game_id": game_id,
             "score1": state.score1,
             "score2": state.score2,
