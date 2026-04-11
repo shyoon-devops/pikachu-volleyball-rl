@@ -62,7 +62,7 @@
 .replay-controls-speed-btn[data-active="true"],
 .replay-controls-speed-btn.active {
   background: var(--color-blue);
-  color: #fff;
+  color: var(--color-text-inverse);
   border-color: transparent;
 }
 
