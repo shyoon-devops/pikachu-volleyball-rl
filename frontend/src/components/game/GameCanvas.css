@@ -36,7 +36,7 @@
   box-shadow: 0 0 30px rgba(0, 0, 0, 0.5),
               inset 0 0 60px rgba(0, 0, 0, 0.2);
   aspect-ratio: 432 / 304;
-  background: #0a1628;
+  background: var(--color-canvas-bg);
 }
 
 /* canvas 요소 자체에 적용 (PixiJS가 생성하는 canvas) */
