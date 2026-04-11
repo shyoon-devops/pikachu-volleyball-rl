@@ -1,37 +1,45 @@
-import { GameCanvas } from './components/game/GameCanvas'
-import { GameOverlay } from './components/game/GameOverlay'
-import { useTrainingState } from './hooks/useTrainingState'
+import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { Dashboard } from './components/dashboard/Dashboard'
+import { ReplayList } from './components/replay/ReplayList'
+import { ReplayPlayer } from './components/replay/ReplayPlayer'
+import { EvalPanel } from './components/evaluation/EvalPanel'
+
+const navLinkStyle = (isActive: boolean): React.CSSProperties => ({
+  color: isActive ? '#ffd700' : '#888',
+  textDecoration: 'none',
+  fontSize: 13,
+  fontWeight: isActive ? 600 : 400,
+  padding: '4px 0',
+  borderBottom: isActive ? '2px solid #ffd700' : '2px solid transparent',
+})
 
 function App() {
-  const { connectionState, status, latestFrame } = useTrainingState()
-
-  const score1 = latestFrame?.score1 ?? 0
-  const score2 = latestFrame?.score2 ?? 0
-
-  const statusText =
-    connectionState !== 'connected'
-      ? `Connection: ${connectionState}`
-      : `Training: ${status.state} | Step ${status.currentStep}`
-
   return (
-    <div style={{ minHeight: '100vh', background: '#0f0f1a', color: '#e0e0e0', fontFamily: 'monospace' }}>
-      <header style={{ padding: '16px 24px', borderBottom: '1px solid #2a2a3e' }}>
-        <h1 style={{ margin: 0, fontSize: 20, color: '#ffd700' }}>Pikachu Volleyball RL</h1>
-      </header>
+    <BrowserRouter>
+      <div style={{ minHeight: '100vh', background: '#0f0f1a', color: '#e0e0e0', fontFamily: 'monospace' }}>
+        <header style={{ padding: '12px 24px', borderBottom: '1px solid #2a2a3e', display: 'flex', alignItems: 'center', gap: 32 }}>
+          <h1 style={{ margin: 0, fontSize: 18, color: '#ffd700' }}>Pikachu Volleyball RL</h1>
+          <nav style={{ display: 'flex', gap: 20 }}>
+            <NavLink to="/" end style={({ isActive }) => navLinkStyle(isActive)}>
+              Dashboard
+            </NavLink>
+            <NavLink to="/history" style={({ isActive }) => navLinkStyle(isActive)}>
+              History
+            </NavLink>
+            <NavLink to="/evaluation" style={({ isActive }) => navLinkStyle(isActive)}>
+              Evaluation
+            </NavLink>
+          </nav>
+        </header>
 
-      <main style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-        <div style={{ position: 'relative' }}>
-          <GameCanvas gameState={latestFrame} width={648} height={456} />
-          <GameOverlay score1={score1} score2={score2} statusText={statusText} width={648} />
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, fontSize: 13, color: '#888' }}>
-          <span>Step: {status.currentStep}</span>
-          <span>Episode: {status.currentEpisode}</span>
-          <span>State: {status.state}</span>
-        </div>
-      </main>
-    </div>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/history" element={<ReplayList />} />
+          <Route path="/replay/:id" element={<ReplayPlayer />} />
+          <Route path="/evaluation" element={<EvalPanel />} />
+        </Routes>
+      </div>
+    </BrowserRouter>
   )
 }
 

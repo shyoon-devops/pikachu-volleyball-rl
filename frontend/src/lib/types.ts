@@ -59,6 +59,27 @@ export interface EvalResult {
   avgRallyLength: number
 }
 
+export interface Hyperparams {
+  learning_rate: number
+  n_steps: number
+  batch_size: number
+  gamma: number
+  clip_range: number
+}
+
+export interface ModelInfo {
+  path: string
+  step: number
+  timestamp: string
+}
+
+export interface PaginatedResponse<T> {
+  data: T[]
+  total: number
+  page: number
+  limit: number
+}
+
 export type WSClientMessageType =
   | 'training:start'
   | 'training:stop'
