@@ -47,20 +47,8 @@ services:
       retries: 3
       start_period: 20s
 
-  frontend:
-    build:
-      context: ./frontend
-      target: build
-    ports:
-      - "3000:5173"
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
-      - ./frontend/index.html:/app/index.html
-    command: npm run dev -- --host 0.0.0.0
-    depends_on:
-      backend:
-        condition: service_healthy
+  # Frontend runs on yoonbian-2 (192.168.0.248:3000) via nginx
+  # Deploy with: bash scripts/deploy-frontend.sh dev
 
 volumes:
   mongo_data_dev:
