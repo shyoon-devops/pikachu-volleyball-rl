@@ -1,0 +1,58 @@
+.replay-list {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.replay-list-title {
+  margin-bottom: 16px;
+}
+
+.replay-list-error {
+  margin-bottom: 16px;
+}
+
+.replay-list-table-wrapper {
+  overflow: hidden;
+}
+
+.replay-list-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.replay-list-empty {
+  text-align: center;
+}
+
+.replay-list-btn {
+}
+
+.replay-list-pagination {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.replay-list-page-btn {
+}
+
+.replay-list-page-btn:disabled {
+  cursor: not-allowed;
+}
+
+.replay-list-page-info {
+}
+
+.score-p1 {
+}
+
+.score-p2 {
+}
+
+.winner-agent {
+}
+
+.winner-bot {
+}

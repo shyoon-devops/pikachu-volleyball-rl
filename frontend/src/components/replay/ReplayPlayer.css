@@ -1,0 +1,44 @@
+.replay-player {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.replay-player-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.replay-player-back {
+  text-decoration: none;
+}
+
+.replay-player-title {
+  margin: 0;
+}
+
+.replay-player-game {
+  position: relative;
+}
+
+.replay-player-loading {
+  padding: 24px;
+  text-align: center;
+}
+
+.replay-player-error-wrapper {
+  padding: 24px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.replay-player-error {
+  margin-bottom: 16px;
+}
+
+.replay-player-error-back {
+}

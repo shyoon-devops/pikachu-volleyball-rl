@@ -1,0 +1,29 @@
+.app {
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  padding: 12px 24px;
+}
+
+.app-title {
+  margin: 0;
+}
+
+.app-nav {
+  display: flex;
+  gap: 20px;
+}
+
+.app-nav-link {
+  text-decoration: none;
+  padding: 4px 0;
+  border-bottom: 2px solid transparent;
+}
+
+.app-nav-link.active {
+  border-bottom-color: currentColor;
+}

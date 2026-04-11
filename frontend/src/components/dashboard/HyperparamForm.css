@@ -1,0 +1,36 @@
+.hyperparam-form {
+}
+
+.hyperparam-form-title {
+  margin: 0 0 12px;
+}
+
+.hyperparam-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.hyperparam-form-label {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.hyperparam-form-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.hyperparam-form-select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.hyperparam-form-submit {
+  width: 100%;
+}
+
+.hyperparam-form-submit:disabled {
+  cursor: not-allowed;
+}
