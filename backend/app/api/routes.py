@@ -67,14 +67,16 @@ async def get_replay(request: Request, game_id: str):
 
 @router.get("/models")
 async def list_models():
-    model_dir = Path(os.getenv("MODEL_DIR", "./models"))
+    model_dir = Path(os.getenv("MODEL_DIR", "./models")).resolve()
     if not model_dir.exists():
         return {"models": []}
     files = sorted(model_dir.rglob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # Only include files that resolve within the model directory
+    safe_files = [f for f in files if str(f.resolve()).startswith(str(model_dir))]
     return {
         "models": [
             {"path": str(f.relative_to(model_dir)), "size_bytes": f.stat().st_size}
-            for f in files
+            for f in safe_files
         ]
     }
 
