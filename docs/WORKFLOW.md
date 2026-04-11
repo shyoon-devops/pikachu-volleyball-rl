@@ -34,6 +34,31 @@ dev (개발) → QA (테스트) → prod (프로덕션)
 - `scripts/deploy-dev.sh`로 dev 환경에 배포
 - dev 환경에서 기능 테스트 완료 후 QA 에스컬레이션
 
+#### 필수: dev 머지 후 Health Check (머지한 사람 책임)
+
+**dev에 코드를 머지한 사람은 반드시 아래를 즉시 확인해야 합니다:**
+
+```bash
+# 1. 컨테이너 상태 확인
+docker ps --filter name=pikachu-rl-dev
+# → STATUS가 (healthy) 인지 확인. (health: starting)이면 30초 대기 후 재확인
+
+# 2. API health check
+curl -s http://localhost:8001/api/health
+# → {"status": "ok"} 반환 확인
+
+# 3. 이상 시 로그 확인
+docker logs pikachu-rl-dev-backend-1 --tail 30
+```
+
+**새 의존성(pip 패키지) 추가 시**: Docker 이미지 재빌드 필수
+```bash
+docker compose -f docker-compose.dev.yml build backend
+docker compose -f docker-compose.dev.yml up -d backend
+```
+
+**unhealthy 발견 시**: PM에게 즉시 보고 + 원인 파악 + 수정
+
 ### 2. QA Escalation (qa)
 - `scripts/promote.sh dev-to-qa`로 dev → qa 승격
 - QA Engineer가 qa 환경에서:
