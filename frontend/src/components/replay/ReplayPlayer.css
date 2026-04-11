@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 .replay-player {
   max-width: 700px;
   margin: 0 auto;
@@ -41,4 +42,81 @@
 }
 
 .replay-player-error-back {
+=======
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  ReplayPlayer.css — 리플레이 재생 페이지
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  Designer: FE에게 ReplayPlayer.tsx에 아래 변경 요청:
+ *
+ *  1. import './ReplayPlayer.css' 추가
+ *  2. 루트 <div>에 className="replay-player" 추가
+ *  3. 헤더 행 <div>에 className="replay-player__header" 추가
+ *  4. Back <Link>에 className="replay-player__back" 추가
+ *  5. <h2>에 className="replay-player__title" 추가
+ *  6. 캔버스 wrapper <div>에 className="replay-player__canvas" 추가
+ *  7. 로딩 <div>에 className="replay-player__loading" 추가
+ *     (spinner 사용: <div className="spinner" /> 추가)
+ *  8. 에러 <div>에 className="replay-player__error" 추가
+ *  9. 위 요소들의 inline style={{}} 제거
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.replay-player {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.replay-player__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.replay-player__back {
+  font-size: var(--text-sm);
+  color: var(--color-blue);
+  text-decoration: none;
+  transition: color var(--duration-fast);
+}
+
+.replay-player__back:hover {
+  color: var(--color-accent);
+}
+
+.replay-player__title {
+  font-size: var(--text-lg);
+  color: var(--color-text-secondary);
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+.replay-player__canvas {
+  position: relative;
+}
+
+.replay-player__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-12);
+  color: var(--color-text-muted);
+}
+
+.replay-player__error {
+  padding: var(--space-3);
+  background: var(--color-danger-dim);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
+>>>>>>> github/yoon/designer
 }

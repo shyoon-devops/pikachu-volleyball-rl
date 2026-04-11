@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 .replay-list {
   max-width: 1000px;
   margin: 0 auto;
@@ -55,4 +56,103 @@
 }
 
 .winner-bot {
+=======
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  ReplayList.css — 게임 히스토리 테이블
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  Designer: FE에게 ReplayList.tsx에 아래 변경 요청:
+ *
+ *  1. import './ReplayList.css' 추가
+ *  2. 루트 <div>에 className="replay-list" 추가
+ *  3. <h2>에 className="replay-list__title" 추가
+ *  4. 에러 <div>에 className="replay-list__error" 추가
+ *  5. 테이블 wrapper <div>에 className="replay-list__table-wrapper card" 추가
+ *  6. Replay 버튼에 className="btn btn-primary" 추가
+ *  7. 페이지네이션 <div>에 className="replay-list__pagination" 추가
+ *  8. Prev/Next 버튼에 className="btn btn-ghost" 추가
+ *  9. 페이지 정보 <span>에 className="replay-list__page-info" 추가
+ *  10. 위 요소들의 inline style={{}} 제거
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.replay-list {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--space-6);
+}
+
+.replay-list__title {
+  font-size: var(--text-xl);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-4);
+  font-weight: var(--weight-medium);
+}
+
+.replay-list__error {
+  padding: var(--space-3);
+  background: var(--color-danger-dim);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  margin-bottom: var(--space-4);
+}
+
+.replay-list__table-wrapper {
+  overflow: hidden;
+  padding: 0;
+}
+
+/* Table element selectors — 글로벌 table 스타일이 적용되지 않을 경우 대비 */
+.replay-list__table-wrapper table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.replay-list__table-wrapper th {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.replay-list__table-wrapper td {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.replay-list__table-wrapper tbody tr:hover {
+  background: var(--color-bg-hover);
+}
+
+.replay-list__table-wrapper tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.replay-list__table-wrapper tbody tr:nth-child(even):hover {
+  background: var(--color-bg-hover);
+}
+
+.replay-list__pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.replay-list__page-info {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+>>>>>>> github/yoon/designer
 }

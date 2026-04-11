@@ -1,7 +1,10 @@
 import { useRef, useEffect, useCallback } from 'react'
 import { Application, Graphics } from 'pixi.js'
 import type { GameState } from '../../lib/types'
+<<<<<<< HEAD
 import './GameCanvas.css'
+=======
+>>>>>>> github/yoon/designer
 
 const COURT_WIDTH = 432
 const COURT_HEIGHT = 304
@@ -123,6 +126,7 @@ export function GameCanvas({ gameState, width = COURT_WIDTH, height = COURT_HEIG
 
     gfx.clear()
 
+<<<<<<< HEAD
     gfx.rect(0, 0, COURT_WIDTH, GROUND_Y)
     gfx.fill(0x87ceeb)
 
@@ -135,22 +139,57 @@ export function GameCanvas({ gameState, width = COURT_WIDTH, height = COURT_HEIG
     gfx.rect(NET_X - NET_HALF_WIDTH, NET_TOP_Y - 4, NET_HALF_WIDTH * 2, 4)
     gfx.fill(0xffffff)
 
+=======
+    // Sky
+    gfx.rect(0, 0, COURT_WIDTH, GROUND_Y)
+    gfx.fill(0x87ceeb)
+
+    // Ground
+    gfx.rect(0, GROUND_Y, COURT_WIDTH, COURT_HEIGHT - GROUND_Y)
+    gfx.fill(0x4a7c59)
+
+    // Net
+    gfx.rect(NET_X - NET_HALF_WIDTH / 2, NET_TOP_Y, NET_HALF_WIDTH / 2, GROUND_Y - NET_TOP_Y)
+    gfx.fill(0xcccccc)
+
+    // Net top bar
+    gfx.rect(NET_X - NET_HALF_WIDTH, NET_TOP_Y - 4, NET_HALF_WIDTH * 2, 4)
+    gfx.fill(0xffffff)
+
+    // Player 1 (yellow - left side)
+>>>>>>> github/yoon/designer
     gfx.circle(state.player1.x, state.player1.y, PLAYER_HALF)
     gfx.fill(0xffd700)
     gfx.circle(state.player1.x, state.player1.y, PLAYER_HALF)
     gfx.stroke({ width: 2, color: 0xb8960f })
 
+<<<<<<< HEAD
     gfx.circle(state.player1.x + 8, state.player1.y - 8, 4)
     gfx.fill(0x000000)
 
+=======
+    // Player 1 eyes
+    gfx.circle(state.player1.x + 8, state.player1.y - 8, 4)
+    gfx.fill(0x000000)
+
+    // Player 2 (red - right side)
+>>>>>>> github/yoon/designer
     gfx.circle(state.player2.x, state.player2.y, PLAYER_HALF)
     gfx.fill(0xff4444)
     gfx.circle(state.player2.x, state.player2.y, PLAYER_HALF)
     gfx.stroke({ width: 2, color: 0xaa2222 })
 
+<<<<<<< HEAD
     gfx.circle(state.player2.x - 8, state.player2.y - 8, 4)
     gfx.fill(0x000000)
 
+=======
+    // Player 2 eyes
+    gfx.circle(state.player2.x - 8, state.player2.y - 8, 4)
+    gfx.fill(0x000000)
+
+    // Ball
+>>>>>>> github/yoon/designer
     gfx.circle(state.ball.x, state.ball.y, BALL_RADIUS)
     gfx.fill(0xffff00)
     gfx.circle(state.ball.x, state.ball.y, BALL_RADIUS)
@@ -167,6 +206,10 @@ export function GameCanvas({ gameState, width = COURT_WIDTH, height = COURT_HEIG
       const next = currentStateRef.current
 
       if (prev && next) {
+<<<<<<< HEAD
+=======
+        // Interpolate from 30fps server frames to 60fps display
+>>>>>>> github/yoon/designer
         lerpFactorRef.current = Math.min(lerpFactorRef.current + 1 / 2, 1)
         const interpolated = lerpState(prev, next, lerpFactorRef.current)
         drawFrame(interpolated)
@@ -185,5 +228,9 @@ export function GameCanvas({ gameState, width = COURT_WIDTH, height = COURT_HEIG
     }
   }, [drawFrame])
 
+<<<<<<< HEAD
   return <div ref={containerRef} className="game-canvas" />
+=======
+  return <div ref={containerRef} style={{ width, height, position: 'relative' }} />
+>>>>>>> github/yoon/designer
 }

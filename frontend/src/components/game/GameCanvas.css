@@ -1,3 +1,50 @@
+<<<<<<< HEAD
 .game-canvas {
   position: relative;
+=======
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  GameCanvas.css — 게임 캔버스 컨테이너 스타일
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  Designer: FE에게 GameCanvas.tsx에 아래 변경 요청:
+ *
+ *  1. import './GameCanvas.css' 추가
+ *  2. 컨테이너 <div ref={containerRef}>에 className="game-canvas" 추가
+ *  3. inline style={{ width, height, position: 'relative' }} 제거
+ *     (width/height는 style prop으로 유지해도 됨)
+ *
+ *  ── PixiJS 비주얼 개선 요청 (CSS로 불가, .tsx 변경 필요) ──
+ *
+ *  현재 GameCanvas의 drawFrame() 함수 내 PixiJS Graphics 코드를
+ *  아래와 같이 개선 요청. CSS로는 canvas 내부 렌더링을 제어할 수 없음.
+ *
+ *  - 배경: 0x1a1a2e → 0x0a1628 (dark navy), sky 0x87ceeb → 0x0f2847
+ *  - 코트 바닥: 잔디 스트라이프 패턴 (교대 녹색 밴드)
+ *  - 네트: 단색 사각형 → 그리드 메시 패턴 (수평+수직 라인)
+ *  - Player 1: 원형 → 둥근 사각형 + 귀 + 눈(동공+빛) + 볼 터치
+ *  - Player 2: 빨간색 → 일렉트릭 블루 (0x4fc3f7)
+ *  - 공: 외부 글로우 + 하이라이트 + 배구 심 라인
+ *  - 그림자: 플레이어/공 아래 바닥 그림자 추가
+ *  - 파워히트 시 글로우 이펙트
+ *
+ *  참고: 이전 커밋 0f824d5의 GameCanvas.tsx에 전체 구현 있음
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.game-canvas {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 2px solid var(--color-border-strong);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5),
+              inset 0 0 60px rgba(0, 0, 0, 0.2);
+}
+
+/* canvas 요소 자체에 적용 (PixiJS가 생성하는 canvas) */
+.game-canvas canvas {
+  display: block;
+  border-radius: var(--radius-lg);
+>>>>>>> github/yoon/designer
 }
