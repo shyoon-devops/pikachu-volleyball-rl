@@ -149,3 +149,43 @@
   padding: var(--space-12);
   color: var(--color-text-muted);
 }
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .eval-panel {
+    padding: var(--space-4);
+  }
+
+  .eval-panel__form-fields {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .eval-panel__field select,
+  .eval-panel__field input {
+    width: 100%;
+  }
+
+  .eval-panel__filter {
+    flex-wrap: wrap;
+  }
+
+  .eval-panel__table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .eval-panel__table table {
+    min-width: 550px;
+  }
+}
+
+@media (max-width: 480px) {
+  .eval-panel {
+    padding: var(--space-3);
+  }
+
+  .eval-panel__title {
+    font-size: var(--text-lg);
+  }
+}

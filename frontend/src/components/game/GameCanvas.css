@@ -42,4 +42,13 @@
 .game-canvas canvas {
   display: block;
   border-radius: var(--radius-lg);
+  max-width: 100%;
+  height: auto;
+}
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .game-canvas {
+    border-width: 1px;
+  }
 }

@@ -96,3 +96,33 @@
   color: var(--color-text-muted);
   font-family: var(--font-mono);
 }
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .replay-list {
+    padding: var(--space-4);
+  }
+
+  .replay-list__table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .replay-list__table-wrapper table {
+    min-width: 550px;
+  }
+
+  .replay-list__pagination {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 480px) {
+  .replay-list {
+    padding: var(--space-3);
+  }
+
+  .replay-list__title {
+    font-size: var(--text-lg);
+  }
+}
