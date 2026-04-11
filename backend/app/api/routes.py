@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -41,11 +42,14 @@ async def get_game(request: Request, game_id: str):
 
 
 @router.get("/replays/{game_id}")
-async def get_replay(game_id: str):
-    replay_service = None  # Wave 3: injected via app.state
+async def get_replay(request: Request, game_id: str):
+    replay_service = getattr(request.app.state, "replay_service", None)
     if replay_service is None:
-        raise HTTPException(status_code=501, detail="Replay service not available yet")
-    return await replay_service.load_replay(game_id)
+        raise HTTPException(status_code=501, detail="Replay service not available")
+    frames = await replay_service.load_replay(game_id)
+    if not frames:
+        raise HTTPException(status_code=404, detail="Replay not found")
+    return {"frames": frames}
 
 
 @router.get("/models")
@@ -62,16 +66,23 @@ async def list_models():
     }
 
 
+class EvalRunRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    model_path: str
+    bot_level: int = 1
+    n_games: int = 50
+
+
 @router.post("/evaluation/run")
-async def run_evaluation(request: Request):
+async def run_evaluation(request: Request, body: EvalRunRequest):
     eval_service = getattr(request.app.state, "eval_service", None)
     if eval_service is None:
-        raise HTTPException(status_code=501, detail="Evaluation service not available yet")
-    body = await request.json()
+        raise HTTPException(status_code=501, detail="Evaluation service not available")
     result = await eval_service.run(
-        model_path=body["model_path"],
-        bot_level=body.get("bot_level", 1),
-        n_games=body.get("n_games", 50),
+        model_path=body.model_path,
+        bot_level=body.bot_level,
+        n_games=body.n_games,
     )
     return result
 

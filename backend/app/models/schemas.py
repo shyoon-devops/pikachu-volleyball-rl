@@ -48,7 +48,7 @@ class EvaluationRecord(BaseModel):
     avg_rally_length: float
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "protected_namespaces": ()}
 
 
 class PaginatedResponse(BaseModel):
