@@ -197,7 +197,8 @@ class TrainingManager:
             # Save final checkpoint
             self._save_final_checkpoint()
         except Exception:
-            pass
+            import logging
+            logging.getLogger(__name__).exception("Training thread crashed")
         finally:
             self.status = "stopped"
             try:
