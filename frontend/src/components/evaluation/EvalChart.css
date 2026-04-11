@@ -1,10 +1,29 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  EvalChart.css — 평가 차트
+ * ═══════════════════════════════════════════════════════════
+ *  FE className 매핑:
+ *    .eval-chart.card, .eval-chart-title, .eval-chart-empty
+ * ═══════════════════════════════════════════════════════════
+ */
+
 .eval-chart {
+  padding: var(--space-4) var(--space-2) var(--space-2);
 }
 
 .eval-chart-title {
-  margin: 0 0 8px 12px;
+  margin: 0 0 var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .eval-chart-empty {
   text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  padding: var(--space-6);
 }

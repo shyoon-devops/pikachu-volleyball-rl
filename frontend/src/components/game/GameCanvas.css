@@ -1,3 +1,55 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  GameCanvas.css — 게임 캔버스 컨테이너 스타일
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  ── PixiJS 스프라이트 전환 요청 (FE 작업) ──
+ *
+ *  원본 스프라이트 시트가 frontend/public/assets/에 추가됨:
+ *    - sprite_sheet.png + sprite_sheet.json (TexturePacker/PixiJS 호환)
+ *    - SPRITE_GUIDE.md에 프레임별 상세 문서 포함
+ *
+ *  현재: Graphics API로 단색 도형 (원, 사각형)
+ *  목표: 원본 피카츄 배구 스프라이트 기반 렌더링
+ *
+ *  FE에게 요청:
+ *    1. Assets.load('/assets/sprite_sheet.json')으로 스프라이트 시트 로드
+ *    2. drawFrame() → Sprite/AnimatedSprite 기반 렌더링 전환
+ *    3. 배경: sky_blue 타일 + mountain + ground 3단 + net_pillar
+ *    4. 피카츄: state별 28프레임 AnimatedSprite
+ *    5. 공: 포케볼 5프레임 회전 + 파워히트 이펙트
+ *    6. 구름 10개 + 파도 애니메이션
+ *    7. 그림자 (shadow 스프라이트)
+ *    8. 점수: number_0~9 스프라이트 (CSS 오버레이 대체)
+ *    9. 사운드: /assets/sounds/ 효과음 연동
+ *
+ *  자세한 프레임 매핑은 SPRITE_GUIDE.md 참고
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
+
 .game-canvas {
   position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 2px solid var(--color-border-strong);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5),
+              inset 0 0 60px rgba(0, 0, 0, 0.2);
+  aspect-ratio: 432 / 304;
+  background: #0a1628;
+}
+
+/* canvas 요소 자체에 적용 (PixiJS가 생성하는 canvas) */
+.game-canvas canvas {
+  display: block;
+  border-radius: var(--radius-lg);
+  max-width: 100%;
+  height: auto;
+}
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .game-canvas {
+    border-width: 1px;
+  }
 }

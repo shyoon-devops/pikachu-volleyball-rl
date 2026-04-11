@@ -1,6 +1,49 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  MetricsChart.css — 메트릭 차트 카드
+ * ═══════════════════════════════════════════════════════════
+ *  FE className 매핑:
+ *    .metrics-chart.card, .metrics-chart-title
+ * ═══════════════════════════════════════════════════════════
+ */
+
 .metrics-chart {
+  padding: var(--space-4) var(--space-2) var(--space-2);
 }
 
 .metrics-chart-title {
-  margin: 0 0 8px 12px;
+  margin: 0 0 var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Recharts responsive container inside card */
+.metrics-chart .recharts-wrapper {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.metrics-chart .recharts-cartesian-axis-tick-value {
+  fill: var(--color-text-muted);
+}
+
+.metrics-chart .recharts-cartesian-grid line {
+  stroke: var(--color-border);
+}
+
+.metrics-chart .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: var(--color-bg-elevated) !important;
+  border: 1px solid var(--color-border-strong) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+.metrics-chart .recharts-tooltip-item {
+  color: var(--color-text-primary) !important;
+  font-family: var(--font-mono) !important;
+  font-size: var(--text-xs) !important;
 }

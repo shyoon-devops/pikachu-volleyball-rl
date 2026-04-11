@@ -1,53 +1,112 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  Dashboard.css — 대시보드 레이아웃
+ * ═══════════════════════════════════════════════════════════
+ *  FE className 매핑:
+ *    .dashboard, .dashboard-left, .dashboard-game-wrapper,
+ *    .dashboard-right, .dashboard-bottom
+ * ═══════════════════════════════════════════════════════════
+ */
+
 .dashboard {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  padding: 24px;
-  max-width: 1400px;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  max-width: var(--content-max-width);
   margin: 0 auto;
 }
 
 .dashboard-left {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .dashboard-game-wrapper {
   position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.dashboard-game-wrapper canvas {
+  max-width: 100%;
+  height: auto;
 }
 
 .dashboard-right {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .dashboard-bottom {
   grid-column: 1 / -1;
 }
 
+/* ── Recent Games ──────────────────────────────────────── */
+.card-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+}
+
+.recent-games-empty {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+  padding: var(--space-4);
+  text-align: center;
+}
+
 .recent-games {
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .recent-games-table {
   width: 100%;
   border-collapse: collapse;
+  font-size: var(--text-sm);
+  min-width: 500px;
 }
 
-.recent-games-empty {
-  margin: 0;
+.recent-games-table th {
+  text-align: left;
+  padding: var(--space-3);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-strong);
 }
 
-.score-p1 {
+.recent-games-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.score-p2 {
+.recent-games-table tbody tr:hover {
+  background: var(--color-bg-hover);
 }
 
-.winner-agent {
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .dashboard {
+    grid-template-columns: 1fr;
+    padding: var(--space-4);
+  }
+
+  .dashboard-bottom {
+    grid-column: 1;
+  }
 }
 
-.winner-bot {
+@media (max-width: 480px) {
+  .dashboard {
+    padding: var(--space-3);
+    gap: var(--space-3);
+  }
 }
