@@ -234,6 +234,22 @@
   .eval-results-table-wrapper {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    position: relative;
+  }
+
+  /* 오른쪽 스크롤 힌트 그라데이션 */
+  .eval-results-table-wrapper::after {
+    content: '';
+    position: sticky;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 32px;
+    pointer-events: none;
+    background: linear-gradient(to right, transparent, var(--color-bg-card));
+    float: right;
+    margin-top: -100%;
+    height: 100%;
   }
 
   .eval-results-table {
@@ -248,5 +264,9 @@
 
   .eval-panel-title {
     font-size: var(--text-lg);
+  }
+
+  .eval-filter-label {
+    width: 100%;
   }
 }
