@@ -1,12 +1,16 @@
 """REST API endpoints — see docs/PLAN.md section 3.1."""
 
+import asyncio
 import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter()
+
+# Limit concurrent evaluations (each can run minutes)
+_eval_semaphore = asyncio.Semaphore(1)
 
 
 @router.get("/health")
@@ -79,8 +83,8 @@ class EvalRunRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
 
     model_path: str
-    bot_level: int = 1
-    n_games: int = 50
+    bot_level: int = Field(default=1, ge=1, le=5)
+    n_games: int = Field(default=50, ge=1, le=500)
 
 
 @router.post("/evaluation/run")
@@ -88,14 +92,17 @@ async def run_evaluation(request: Request, body: EvalRunRequest):
     eval_service = getattr(request.app.state, "eval_service", None)
     if eval_service is None:
         raise HTTPException(status_code=501, detail="Evaluation service not available")
-    try:
-        result = await eval_service.run(
-            model_path=body.model_path,
-            bot_level=body.bot_level,
-            n_games=body.n_games,
-        )
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    if _eval_semaphore.locked():
+        raise HTTPException(status_code=409, detail="Evaluation already in progress")
+    async with _eval_semaphore:
+        try:
+            result = await eval_service.run(
+                model_path=body.model_path,
+                bot_level=body.bot_level,
+                n_games=body.n_games,
+            )
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
     return result
 
 

@@ -44,6 +44,9 @@ class FakeEvalService:
 
 
 class FakeReplayService:
+    async def list_replays(self):
+        return []
+
     async def load_replay(self, game_id: str):
         return []
 
