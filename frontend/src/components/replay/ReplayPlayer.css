@@ -82,3 +82,15 @@
 .replay-player-error-back:hover {
   color: var(--color-accent);
 }
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .replay-player {
+    padding: var(--space-3);
+    gap: var(--space-3);
+  }
+
+  .replay-player-title {
+    font-size: var(--text-base);
+  }
+}

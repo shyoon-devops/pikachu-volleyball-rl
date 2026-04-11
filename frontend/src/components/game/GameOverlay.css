@@ -45,3 +45,12 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .game-overlay-score {
+    font-size: var(--text-lg);
+    padding: var(--space-1) var(--space-2);
+    gap: var(--space-1);
+  }
+}
