@@ -1,0 +1,34 @@
+.replay-controls {
+}
+
+.replay-controls-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.replay-controls-play-btn {
+}
+
+.replay-controls-play-btn[data-playing="true"] {
+}
+
+.replay-controls-speeds {
+  display: flex;
+  gap: 4px;
+}
+
+.replay-controls-speed-btn {
+}
+
+.replay-controls-speed-btn[data-active="true"] {
+}
+
+.replay-controls-frame-info {
+  margin-left: auto;
+}
+
+.replay-controls-seek {
+  width: 100%;
+}
