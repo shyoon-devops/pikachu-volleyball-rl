@@ -79,11 +79,14 @@ async def run_evaluation(request: Request, body: EvalRunRequest):
     eval_service = getattr(request.app.state, "eval_service", None)
     if eval_service is None:
         raise HTTPException(status_code=501, detail="Evaluation service not available")
-    result = await eval_service.run(
-        model_path=body.model_path,
-        bot_level=body.bot_level,
-        n_games=body.n_games,
-    )
+    try:
+        result = await eval_service.run(
+            model_path=body.model_path,
+            bot_level=body.bot_level,
+            n_games=body.n_games,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     return result
 
 

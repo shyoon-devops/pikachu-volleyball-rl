@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -18,6 +20,7 @@ class EvalServiceWrapper:
     def __init__(self, db: AsyncIOMotorDatabase) -> None:
         self._evaluator = ModelEvaluator()
         self._col = db["evaluations"]
+        self._model_dir = Path(os.getenv("MODEL_DIR", "./models"))
 
     async def run(
         self,
@@ -25,9 +28,13 @@ class EvalServiceWrapper:
         bot_level: int = 1,
         n_games: int = 50,
     ) -> dict[str, Any]:
+        full_path = self._model_dir / model_path
+        if not full_path.exists():
+            raise FileNotFoundError(f"Model not found: {model_path}")
+
         result = await asyncio.to_thread(
             self._evaluator.evaluate,
-            model_path=model_path,
+            model_path=str(full_path),
             bot_level=bot_level,
             n_games=n_games,
         )

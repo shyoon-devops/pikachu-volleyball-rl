@@ -25,8 +25,13 @@ class GameService:
 
     async def get_game(self, game_id: str) -> dict | None:
         from bson import ObjectId
+        from bson.errors import InvalidId
 
-        doc = await self._col.find_one({"_id": ObjectId(game_id)})
+        try:
+            oid = ObjectId(game_id)
+        except (InvalidId, TypeError):
+            return None
+        doc = await self._col.find_one({"_id": oid})
         if doc is None:
             return None
         doc["_id"] = str(doc["_id"])
