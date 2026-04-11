@@ -32,7 +32,11 @@ export function ReplayPlayer() {
       })
       .catch(err => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Failed to load replay')
+        const msg = err instanceof Error ? err.message : 'Failed to load replay'
+        setError(msg.includes('not found') || msg.includes('404')
+          ? 'Replay data not available for this game. Replays are only saved during training sessions.'
+          : msg,
+        )
       })
       .finally(() => {
         if (!cancelled) setLoading(false)

@@ -26,7 +26,7 @@ export function ReplayControls({
       <div className="replay-controls-bar">
         <button
           onClick={onTogglePlay}
-          className="replay-controls-play-btn"
+          className="replay-controls-play-btn btn btn-primary"
           data-playing={isPlaying}
         >
           {isPlaying ? 'Pause' : 'Play'}
@@ -37,7 +37,7 @@ export function ReplayControls({
             <button
               key={s}
               onClick={() => onSpeedChange(s)}
-              className="replay-controls-speed-btn"
+              className="replay-controls-speed-btn btn btn-ghost"
               data-active={speed === s}
             >
               {s}x

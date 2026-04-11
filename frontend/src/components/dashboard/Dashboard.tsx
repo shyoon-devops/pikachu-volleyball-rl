@@ -48,9 +48,9 @@ export function Dashboard() {
         <div className="card">
           <h3 className="card-title">Recent Games</h3>
           {recentGames.length === 0 ? (
-            <p className="recent-games-empty">No games yet.</p>
+            <p className="recent-games-empty empty-state">No games yet.</p>
           ) : (
-            <div className="recent-games">
+            <div className="recent-games table-scroll">
               <table className="recent-games-table">
                 <thead>
                   <tr>

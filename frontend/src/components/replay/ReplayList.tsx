@@ -47,7 +47,7 @@ export function ReplayList() {
         <div className="replay-list-error alert-error">{error}</div>
       )}
 
-      <div className="replay-list-table-wrapper card">
+      <div className="replay-list-table-wrapper card table-scroll">
         <table className="replay-list-table">
           <thead>
             <tr>
@@ -63,7 +63,7 @@ export function ReplayList() {
               </tr>
             ) : games.length === 0 ? (
               <tr>
-                <td colSpan={7} className="replay-list-empty">No games recorded yet.</td>
+                <td colSpan={7} className="replay-list-empty empty-state">No games recorded yet.</td>
               </tr>
             ) : (
               games.map(g => (
@@ -85,7 +85,7 @@ export function ReplayList() {
                   <td>
                     <button
                       onClick={() => navigate(`/replay/${g.id}`)}
-                      className="replay-list-btn"
+                      className="replay-list-btn btn btn-primary"
                     >
                       Replay
                     </button>
@@ -102,7 +102,7 @@ export function ReplayList() {
           <button
             onClick={() => changePage(Math.max(1, page - 1))}
             disabled={page <= 1}
-            className="replay-list-page-btn"
+            className="replay-list-page-btn btn btn-ghost"
           >
             Prev
           </button>
@@ -112,7 +112,7 @@ export function ReplayList() {
           <button
             onClick={() => changePage(Math.min(totalPages, page + 1))}
             disabled={page >= totalPages}
-            className="replay-list-page-btn"
+            className="replay-list-page-btn btn btn-ghost"
           >
             Next
           </button>

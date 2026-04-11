@@ -46,7 +46,7 @@ export function EvalPanel() {
   }
 
   if (loading) {
-    return <div className="eval-panel-loading">Loading...</div>
+    return <div className="eval-panel-loading"><div className="spinner" />Loading...</div>
   }
 
   return (
@@ -71,7 +71,7 @@ export function EvalPanel() {
               {models.length === 0 && <option value="">No models available</option>}
               {models.map(m => (
                 <option key={m.path} value={m.path}>
-                  {m.path.split('/').pop()} (step {m.step})
+                  {m.path.split('/').pop()}
                 </option>
               ))}
             </select>
@@ -104,7 +104,7 @@ export function EvalPanel() {
           <button
             onClick={handleRun}
             disabled={running || !selectedModel}
-            className="eval-form-submit"
+            className="eval-form-submit btn btn-primary"
           >
             {running ? 'Running...' : 'Run Evaluation'}
           </button>
@@ -115,8 +115,7 @@ export function EvalPanel() {
         <span className="eval-filter-label">Filter by level:</span>
         <button
           onClick={() => setFilterLevel(null)}
-          className="eval-filter-btn"
-          data-active={filterLevel === null}
+          className={`eval-filter-btn btn ${filterLevel === null ? 'btn-ghost active' : 'btn-ghost'}`}
         >
           All
         </button>
@@ -124,8 +123,7 @@ export function EvalPanel() {
           <button
             key={l}
             onClick={() => setFilterLevel(l)}
-            className="eval-filter-btn"
-            data-active={filterLevel === l}
+            className={`eval-filter-btn btn ${filterLevel === l ? 'btn-ghost active' : 'btn-ghost'}`}
           >
             L{l}
           </button>
@@ -134,7 +132,7 @@ export function EvalPanel() {
 
       <EvalChart results={results} filterLevel={filterLevel} />
 
-      <div className="eval-results-table-wrapper card">
+      <div className="eval-results-table-wrapper card table-scroll">
         <table className="eval-results-table">
           <thead>
             <tr>
@@ -146,7 +144,7 @@ export function EvalPanel() {
           <tbody>
             {results.length === 0 ? (
               <tr>
-                <td colSpan={6} className="eval-results-empty">No evaluation results yet.</td>
+                <td colSpan={6} className="eval-results-empty empty-state">No evaluation results yet.</td>
               </tr>
             ) : (
               results.map((r, i) => (
