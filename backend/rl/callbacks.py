@@ -19,6 +19,25 @@ from backend.game.constants import MAX_SCORE
 from backend.game.engine import PikachuVolleyball, PlayerInput
 from backend.rl.env import ACTION_MAP
 
+import logging
+
+_cb_logger = logging.getLogger(__name__)
+
+
+def _safe_enqueue(queue: asyncio.Queue, item: Any) -> None:
+    """put_nowait with drop-oldest on full queue (backpressure)."""
+    try:
+        queue.put_nowait(item)
+    except asyncio.QueueFull:
+        try:
+            queue.get_nowait()  # drop oldest
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            queue.put_nowait(item)
+        except asyncio.QueueFull:
+            _cb_logger.debug("Queue still full after drop, discarding item")
+
 
 class MetricsCallback(BaseCallback):
     """Collects training metrics every N steps and pushes to an asyncio.Queue."""
@@ -74,7 +93,7 @@ class MetricsCallback(BaseCallback):
             "value_loss": value_loss,
         }
 
-        self.loop.call_soon_threadsafe(self.queue.put_nowait, metrics)
+        self.loop.call_soon_threadsafe(_safe_enqueue, self.queue, metrics)
         return True
 
 
@@ -139,7 +158,8 @@ class LiveFrameCallback(BaseCallback):
             frame_data = _serialize_state(state)
             frames.append(frame_data)
             self.loop.call_soon_threadsafe(
-                self.frames_queue.put_nowait,
+                _safe_enqueue,
+                self.frames_queue,
                 {"type": "training:frame", **frame_data},
             )
 
@@ -163,7 +183,7 @@ class LiveFrameCallback(BaseCallback):
             "winner": 1 if state.score1 >= MAX_SCORE else 2,
             "duration_frames": state.frame,
         }
-        self.loop.call_soon_threadsafe(self.results_queue.put_nowait, result)
+        self.loop.call_soon_threadsafe(_safe_enqueue, self.results_queue, result)
 
         # Save replay
         self._save_replay(game_id, frames)

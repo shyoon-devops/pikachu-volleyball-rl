@@ -58,3 +58,20 @@ class PaginatedResponse(BaseModel):
     total: int
     page: int
     limit: int
+
+
+# --- WebSocket message schemas ---
+
+
+class WsTrainingStartPayload(BaseModel):
+    hyperparams: dict | None = None
+    bot_level: int = Field(default=1, ge=1, le=5)
+    total_timesteps: int = Field(default=1_000_000, ge=1000)
+
+
+class WsSetLevelPayload(BaseModel):
+    level: int = Field(ge=1, le=5)
+
+
+class WsReplayRequestPayload(BaseModel):
+    game_id: str = Field(min_length=1)

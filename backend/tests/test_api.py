@@ -37,3 +37,25 @@ def test_evaluation_results_empty(client):
     resp = client.get("/api/evaluation/results")
     assert resp.status_code == 200
     assert resp.json()["data"] == []
+
+
+def test_evaluation_run_validation(client):
+    """bot_level and n_games are validated."""
+    resp = client.post(
+        "/api/evaluation/run",
+        json={"model_path": "test.zip", "bot_level": 99},
+    )
+    assert resp.status_code == 422
+
+    resp2 = client.post(
+        "/api/evaluation/run",
+        json={"model_path": "test.zip", "n_games": 0},
+    )
+    assert resp2.status_code == 422
+
+
+def test_replays_list_empty(client):
+    """Replay list returns empty when no replays exist."""
+    resp = client.get("/api/replays")
+    assert resp.status_code == 200
+    assert resp.json()["replays"] == []

@@ -29,7 +29,7 @@
   border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.08);
   font-family: var(--font-mono);
-  font-size: 28px;
+  font-size: var(--text-2xl);
   font-weight: var(--weight-bold);
   letter-spacing: 0.15em;
   color: var(--color-text-primary);
