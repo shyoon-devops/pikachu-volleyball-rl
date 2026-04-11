@@ -102,3 +102,29 @@
     font-size: var(--text-base);
   }
 }
+
+@media (max-width: 480px) {
+  .navbar {
+    padding: 0 var(--space-3);
+    gap: var(--space-3);
+    height: auto;
+    min-height: var(--navbar-height);
+    flex-wrap: wrap;
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-2);
+  }
+
+  .navbar__logo-text {
+    font-size: var(--text-sm);
+    width: 100%;
+  }
+
+  .navbar__nav {
+    width: 100%;
+  }
+
+  .navbar__link {
+    font-size: var(--text-xs);
+    padding: var(--space-1) var(--space-2);
+  }
+}

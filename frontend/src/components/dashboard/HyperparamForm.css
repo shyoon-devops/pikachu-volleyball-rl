@@ -60,3 +60,10 @@
 .hyperparam-form__submit {
   width: 100%;
 }
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .hyperparam-form__grid {
+    grid-template-columns: 1fr;
+  }
+}

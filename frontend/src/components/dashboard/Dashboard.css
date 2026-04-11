@@ -65,3 +65,51 @@
     grid-column: 1;
   }
 }
+
+@media (max-width: 480px) {
+  .dashboard {
+    padding: var(--space-3);
+    gap: var(--space-3);
+  }
+}
+
+/* ── 게임 캔버스 반응형 ────────────────────────────────── */
+.dashboard__game-wrapper canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ── Recent Games 테이블 모바일 대응 ───────────────────── */
+.recent-games-card {
+  overflow: hidden;
+}
+
+.recent-games-card table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.recent-games-card th {
+  text-align: left;
+  padding: var(--space-3) var(--space-3);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.recent-games-card td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.recent-games-card tbody tr:hover {
+  background: var(--color-bg-hover);
+}
+
+.recent-games-card .table-scroll table {
+  min-width: 500px;
+}
