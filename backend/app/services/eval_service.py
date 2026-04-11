@@ -28,7 +28,9 @@ class EvalServiceWrapper:
         bot_level: int = 1,
         n_games: int = 50,
     ) -> dict[str, Any]:
-        full_path = self._model_dir / model_path
+        full_path = (self._model_dir / model_path).resolve()
+        if not str(full_path).startswith(str(self._model_dir.resolve())):
+            raise FileNotFoundError(f"Invalid model path: {model_path}")
         if not full_path.exists():
             raise FileNotFoundError(f"Model not found: {model_path}")
 

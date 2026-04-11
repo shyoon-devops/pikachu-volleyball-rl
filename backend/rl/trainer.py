@@ -45,9 +45,9 @@ class TrainingManager:
         self.model_dir = model_dir
         self.replay_dir = replay_dir
         self.status: str = "stopped"
-        self.metrics_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-        self.frames_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-        self.results_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.metrics_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=500)
+        self.frames_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=100)
+        self.results_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=200)
 
         self._model: PPO | None = None
         self._thread: threading.Thread | None = None
