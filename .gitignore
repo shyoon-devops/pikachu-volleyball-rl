@@ -20,6 +20,9 @@ replays/*.msgpack
 # Docker
 mongo_data/
 
+# Backups (binary artifacts)
+backups/
+
 # IDE
 .vscode/
 .idea/

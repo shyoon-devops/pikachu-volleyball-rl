@@ -1,31 +1,33 @@
-# === Stage 1: Install Python dependencies ===
-FROM python:3.11-slim AS builder
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
-WORKDIR /build
-
-COPY pyproject.toml .
-RUN pip install --no-cache-dir --prefix=/install .
-
-# === Stage 2: Runtime with CUDA support ===
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
-
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    MPLCONFIGDIR=/tmp/matplotlib
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3.11 python3.11-venv python3-pip curl && \
-    ln -sf /usr/bin/python3.11 /usr/bin/python && \
+        python3.11 python3.11-venv python3.11-dev python3-pip curl && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /install /usr/local
+RUN python3.11 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN useradd -r -s /usr/sbin/nologin appuser
 
 WORKDIR /app
 
-COPY backend/ ./backend/
+# Layer 1: Install dependencies only (cached unless pyproject.toml changes)
+COPY backend/pyproject.toml ./
+RUN pip install --no-cache-dir tomli && \
+    python -c "import tomli; f=open('pyproject.toml','rb'); deps=tomli.load(f)['project']['dependencies']; f.close(); print('\n'.join(deps))" > /tmp/requirements.txt && \
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm /tmp/requirements.txt
 
-RUN useradd -r -s /usr/sbin/nologin appuser && \
-    mkdir -p /app/models /app/replays && \
-    chown -R appuser:appuser /app
+# Layer 2: Install package (fast, no deps to resolve)
+COPY backend/ ./backend/
+RUN pip install --no-cache-dir --no-deps .
+
+RUN mkdir -p /app/models /app/replays /tmp/matplotlib && \
+    chown -R appuser:appuser /app /tmp/matplotlib
 
 USER appuser
 

@@ -4,27 +4,34 @@ services:
   mongodb:
     image: mongo:7
     ports:
-      - "27017:27017"
+      - "27020:27017"
     volumes:
       - mongo_data_prod:/data/db
-    restart: unless-stopped
+    restart: always
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok && db.stats().ok"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "8000:8000"
+      - "8003:8000"
     volumes:
       - models_prod:/app/models
       - replays_prod:/app/replays
     env_file: .env.prod
+    environment:
+      - MPLCONFIGDIR=/tmp/matplotlib
     depends_on:
       mongodb:
         condition: service_healthy
@@ -35,15 +42,20 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    restart: unless-stopped
+    restart: always
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "--max-time", "3", "http://localhost:8000/api/health"]
       interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 20s
+      retries: 5
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
-  # Frontend runs on yoonbian-2 (192.168.0.248:5173) via nginx
+  # Frontend runs on yoonbian-2 (192.168.0.248:3002) via nginx
   # Deploy with: bash scripts/deploy-frontend.sh prod
 
 volumes:

@@ -1,0 +1,14 @@
+# Training override for dev environment.
+# Removes --reload so file changes don't kill training threads mid-run.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml -f docker-compose.dev-training.yml up -d
+#
+# To return to normal dev mode:
+#   docker compose -f docker-compose.dev.yml up -d
+
+services:
+  backend:
+    command: >
+      python -m uvicorn backend.app.main:app
+      --host 0.0.0.0 --port 8000
