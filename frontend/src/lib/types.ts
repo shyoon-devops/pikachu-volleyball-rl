@@ -28,9 +28,10 @@ export interface GameState {
 export interface TrainingMetrics {
   step: number
   episode: number
-  reward: number
+  meanReward: number
   winRate: number
-  loss: number
+  policyLoss: number
+  valueLoss: number
 }
 
 export interface TrainingStatus {
@@ -70,6 +71,12 @@ export interface Hyperparams {
 export interface ModelInfo {
   path: string
   sizeBytes: number
+}
+
+export interface ReplayInfo {
+  gameId: string
+  sizeBytes: number
+  createdAt: number
 }
 
 export interface PaginatedResponse<T> {
