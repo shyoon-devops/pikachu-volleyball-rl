@@ -9,6 +9,14 @@ from backend.game.engine import GameState, PikachuVolleyball
 from backend.rl.env import PikachuVolleyballEnv
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--base-url",
+        default="http://localhost:8001",
+        help="Base URL for regression tests (default: dev)",
+    )
+
+
 @pytest.fixture
 def game_engine() -> PikachuVolleyball:
     """Return an initialized game engine."""
