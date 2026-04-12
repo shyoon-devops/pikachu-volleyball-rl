@@ -9,9 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 Sprint 1 코드 완료 — QA v0.2.1 배포 및 검증 대기 중. 추적: [docs/sprint-tracking/sprint1-v0.2.1.md](docs/sprint-tracking/sprint1-v0.2.1.md)
 
-## [0.2.1] - 2026-04-12 (QA 배포 완료, prod 대기)
+## [0.2.1] - 2026-04-12 (QA 재배포 완료, prod 대기 / dev HEAD 482df2d1)
 
-Sprint 1 완료분 + 팀 자발적 품질 보강 (스프린트 종료 직전 1시간 동안 10개 후속 커밋). QA 환경 승격 완료 (`15f4a11`), prod 승격 대기.
+Sprint 1 완료분 + 팀 자발적 품질 보강 + BE-2/BE-3 조기 착수분. 최초 QA 승격 (`15f4a11`) 이후 BE-3 재작업과 BE-2 가 dev 에 추가 병합되어 QA 재승격(`1baa3e3b`) 수행. 태그는 dev HEAD (`482df2d1`) 기준.
+
+### Added (post-first-QA-promotion batch — sprint-2 items advanced into v0.2.1)
+- **BE-3 JSON structured logging + /health/live|ready split** (`f6e71e80`): JSON 구조화 로깅 + liveness/readiness 분리. 초기 `13e103f` BE-3 에 추가된 확장분
+- **BE-2 API TTL cache + unified pagination envelope** (`482df2d1`) — Sprint 2 (#31) 에서 조기 진입. TTL 기반 API 캐시 + 통일된 페이지네이션 응답 래퍼
+
+### Deployment (updated)
+- **dev → qa 재승격 완료** (2026-04-12): qa 브랜치 `1baa3e3b` — BE-2/BE-3 추가 병합분 포함
 
 ### Added (late batch — post-Sprint 1 finalization, 2026-04-12 03:xx)
 - **Prometheus metrics endpoint** (`5da6af3`): `/api/metrics` Prometheus exposition format — Sprint 3 DO-1 선행 작업
