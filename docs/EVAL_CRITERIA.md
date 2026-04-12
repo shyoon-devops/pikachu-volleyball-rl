@@ -97,7 +97,18 @@ A checkpoint is flagged as **REGRESSION** if any metric drops more than:
 > **Analysis**: Zero wins in 50 games. Score slowly increasing but opponent consistently winning.
 > Rally length trend up (78→170) — model keeps ball alive longer but cannot close games.
 
-### Pending: New Model (reward shaping v2, obs=19, action=12)
+### Pending: New Model (reward shaping v2, obs=18, action=12)
 
 AI Engineer completed reward shaping fix (commit 5a5def9, 2026-04-12).
-Trainer started new training. Awaiting first checkpoint for evaluation.
+Trainer launched several short runs (Apr 12 02:05+) — see `final.zip` checkpoints
+under `models/{517843a3,c8473f51,71f1475f,a9666c91,b1ea7251}/`.
+Training currently `stopped` at step 408 — full evaluation pending sustained training.
+
+### Action/Observation Space (current — reward shaping v2)
+
+| Space | Shape | Notes |
+|-------|-------|-------|
+| observation | `Box(-1, 1, (18,), float32)` | Expanded from 12 → 18 features |
+| action | `Discrete(12)` | Expanded from 6 → 12 (adds explicit power_hit combos) |
+
+See `docs/ENV_SPEC.md` (ai-engineer worktree) for full feature/action breakdown.
