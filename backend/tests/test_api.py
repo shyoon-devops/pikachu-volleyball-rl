@@ -58,4 +58,51 @@ def test_replays_list_empty(client):
     """Replay list returns empty when no replays exist."""
     resp = client.get("/api/replays")
     assert resp.status_code == 200
-    assert resp.json()["replays"] == []
+    body = resp.json()
+    assert body["replays"] == []
+    assert body["total"] == 0
+    assert body["page"] == 1
+    assert body["limit"] == 20
+
+
+def test_replays_list_pagination(client):
+    """Replay list supports page/limit query params."""
+    resp = client.get("/api/replays?page=2&limit=5")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["page"] == 2
+    assert body["limit"] == 5
+
+
+def test_game_record_has_game_id(client):
+    """GameRecord schema includes uuid4 game_id field."""
+    from backend.app.models.schemas import GameRecord
+
+    record = GameRecord(
+        experiment_id="exp-1",
+        bot_level=1,
+        score1=15,
+        score2=10,
+        winner=1,
+        duration_frames=300,
+        rally_count=5,
+    )
+    assert record.game_id  # auto-generated uuid4
+    assert len(record.game_id) == 36  # uuid4 format: 8-4-4-4-12
+
+
+def test_game_record_preserves_game_id(client):
+    """GameRecord preserves explicitly provided game_id."""
+    from backend.app.models.schemas import GameRecord
+
+    record = GameRecord(
+        game_id="custom-id-123",
+        experiment_id="exp-1",
+        bot_level=1,
+        score1=15,
+        score2=10,
+        winner=1,
+        duration_frames=300,
+        rally_count=5,
+    )
+    assert record.game_id == "custom-id-123"

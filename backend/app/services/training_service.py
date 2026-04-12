@@ -25,8 +25,8 @@ class TrainingServiceWrapper:
             total_timesteps=total_timesteps,
         )
 
-    async def stop(self, *, force: bool = False) -> dict[str, Any]:
-        return await self.manager.stop(force=force)
+    async def stop(self) -> None:
+        await self.manager.stop()
 
     async def resume(self) -> None:
         await self.manager.resume()
@@ -37,6 +37,6 @@ class TrainingServiceWrapper:
     def status(self) -> dict[str, Any]:
         return {
             "state": self.manager.status,
-            "current_step": self.manager.current_step,
-            "current_episode": self.manager.current_episode,
+            "current_step": 0,
+            "current_episode": 0,
         }

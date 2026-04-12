@@ -7,6 +7,14 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
+
+from backend.app.metrics import update_training_metrics
+from backend.app.models.schemas import (
+    WsReplayRequestPayload,
+    WsSetLevelPayload,
+    WsTrainingStartPayload,
+)
 
 if TYPE_CHECKING:
     from backend.app.services.replay_service import ReplayService
@@ -36,6 +44,10 @@ async def ws_endpoint(
         manager.disconnect(ws)
 
 
+async def _send_error(ws: WebSocket, message: str) -> None:
+    await ws.send_json({"type": "error", "payload": {"message": message}})
+
+
 async def _dispatch(
     ws: WebSocket,
     msg_type: str,
@@ -45,47 +57,64 @@ async def _dispatch(
 ) -> None:
     """Route incoming messages to the appropriate handler."""
     if msg_type == "training:start":
+        current = training_service.status()
+        if current["state"] == "running":
+            await ws.send_json({
+                "type": "training:error",
+                "payload": {"message": "Training is already running"},
+            })
+            return
+        try:
+            params = WsTrainingStartPayload(**(payload or {}))
+        except ValidationError as e:
+            await _send_error(ws, f"Invalid training:start payload: {e.error_count()} errors")
+            return
         experiment_id = await training_service.start(
-            hyperparams=payload.get("hyperparams"),
-            bot_level=payload.get("bot_level", 1),
+            hyperparams=params.hyperparams,
+            bot_level=params.bot_level,
+            total_timesteps=params.total_timesteps,
         )
+        logger.info("Training started: experiment=%s bot_level=%d", experiment_id, params.bot_level)
         await ws.send_json({
             "type": "training:status",
             "payload": {"state": "running", "experiment_id": experiment_id},
         })
 
     elif msg_type == "training:stop":
-        force = payload.get("force", False)
-        result = await training_service.stop(force=force)
-        if result["stopped"]:
-            await ws.send_json({
-                "type": "training:status",
-                "payload": {"state": "stopped"},
-            })
-        else:
-            await ws.send_json({
-                "type": "training:stop_rejected",
-                "payload": result,
-            })
+        await training_service.stop()
+        logger.info("Training stopped")
+        await ws.send_json({
+            "type": "training:status",
+            "payload": {"state": "stopped"},
+        })
 
     elif msg_type == "training:resume":
         await training_service.resume()
+        logger.info("Training resumed")
         await ws.send_json({
             "type": "training:status",
             "payload": {"state": "running"},
         })
 
     elif msg_type == "training:set_level":
-        level = payload.get("level", 1)
-        training_service.set_bot_level(level)
+        try:
+            params = WsSetLevelPayload(**(payload or {}))
+        except ValidationError as e:
+            await _send_error(ws, f"Invalid level: {e.error_count()} errors")
+            return
+        training_service.set_bot_level(params.level)
         await ws.send_json({
             "type": "training:status",
-            "payload": {"state": training_service.status()["state"], "bot_level": level},
+            "payload": {"state": training_service.status()["state"], "bot_level": params.level},
         })
 
     elif msg_type == "replay:request":
-        game_id = payload.get("game_id", "")
-        frames = await replay_service.load_replay(game_id)
+        try:
+            params = WsReplayRequestPayload(**(payload or {}))
+        except ValidationError as e:
+            await _send_error(ws, f"Invalid replay request: {e.error_count()} errors")
+            return
+        frames = await replay_service.load_replay(params.game_id)
         await ws.send_json({"type": "replay:data", "payload": {"frames": frames}})
 
     else:
@@ -100,6 +129,7 @@ async def metrics_push_loop(
     queue = training_service.manager.metrics_queue
     while True:
         data = await queue.get()
+        update_training_metrics(data)
         await manager.broadcast({"type": "training:metrics", "payload": data})
 
 
@@ -126,6 +156,7 @@ async def results_push_loop(
     while True:
         data = await queue.get()
         record = GameRecord(
+            game_id=data.get("game_id", ""),
             experiment_id=data.get("experiment_id", ""),
             bot_level=data.get("bot_level", 1),
             score1=data["score1"],

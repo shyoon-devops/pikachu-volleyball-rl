@@ -1,0 +1,272 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  EvalPanel.css — 모델 평가 패널
+ * ═══════════════════════════════════════════════════════════
+ *  FE className 매핑:
+ *    .eval-panel, .eval-panel-title, .eval-panel-error,
+ *    .eval-panel-loading,
+ *    .eval-form.card, .eval-form-title, .eval-form-row,
+ *    .eval-form-label, .eval-form-select, .eval-form-input,
+ *    .eval-form-submit,
+ *    .eval-filter, .eval-filter-label, .eval-filter-btn,
+ *    .eval-results-table-wrapper.card, .eval-results-table,
+ *    .eval-results-empty, .eval-results-winrate
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.eval-panel {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.eval-panel-title {
+  font-size: var(--text-xl);
+  color: var(--color-text-secondary);
+  margin: 0;
+  font-weight: var(--weight-medium);
+}
+
+.eval-panel-error {
+  padding: var(--space-3);
+  background: var(--color-danger-dim);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.eval-panel-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-12);
+  color: var(--color-text-muted);
+}
+
+/* ── Eval Form ─────────────────────────────────────────── */
+.eval-form-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+}
+
+.eval-form-row {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.eval-form-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  display: block;
+  margin-bottom: var(--space-1);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.eval-form-select,
+.eval-form-input {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.eval-form-select:focus,
+.eval-form-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-dim);
+  outline: none;
+}
+
+.eval-form-select--model {
+  min-width: 200px;
+}
+
+.eval-form-submit {
+  padding: var(--space-2) var(--space-4);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-blue);
+  color: var(--color-text-inverse);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.eval-form-submit:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow-blue);
+  transform: translateY(-1px);
+}
+
+.eval-form-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── Filter ────────────────────────────────────────────── */
+.eval-filter {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.eval-filter-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.eval-filter-btn {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.eval-filter-btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.eval-filter-btn[data-active="true"],
+.eval-filter-btn.active {
+  background: var(--color-blue);
+  color: var(--color-text-inverse);
+  border-color: transparent;
+}
+
+/* ── Results Table ─────────────────────────────────────── */
+.eval-results-table-wrapper {
+  overflow: hidden;
+  padding: 0;
+}
+
+.eval-results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.eval-results-table th {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.eval-results-table td {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.eval-results-table tbody tr:hover {
+  background: var(--color-bg-hover);
+}
+
+.eval-results-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.eval-results-table tbody tr:nth-child(even):hover {
+  background: var(--color-bg-hover);
+}
+
+.eval-results-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: var(--space-6);
+}
+
+.eval-results-winrate {
+  color: var(--color-success);
+  font-weight: var(--weight-semibold);
+}
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .eval-panel {
+    padding: var(--space-4);
+  }
+
+  .eval-form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .eval-form-select,
+  .eval-form-input {
+    width: 100%;
+  }
+
+  .eval-form-select--model {
+    min-width: unset;
+  }
+
+  .eval-filter {
+    flex-wrap: wrap;
+  }
+
+  .eval-results-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    position: relative;
+  }
+
+  /* 오른쪽 스크롤 힌트 그라데이션 */
+  .eval-results-table-wrapper::after {
+    content: '';
+    position: sticky;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 32px;
+    pointer-events: none;
+    background: linear-gradient(to right, transparent, var(--color-bg-card));
+    float: right;
+    margin-top: -100%;
+    height: 100%;
+  }
+
+  .eval-results-table {
+    min-width: 550px;
+  }
+}
+
+@media (max-width: 480px) {
+  .eval-panel {
+    padding: var(--space-3);
+  }
+
+  .eval-panel-title {
+    font-size: var(--text-lg);
+  }
+
+  .eval-filter-label {
+    width: 100%;
+  }
+}

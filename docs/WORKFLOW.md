@@ -66,6 +66,36 @@ dev (개발) → QA (테스트) → prod (프로덕션)
 5. Git tag 생성
 6. prod 환경 배포
 
+## Branch Strategy
+
+```
+main (prod)
+  └── qa
+       └── dev
+            ├── yoon/ai-engineer        ✅ merged to dev
+            ├── yoon/trainer             ✅ merged to dev
+            ├── yoon/evaluator           ✅ merged to dev
+            ├── yoon/backend-engineer    ✅ merged to dev
+            ├── yoon/frontend-engineer   🔄 refactoring (1 commit ahead of dev)
+            ├── yoon/designer            🔄 refactoring (1 commit ahead of dev)
+            ├── yoon/devops-engineer     🔄 enhancement (1 commit ahead of dev)
+            ├── yoon/qa-engineer         ✅ merged to dev
+            └── yoon/product-manager     📋 docs & release management
+```
+
+## Scripts Reference
+
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `scripts/deploy-dev.sh` | dev 환경 배포 | `./scripts/deploy-dev.sh` |
+| `scripts/deploy-qa.sh` | QA 환경 배포 | `./scripts/deploy-qa.sh` |
+| `scripts/deploy-prod.sh` | prod 환경 배포 | `./scripts/deploy-prod.sh` |
+| `scripts/promote.sh` | 환경 간 승격 | `./scripts/promote.sh dev-to-qa` |
+| `scripts/release.sh` | 릴리스 실행 | `./scripts/release.sh 0.2.0` |
+| `scripts/status.sh` | 환경 상태 확인 | `./scripts/status.sh` |
+| `scripts/setup.sh` | 초기 환경 설정 | `./scripts/setup.sh` |
+| `scripts/cleanup-replays.sh` | 리플레이 정리 | `./scripts/cleanup-replays.sh` |
+
 ## Documentation Requirements
 
 모든 변경사항은 다음 문서에 반영:

@@ -5,20 +5,16 @@ import pytest
 from backend.game.constants import (
     BALL_GROUND_Y,
     GRAVITY,
-    GROUND_WIDTH,
     MAX_SCORE,
-    NET_PILLAR_HALF_WIDTH,
     NET_PILLAR_TOP_Y,
     NET_PILLAR_X,
     PLAYER_GROUND_Y,
     PLAYER_HALF_LENGTH,
 )
 from backend.game.engine import (
-    BallState,
     GameState,
     PikachuVolleyball,
     PlayerInput,
-    PlayerState,
 )
 
 NOOP = PlayerInput(x_dir=0, y_dir=0, power_hit=False)
@@ -68,7 +64,7 @@ class TestBallNetCollision:
     def test_ball_vx_reverses_on_net_collision(
         self, game: PikachuVolleyball
     ) -> None:
-        state = game.reset()
+        game.reset()
         # Place ball at net position, below net top
         game._state.ball.x = NET_PILLAR_X
         game._state.ball.y = NET_PILLAR_TOP_Y + 10
@@ -160,7 +156,7 @@ class TestGameCompletion:
     """Game should end when a player reaches MAX_SCORE."""
 
     def test_game_ends_at_max_score(self, game: PikachuVolleyball) -> None:
-        state = game.reset()
+        game.reset()
         game._state.score1 = MAX_SCORE - 1
         # Force ball to land on p2 side
         game._state.ball.x = NET_PILLAR_X + 100

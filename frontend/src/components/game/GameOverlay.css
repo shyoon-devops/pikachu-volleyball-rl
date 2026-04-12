@@ -1,0 +1,56 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  GameOverlay.css — 게임 점수판 오버레이
+ * ═══════════════════════════════════════════════════════════
+ *  FE className 매핑:
+ *    .game-overlay, .game-overlay-score, .game-overlay-status
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.game-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-2) 0;
+  z-index: 2;
+}
+
+.game-overlay-score {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.15em;
+  color: var(--color-text-primary);
+  text-shadow: 0 0 10px currentColor;
+}
+
+.game-overlay-status {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-accent);
+  text-shadow: 0 0 8px var(--color-accent);
+  margin-top: var(--space-1);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .game-overlay-score {
+    font-size: var(--text-lg);
+    padding: var(--space-1) var(--space-2);
+    gap: var(--space-1);
+  }
+}

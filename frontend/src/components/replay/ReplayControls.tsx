@@ -1,3 +1,5 @@
+import './ReplayControls.css'
+
 interface ReplayControlsProps {
   isPlaying: boolean
   speed: number
@@ -10,15 +12,6 @@ interface ReplayControlsProps {
 
 const SPEEDS = [0.5, 1, 2, 4] as const
 
-const btnStyle: React.CSSProperties = {
-  padding: '4px 10px',
-  border: 'none',
-  borderRadius: 4,
-  fontFamily: 'monospace',
-  fontSize: 12,
-  cursor: 'pointer',
-}
-
 export function ReplayControls({
   isPlaying,
   speed,
@@ -29,32 +22,30 @@ export function ReplayControls({
   onSeek,
 }: ReplayControlsProps) {
   return (
-    <div style={{ background: '#1a1a2e', borderRadius: 8, padding: 12, border: '1px solid #2a2a3e' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+    <div className="replay-controls card">
+      <div className="replay-controls-bar">
         <button
           onClick={onTogglePlay}
-          style={{ ...btnStyle, background: isPlaying ? '#ef4444' : '#22c55e', color: isPlaying ? '#fff' : '#000', minWidth: 64 }}
+          className="replay-controls-play-btn btn btn-primary"
+          data-playing={isPlaying}
         >
           {isPlaying ? 'Pause' : 'Play'}
         </button>
 
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div className="replay-controls-speeds">
           {SPEEDS.map(s => (
             <button
               key={s}
               onClick={() => onSpeedChange(s)}
-              style={{
-                ...btnStyle,
-                background: speed === s ? '#3b82f6' : '#2a2a3e',
-                color: speed === s ? '#fff' : '#888',
-              }}
+              className="replay-controls-speed-btn btn btn-ghost"
+              data-active={speed === s}
             >
               {s}x
             </button>
           ))}
         </div>
 
-        <span style={{ fontSize: 12, color: '#888', marginLeft: 'auto', fontFamily: 'monospace' }}>
+        <span className="replay-controls-frame-info">
           {currentFrame} / {totalFrames}
         </span>
       </div>
@@ -65,8 +56,19 @@ export function ReplayControls({
         max={Math.max(0, totalFrames - 1)}
         value={currentFrame}
         onChange={e => onSeek(Number(e.target.value))}
-        style={{ width: '100%', accentColor: '#3b82f6' }}
+        className="replay-controls-seek"
+        aria-label="Seek replay frame"
+        aria-valuemin={0}
+        aria-valuemax={Math.max(0, totalFrames - 1)}
+        aria-valuenow={currentFrame}
       />
+
+      <div className="replay-controls-shortcuts">
+        <kbd>Space</kbd> Play/Pause
+        <kbd>&larr;</kbd><kbd>&rarr;</kbd> Step
+        <kbd>Shift</kbd>+Arrow &plusmn;10
+        <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Speed
+      </div>
     </div>
   )
 }
