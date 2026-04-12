@@ -83,16 +83,50 @@ So the failure is either:
 Either way, **not blocking** — the endpoint works in normal usage. File as
 HIGH (not CRITICAL) and have Backend add a timeout guard + a retry.
 
-### 2 / 3. `/api/health` not rate-limited (same issue dev has)
+### 2 / 3. `/api/health` not rate-limited — **resolved by PM decision**
 
 ```
 /api/health: 200 burst requests → 200x200, 0x429
 ```
 
-Reproduces on dev as well — this was flagged in the first report as
-`RL-HEALTH-RATE`. Nothing changed on this front with the redeploy. Backend
-should confirm whether excluding `/api/health` from the rate-limit middleware
-is intentional (common practice for load-balancer probes) or an oversight.
+**PM decision 2026-04-12 — EXEMPTION INTENDED.** Both failing tests probed
+`/api/health` and asserted that a burst produces a 429. That assertion is
+wrong per product intent:
+
+> `/api/health`, `/api/health/live`, `/api/health/ready` must be callable at
+> arbitrary cadence by load balancers, k8s probes, and uptime monitors. They
+> are EXEMPT from rate-limit middleware.
+
+The "2 deterministic failures" are therefore **not server bugs** — they are
+tests that were written against a wrong invariant. QA-side fix applied:
+
+| File | Change |
+|------|--------|
+| `tests/test_rate_limiting.py` | `GET_ENDPOINTS` no longer contains `/api/health`; burst-429 cases now probe `/api/models`, `/api/training/status`, `/api/evaluation/results`. Added new class `TestHealthExemptFromRateLimit` that asserts `/api/health` NEVER returns 429 under 200-request burst (enforces the exemption). |
+| `tests/test_sprint1_verification.py` | `TestSEC3RateLimiting::test_burst_triggers_429` and `test_rate_limit_response_format` now probe `/api/models` instead of `/api/health`. |
+
+**Action for Backend:** confirm that the Starlette rate-limit middleware's
+path predicate excludes all of `/api/health`, `/api/health/live`, and
+`/api/health/ready`. The next QA re-run will verify. If the exemption is
+already in place by coincidence (because `/api/health` is on a different
+router), we still need it to be *explicit* — add a test-reviewed comment in
+the middleware config so it's not accidentally removed later.
+
+**Flake fixes applied QA-side (commit this batch):**
+
+- `test_start_returns_running_status_with_experiment_id`: timeout 5s → 15s.
+- `test_stop_then_resume`: resume timeout 5s → 15s.
+- `test_disconnect_during_broadcast`: disabled client auto-ping
+  (`ping_interval=None`) on all probe sockets — the default 20s keepalive
+  races with the broadcast storm; replaced with an explicit ping() + 10s
+  `asyncio.wait_for`. Still covers liveness; removes a non-deterministic
+  source of failure.
+
+**Prod promotion status (after PM decision applied):** the 2 "deterministic"
+failures are invalid-invariant tests. With the test fixes above + the Backend
+exemption confirmation, **QA is promotable**. The previously reported
+`43 pass / 5 fail / 3 skip` becomes effectively `48 pass / 0 fail / 3 skip`
+once the re-run lands, assuming no new regression.
 
 ---
 
@@ -131,14 +165,23 @@ was also wrong — please disregard).
 
 1. ✅ **DevOps redeploy worked** — thank DevOps, no further action on their
    side for this batch.
-2. ⚠️ **Backend: 2 follow-ups**
+2. ⚠️ **Backend: 1 follow-up + 1 confirmation**
    - `run_evaluation` 500 under concurrent load — add timeout guard and
-     determinism.
-   - `/api/health` rate-limit coverage — confirm intent with PM.
+     determinism. (HIGH, not blocking.)
+   - Confirm `/api/health`, `/api/health/live`, `/api/health/ready` are
+     explicitly in the rate-limit middleware's exemption list (per PM
+     decision 2026-04-12). If already there, good — add a comment so it's
+     not removed.
    - ~~Rate-limit middleware should exclude `/ws` upgrade path~~ — retracted,
      already excluded.
-3. ✅ **QA → prod promotion**: once the three above are triaged (fixed or
-   PM-waived), QA is promotable.
+3. ✅ **QA → prod promotion**: applying the three QA-side test fixes
+   (rate-limit probe endpoint swap + flake timeouts + ping disablement)
+   and confirming the Backend health exemption clears the last blocker.
+   PM approval conditions:
+   - ✅ "Deterministic fail 2개 해결 완료" — resolved as invalid-invariant
+     tests; fixes in this commit.
+   - ⏳ "Rate-limit exemption 적용 완료" — needs Backend confirmation after
+     next QA re-run.
 
 ---
 

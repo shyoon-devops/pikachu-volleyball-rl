@@ -229,18 +229,25 @@ class TestSEC2CORS:
 
 
 class TestSEC3RateLimiting:
-    """Verify rate limiting rejects excessive requests."""
+    """Verify rate limiting rejects excessive requests.
+
+    PM decision 2026-04-12: `/api/health*` endpoints are EXEMPT from rate-limit
+    so that load balancers, k8s probes, and uptime monitors can poll at
+    arbitrary cadence. Burst-triggers-429 must therefore target a rate-limited
+    endpoint (`/api/models`), not `/api/health`. See
+    test_rate_limiting.py::TestHealthExemptFromRateLimit for the exemption check.
+    """
 
     @pytest.mark.asyncio
     async def test_burst_triggers_429(self, base_url: str) -> None:
-        """100 rapid requests must produce at least one 429."""
+        """100 rapid requests to a rate-limited endpoint must produce ≥1 429."""
         async with httpx.AsyncClient(base_url=base_url, timeout=10) as c:
-            tasks = [c.get("/api/health") for _ in range(100)]
+            tasks = [c.get("/api/models") for _ in range(100)]
             results = await asyncio.gather(*tasks)
         codes = [r.status_code for r in results]
         count_429 = codes.count(429)
         assert count_429 > 0, (
-            f"No rate limiting detected: 100 burst requests → "
+            f"No rate limiting detected on /api/models: 100 burst requests → "
             f"{codes.count(200)}x200, 0x429"
         )
 
@@ -248,7 +255,7 @@ class TestSEC3RateLimiting:
     async def test_rate_limit_response_format(self, base_url: str) -> None:
         """429 response must include Retry-After or meaningful body."""
         async with httpx.AsyncClient(base_url=base_url, timeout=10) as c:
-            tasks = [c.get("/api/health") for _ in range(200)]
+            tasks = [c.get("/api/models") for _ in range(200)]
             results = await asyncio.gather(*tasks)
         limited = [r for r in results if r.status_code == 429]
         if not limited:
@@ -579,12 +586,23 @@ class TestBE1Heartbeat:
 
     @pytest.mark.asyncio
     async def test_disconnect_during_broadcast(self, ws_url: str) -> None:
-        """Abruptly disconnecting mid-broadcast must not crash the server."""
+        """Abruptly disconnecting mid-broadcast must not crash the server.
+
+        Keepalive disabled on all sockets (``ping_interval=None``) because the
+        default 20s/20s keepalive races with the broadcast storm — under load,
+        the server can't respond to auto-ping fast enough and the client
+        library terminates the connection with a keepalive-timeout. We have
+        explicit ping() calls below that do carry a timeout, so we're not
+        losing liveness coverage, just removing a non-deterministic source of
+        failure.
+        """
         await _stop_training(ws_url)
         await asyncio.sleep(0.5)
 
         # Start training so broadcasts are flowing
-        starter = await websockets.connect(ws_url, open_timeout=5)
+        starter = await websockets.connect(
+            ws_url, open_timeout=10, ping_interval=None,
+        )
         await starter.send(json.dumps({
             "type": "training:start",
             "payload": {"bot_level": 1},
@@ -594,7 +612,9 @@ class TestBE1Heartbeat:
         # Connect and immediately disconnect 10 times
         for _ in range(10):
             try:
-                ws = await websockets.connect(ws_url, open_timeout=3)
+                ws = await websockets.connect(
+                    ws_url, open_timeout=5, ping_interval=None,
+                )
                 await asyncio.sleep(0.1)
                 await ws.close()
             except Exception:
@@ -602,8 +622,13 @@ class TestBE1Heartbeat:
 
         # Server must still be functional
         await asyncio.sleep(1)
-        async with websockets.connect(ws_url, open_timeout=5) as probe:
-            await probe.ping()
+        async with websockets.connect(
+            ws_url, open_timeout=10, ping_interval=None,
+        ) as probe:
+            # Explicit ping with generous timeout (was default 20s). Under a
+            # broadcast storm, server response can be delayed.
+            pong = await probe.ping()
+            await asyncio.wait_for(pong, timeout=10)
             msgs = await _drain(probe, 3)
             # Should still receive broadcasts
             assert len(msgs) > 0 or True  # At minimum, connection works

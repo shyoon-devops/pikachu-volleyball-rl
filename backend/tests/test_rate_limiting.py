@@ -34,12 +34,21 @@ async def client(base_url: str):
         yield c
 
 
-# Target endpoints — read-only GETs that are cheap to hammer
+# Endpoints rate-limit is expected to cover.
+#
+# `/api/health`, `/api/health/live`, `/api/health/ready` are intentionally
+# EXEMPT from rate-limiting (PM decision 2026-04-12): load balancers and
+# k8s probes must be able to poll these at arbitrary rate. They are covered
+# instead by TestHealthExemptFromRateLimit below — a burst against health
+# must never throttle and must never 5xx.
 GET_ENDPOINTS = [
-    "/api/health",
     "/api/models",
     "/api/training/status",
     "/api/evaluation/results",
+]
+
+HEALTH_ENDPOINTS = [
+    "/api/health",
 ]
 
 
@@ -50,7 +59,7 @@ class TestBurstRateLimit:
     async def test_burst_200_requests_any_endpoint_triggers_429(
         self, base_url: str, endpoint: str,
     ) -> None:
-        """200 rapid requests to any GET endpoint must produce at least one 429."""
+        """200 rapid requests to a rate-limited GET endpoint must produce ≥1 429."""
         async with httpx.AsyncClient(base_url=base_url, timeout=15) as c:
             results = await asyncio.gather(
                 *[c.get(endpoint) for _ in range(200)],
@@ -71,10 +80,13 @@ class TestBurstRateLimit:
 
     @pytest.mark.asyncio
     async def test_burst_does_not_leak_500(self, base_url: str) -> None:
-        """Burst traffic must never cause 5xx (rate-limit, don't crash)."""
+        """Burst traffic must never cause 5xx (rate-limit, don't crash).
+
+        Probes a rate-limited endpoint so the middleware engages.
+        """
         async with httpx.AsyncClient(base_url=base_url, timeout=15) as c:
             results = await asyncio.gather(
-                *[c.get("/api/health") for _ in range(300)],
+                *[c.get("/api/models") for _ in range(300)],
                 return_exceptions=True,
             )
         codes = [r.status_code for r in results if not isinstance(r, Exception)]
@@ -82,6 +94,46 @@ class TestBurstRateLimit:
         assert not bad, (
             f"Burst caused {len(bad)}x5xx: "
             f"sample={bad[:5]}. Rate limiter missing or broken."
+        )
+
+
+class TestHealthExemptFromRateLimit:
+    """PM decision 2026-04-12: health endpoints are exempt from rate-limit.
+
+    Health probes from load balancers, k8s readiness/liveness probes, and
+    uptime monitors must succeed at arbitrary cadence. The invariant we
+    enforce here is:
+
+      * burst against /api/health returns 200 for every request
+      * burst must never return 429 (proves exemption is in place)
+      * burst must never return 5xx (proves the endpoint itself is robust)
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("endpoint", HEALTH_ENDPOINTS)
+    async def test_health_endpoint_never_throttled(
+        self, base_url: str, endpoint: str,
+    ) -> None:
+        async with httpx.AsyncClient(base_url=base_url, timeout=15) as c:
+            results = await asyncio.gather(
+                *[c.get(endpoint) for _ in range(200)],
+                return_exceptions=True,
+            )
+        codes = [r.status_code for r in results if not isinstance(r, Exception)]
+        count_429 = codes.count(429)
+        count_5xx = sum(1 for c in codes if c >= 500)
+        count_200 = codes.count(200)
+        assert count_429 == 0, (
+            f"{endpoint} was throttled ({count_429}x429); must be exempt "
+            f"from rate-limit per PM decision 2026-04-12."
+        )
+        assert count_5xx == 0, (
+            f"{endpoint} returned {count_5xx}x5xx under burst; health "
+            f"endpoints must be robust under load."
+        )
+        assert count_200 >= 190, (
+            f"{endpoint} returned only {count_200}/200 success; expected "
+            f"near-100% success when exempt."
         )
 
 

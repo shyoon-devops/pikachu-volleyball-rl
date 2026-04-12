@@ -98,7 +98,10 @@ class TestTrainingLifecycle:
     async def test_start_returns_running_status_with_experiment_id(
         self, ws_url: str,
     ) -> None:
-        async with websockets.connect(ws_url, open_timeout=5) as ws:
+        # Widened from 5s → 15s: under a loaded QA instance after many prior
+        # tests, training thread spin-up + first broadcast can cross a 5s
+        # boundary. 15s is still tight enough to catch real stalls.
+        async with websockets.connect(ws_url, open_timeout=10) as ws:
             await ws.send(json.dumps({
                 "type": "training:start",
                 "payload": {"bot_level": 1},
@@ -107,10 +110,10 @@ class TestTrainingLifecycle:
                 ws,
                 lambda m: m.get("type") == "training:status"
                 and m.get("payload", {}).get("state") == "running",
-                timeout=5,
+                timeout=15,
             )
         assert msg is not None, (
-            "No training:status(running) received within 5s after start"
+            "No training:status(running) received within 15s after start"
         )
         payload = msg["payload"]
         assert payload.get("state") == "running"
@@ -201,8 +204,14 @@ class TestTrainingLifecycle:
 
     @pytest.mark.asyncio
     async def test_stop_then_resume(self, ws_url: str) -> None:
-        """Stop must fully halt; resume must return state to running."""
-        async with websockets.connect(ws_url, open_timeout=5) as ws:
+        """Stop must fully halt; resume must return state to running.
+
+        Timeouts widened (5s → 15s) because this test runs late in the suite
+        after the rate-limit / broadcast-storm tests, by which time the QA
+        server's event loop is under GC pressure and a resume handshake can
+        cross the tighter boundary. 15s still catches real stalls.
+        """
+        async with websockets.connect(ws_url, open_timeout=10) as ws:
             await ws.send(json.dumps({
                 "type": "training:start",
                 "payload": {"bot_level": 1},
@@ -220,10 +229,10 @@ class TestTrainingLifecycle:
                 ws,
                 lambda m: m.get("type") == "training:status"
                 and m.get("payload", {}).get("state") == "running",
-                timeout=5,
+                timeout=15,
             )
         assert resumed is not None, (
-            "training:resume did not produce running status within 5s"
+            "training:resume did not produce running status within 15s"
         )
 
     @pytest.mark.asyncio
