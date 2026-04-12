@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-v0.2.5 이후 scope — PR #44 evaluator + PR #42 trainer 번들 dev 에 머지 완료 (v0.2.6 candidate). 배포 전 smoke test + 회귀 스위트 GREEN 확인 필요.
+v0.2.5 이후 scope — PR #44 evaluator 번들만 dev 에 머지 완료 (v0.2.6 candidate). 배포 전 smoke test + 회귀 스위트 GREEN 확인 필요.
+
+PR #42 trainer (`be4001eb`) 는 머지 직후 `backend/rl/trainer.py:455` 에 `SyntaxError: unmatched ')'` 가 드러나 dev backend 컨테이너를 crash 시켜 **revert 완료** (`ffe1ae6a`, 2026-04-12). 이 릴리스에서는 trainer 관련 신규 기능은 **전부 제외**.
 
 ### Added — Evaluator system E1-E10 (PR #44, merge `f9ffdd2d`)
 
@@ -23,23 +25,13 @@ v0.2.5 이후 scope — PR #44 evaluator + PR #42 trainer 번들 dev 에 머지 
 - **`backend/app/services/elo_tracker.py`** — asyncio 백그라운드 tick, timestamp cursor 로 재시작 dedup
 - **`EvalResult.dominance_score`** — win_rate(60%) + point_share(40%) 합성 메트릭
 
-### Added — Trainer Task B (PR #42, merge `be4001eb`)
+### Reverted — PR #42 trainer (do-not-retry)
 
-- **`backend/rl/callbacks.py::CurriculumCallback`** — sliding win-rate window, threshold 초과 시 자동 promote. `env.set_bot_level()` 로 다음 reset 때 적용. `training:curriculum` WS 이벤트 발행
-- **`backend/rl/sweep.py`** — `HyperparamSweep` + `expand_grid()` 카테시안 product, `SweepResult` persist (`summary.json`), `best_run()`
-- **`backend/rl/callbacks.py::EarlyStoppingCallback`** — patience + min_delta + check_interval 기반 plateau 종료. regression 은 stagnation 으로 카운트
-- **Training reproducibility** — `trainer.start(seed=...)` 가 PPO + VecEnv 에 시드 전파, `config.json` 자동 기록 (bot_level + seed + hyperparams + obs/action space + net_arch + git_commit + started_at)
-- **TensorBoard integration** — `PPO(tensorboard_log=<tb_dir>/<experiment_id>)` per-experiment 로그. `hyperparams.tensorboard_dir=None` 이면 비활성
-- **`backend/rl/run_training.py`** — headless 러너 (asyncio queue 오버헤드 없는 500K 베이스라인용)
-- **`docs/tasks/B-reward-rebalance.md`** — reward shaping 재리뷰 요청 + 500K 베이스라인 증거
+- `ffe1ae6a revert: be4001eb PR #42 — trainer.py syntax error broke dev BE` — 원인: 3-way auto-merge 는 깨끗했으나 결과 파일이 `trainer.py:455` 에서 bracket mismatch. dev backend 컨테이너 unhealthy. qa/prod 는 이전 SHA 였기 때문에 영향 없음. **PM 결정: trainer 브랜치 이후 재머지 시도 금지**
 
 ### Notes
 
-- AI Engineer 의 reward rebalance (`0f32235e`) 는 이미 dev 에 있으며 PR #42 내부 merge 는 no-op (동일 컨텐츠). Phase 2 engine 추가 (rally-timeout, is_power_hit, punch_effect_radius, is_diving, freeze tick, bot L1-L5 aggression/net_bias) 모두 3-way merge 후 보존 확인
-- Trainer 팀 일시 중단(중단 지시) 상태이나 PR 코드는 완성되어 있어 병합. 실제 새 훈련 실행은 별도 지시 필요
-- v0.2.5 태그(`cd1e6a39`) 보다 후행 커밋. v0.2.5 범위에 포함되지 않음 — **v0.2.6 릴리스 후보**
-
-## [0.2.5] - 2026-04-12 (Phase 2 bug bundle — gameplay feel + metrics fidelity + match-end freeze / dev HEAD cd1e6a39)
+- v0.2.5 태그(`cd1e6a39`) 보다 후행 커밋(PR #44 evaluator). v0.2.5 범위에 포함되지 않음 — **v0.2.6 릴리스 후보**
 
 ## [0.2.5] - 2026-04-12 (Phase 2 bug bundle — gameplay feel + metrics fidelity + match-end freeze / dev HEAD cd1e6a39)
 
