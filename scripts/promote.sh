@@ -34,11 +34,18 @@ case "$PROMOTION" in
         SOURCE_BRANCH="dev"
         TARGET_BRANCH="qa"
         DEPLOY_SCRIPT="$SCRIPT_DIR/deploy-qa.sh"
+        # Also rebuild dev backend to guarantee dev == github/dev HEAD. Without
+        # this, merges into dev (e.g. hotfixes) leave the dev backend running
+        # a stale image until someone manually runs deploy-dev.sh — the exact
+        # failure mode PM hit on 2026-04-12 (dev :8001 served a 15h-old image
+        # missing BE-6 WS hotfix and anti-toss-loop fix). See DEPLOYMENT-STATUS.md.
+        PRE_DEPLOY_SCRIPT="$SCRIPT_DIR/deploy-dev.sh"
         ;;
     qa-to-prod)
         SOURCE_BRANCH="qa"
         TARGET_BRANCH="main"
         DEPLOY_SCRIPT="$SCRIPT_DIR/deploy-prod.sh"
+        PRE_DEPLOY_SCRIPT=""
         ;;
     *)
         usage
@@ -62,6 +69,16 @@ fi
 
 # Fetch latest from remote
 git fetch "$REMOTE" "$SOURCE_BRANCH" "$TARGET_BRANCH"
+
+# Rebuild source environment first (dev-to-qa only). Ensures the image running
+# on :8001 matches the commit we are about to promote to qa. If dev was already
+# in sync, this is a fast no-op rebuild; if dev was stale, this catches it
+# before the staler image reaches a second environment.
+if [ -n "$PRE_DEPLOY_SCRIPT" ]; then
+    echo ""
+    echo "Pre-deploy sync: $PRE_DEPLOY_SCRIPT"
+    bash "$PRE_DEPLOY_SCRIPT"
+fi
 
 # Checkout target and merge
 git checkout "$TARGET_BRANCH"
