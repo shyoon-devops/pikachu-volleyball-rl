@@ -143,3 +143,55 @@ def app_instance():
 def client(app_instance):
     with TestClient(app_instance) as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def _reset_route_caches():
+    """Clear TTL caches attached to route handlers before each test.
+
+    The ``@cache_ttl`` decorator exposes the underlying ``AsyncTTLCache`` via
+    ``wrapper.cache``; without this reset, a successful response in one test
+    would satisfy later tests whose fixtures swap the service for a mock.
+    """
+    try:
+        from backend.app.api import routes as routes_mod
+
+        for obj in vars(routes_mod).values():
+            cache = getattr(obj, "cache", None)
+            if cache is not None and hasattr(cache, "clear"):
+                cache.clear()
+    except Exception:  # noqa: BLE001 — best-effort test hygiene
+        pass
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit_buckets():
+    """Clear in-memory rate-limit buckets before each test.
+
+    The RateLimitMiddleware instance is shared across every TestClient
+    because FastAPI builds the middleware chain once at import. Without a
+    reset, earlier tests (test_api, test_error_handling, ...) consume
+    tokens and later tests that hit the same endpoints end up getting 429
+    instead of the status they expect. Per-test reset keeps each test in
+    control of its own rate-limit assumptions.
+    """
+    try:
+        from backend.app.main import app as _app
+
+        for mw in _app.user_middleware:
+            if mw.cls.__name__ == "RateLimitMiddleware":
+                # Starlette stores options under mw.kwargs; the bucket dict
+                # lives on the bound middleware once the app is built, not on
+                # the config. We reach the instance through app.middleware_stack.
+                break
+        # Walk the middleware stack to find the RateLimitMiddleware instance.
+        stack = getattr(_app, "middleware_stack", None)
+        while stack is not None:
+            if type(stack).__name__ == "RateLimitMiddleware":
+                stack._buckets.clear()
+                break
+            stack = getattr(stack, "app", None)
+    except Exception:  # noqa: BLE001 — best-effort test hygiene
+        pass
+    yield
