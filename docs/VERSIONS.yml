@@ -14,7 +14,7 @@
 #   last_verified_at   : when this YAML entry was last confirmed via curl + docker inspect
 
 schema_version: 1
-last_file_update: 2026-04-12T22:45:00+09:00   # P0 hotfix — match-end freeze tick (cd1e6a39, BE-only change)
+last_file_update: 2026-04-12T23:22:00+09:00   # P0 hotfix — match-end freeze tick (cd1e6a39) BE rebuild + --force-recreate
 authoritative_source: docs/VERSIONS.yml       # this file supersedes README + DEPLOYMENT-STATUS on port/version conflicts
 
 release_history:
@@ -78,20 +78,21 @@ environments:
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
       commit: cd1e6a39                        # P0 hotfix runtime (e9f72459 engine fix merged)
-      image: sha256:d577fb9ab05cf013c6f43b4f64253210bf27b850d5da1177a78c9bd527ed9f16
-      built_at: 2026-04-12T22:42:29+09:00
-      deployed_at: 2026-04-12T22:42:29+09:00
+      image: sha256:d8726f6b972ef95162537d9651166ac15e75a802fbd6d928b69f6f49e93c6293
+      built_at: 2026-04-12T23:19:54+09:00
+      deployed_at: 2026-04-12T23:19:54+09:00
       training_state: stopped
       runtime_verified:
-        - "post_score_freeze_frames tick BEFORE match-over guard (engine.py:219-220)"
+        - "CONTAINER GREP: post_score_freeze_frames count=7 in /app/backend/game/engine.py"
+        - "CONTAINER GREP: freeze tick BEFORE match-over guard (engine.py:209-218, with full comment)"
         - "P0 regression fixed: game no longer wedges at 15pt match-winning point"
-        - "punch_effect_radius (6 matches), is_diving (engine.py:48, 350)"
+        - "punch_effect_radius + is_diving still present (Phase 2 intact)"
         - "log_interval: int = 256 at callbacks.py:88"
     frontend:
       port: 3000
       status: up
-      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; FE delta = 0 from 6f4a057f
-      commit: cd1e6a39                        # FE built on cd1e6a39 but produced byte-identical bundle
+      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; FE rebuild skipped per PM
+      commit: cd1e6a39                        # FE source delta = 0 from 6f4a057f; last FE deploy 22:40:00
       built_at: 2026-04-12T22:40:00+09:00
       deployed_at: 2026-04-12T22:40:00+09:00
     mongodb:
@@ -114,21 +115,21 @@ environments:
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
       commit: cd1e6a39
-      image: sha256:304a259dc121e657fab69bf961e824cc0f3ae893e6aa9373a956c42c00ad1312
-      built_at: 2026-04-12T22:42:29+09:00
-      deployed_at: 2026-04-12T22:42:29+09:00
+      image: sha256:42b3a16e66682e6f2a680de5f7ebd7f0754d2e64cfdcf32d09ac4e63a13a4a18
+      built_at: 2026-04-12T23:20:04+09:00
+      deployed_at: 2026-04-12T23:20:04+09:00
       training_state: stopped
       runtime_verified:
-        - "post_score_freeze_frames tick BEFORE match-over guard (engine.py:219-220)"
-        - "WS /ws training:start end-to-end smoke OK (state=running, metrics @256/512/768/1024)"
+        - "CONTAINER GREP: post_score_freeze_frames count=7 in /app/backend/game/engine.py"
+        - "CONTAINER GREP: freeze tick BEFORE match-over guard (engine.py:209-218)"
+        - "WS /ws training:start end-to-end smoke OK — metrics @ 256/512/768/1024/1280"
         - "POST /api/training/stop cleanup OK (final step=10000, state=stopped)"
         - "log_interval: int = 256 at callbacks.py:88 (confirmed by live metric stream)"
-        - "punch_effect_radius (6), is_diving (48, 350) still present"
     frontend:
       port: 3001
       status: up
-      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; FE delta = 0 from 6f4a057f
-      commit: cd1e6a39                        # FE built on cd1e6a39 but produced byte-identical bundle
+      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; FE rebuild skipped per PM
+      commit: cd1e6a39                        # FE source delta = 0 from 6f4a057f; last FE deploy 22:40:00
       built_at: 2026-04-12T22:40:00+09:00
       deployed_at: 2026-04-12T22:40:00+09:00
     mongodb:
@@ -158,21 +159,21 @@ environments:
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
       commit: cd1e6a39                        # P0 hotfix runtime (e9f72459 engine fix merged)
-      image: sha256:10e7b3b315e7037f39a08066c999674677b118db0e6a67d13e340a69822bbc84
-      built_at: 2026-04-12T22:42:31+09:00
-      deployed_at: 2026-04-12T22:42:31+09:00
+      image: sha256:4eb2cd0aa4e190994c44aa4347340c4370aedcd8e9d18970d5222245356906ae
+      built_at: 2026-04-12T23:20:12+09:00
+      deployed_at: 2026-04-12T23:20:12+09:00
       training_state: stopped
       runtime_verified:
-        - "post_score_freeze_frames tick BEFORE match-over guard (engine.py:219-220)"
+        - "CONTAINER GREP: post_score_freeze_frames count=7 in /app/backend/game/engine.py"
+        - "CONTAINER GREP: freeze tick BEFORE match-over guard (engine.py:209-218)"
         - "P0 regression fixed: game no longer wedges at 15pt match-winning point"
-        - "punch_effect_radius (6 matches), is_diving (engine.py:48, 350)"
+        - "punch_effect_radius + is_diving still present (Phase 2 intact)"
         - "log_interval: int = 256 at callbacks.py:88"
-        - "built from same cd1e6a39 SHA as dev/qa (cache-reuse)"
     frontend:
       port: 3002
       status: up
-      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; byte-identical across 3 envs
-      commit: cd1e6a39                        # FE built on cd1e6a39 but produced byte-identical bundle
+      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; FE rebuild skipped per PM
+      commit: cd1e6a39                        # FE source delta = 0 from 6f4a057f; last FE deploy 22:40:00
       built_at: 2026-04-12T22:40:00+09:00
       deployed_at: 2026-04-12T22:40:00+09:00
     mongodb:
