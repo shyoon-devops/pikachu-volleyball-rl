@@ -7,10 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Sprint 1 (v0.2.1) 작업 진행 중 — 추적 문서: [docs/sprint-tracking/sprint1-v0.2.1.md](docs/sprint-tracking/sprint1-v0.2.1.md)
+
+### In Progress
+- FE-3: GameCanvas Responsive Scaling (#22)
+- FE-5: A11y Improvements (#24)
+- QA-2: CI/CD Test Pipeline (#25), QA-4: Security Auto-Scan in CI (#26)
+- BUG-1/2/4/6/7: 잔여 HIGH 버그 수정
+
+## [0.2.0] - 2026-04-11 (QA 환경 배포 완료, prod 미배포)
+
+QA 환경(`:8002`) 태그 완료 — prod 승격 대기 중. 전체 릴리스 노트: [docs/releases/v0.2.0-qa.md](docs/releases/v0.2.0-qa.md).
+
+### Security (CRITICAL)
+- **SEC-1**: `/api/evaluation/run` path traversal 차단 — `Path.resolve()` + `MODEL_DIR` 경계 검증 (#9, 10c9f1d)
+- **SEC-2**: CORS 와일드카드 `*` 제거, 환경별 허용 오리진 화이트리스트 적용 (#10, 10c9f1d)
+- **SEC-3**: REST API 엔드포인트 rate limiting 적용 (#11, 10c9f1d)
+
+### Added
+- **TR-4 Training Session Protection (BLOCKER)**: SIGTERM 복구, 세이프 큐 enqueue, 세션 중복 보호 (PR #28, 6e8ea3e / #12)
+- **BE-1 WebSocket Heartbeat + Backpressure**: ping/pong 프로토콜, 큐 상한, 슬로우 컨슈머 감지 (#20, 3f8abb8)
+- **BE-4 Input Validation + Rate Limiting**: 요청 스키마 검증 강화, 엔드포인트별 레이트 리밋 (#21, 3f8abb8)
+- **FE-1 Replay Keyboard Shortcuts**: 재생/일시정지(Space), 시크(←/→), 배속(↑/↓) (#23, 830278b)
+- **Evaluator**: 크로스 환경 평가 리포트 및 기준 문서화 (294f524)
+- **Game Visuals**: 오리지널 피카추 배구 비주얼 포팅 — 구름, 파도, 공 이펙트, 스코어 스프라이트 (f25e50d)
+- **Designer**: 하드코딩 값 토큰화, WCAG 명도 대비 위반 해소 (e19bc33)
+
+### Fixed
+- **BUG-3**: WebSocket 중복 start 크래시 가드, training_status 완전 데이터 반환 (#15, 5c30671)
+- **BUG-5**: `/api/models`·`/api/replays` 필드 불일치 및 replay ID 라우팅 수정 (#17, 07c36bd)
+- FE 페이로드 래핑 수정, `game_id` 추가, replay 응답 강화 (ac03e02)
+- 누락된 반응형 브레이크포인트 4개 컴포넌트 복구 (18bfc32)
+- Observation space shape 문서 정정 (19 → 18 features) + space spec 섹션 추가 (541f15a, 3823ecc)
+
 ### Changed
-- **Designer**: CSS를 TSX에서 분리하여 .css 파일로 독립 관리 (`yoon/designer`)
-- **Frontend Engineer**: 모든 인라인 스타일을 className + CSS 파일로 변환 (`yoon/frontend-engineer`)
-- **DevOps Engineer**: CI/CD 파이프라인 강화 — 커버리지 리포트, CD 워크플로우, 셀프호스트 러너 (`yoon/devops-engineer`)
+- **Designer**: CSS를 TSX에서 분리하여 .css 파일로 독립 관리
+- **Frontend Engineer**: 모든 인라인 스타일을 className + CSS 파일로 변환
+- **DevOps Engineer**: CI/CD 파이프라인 강화 — 커버리지 리포트, CD 워크플로우, 셀프호스트 러너
+
+### Known Issues (prod 승격 전 해결 필요)
+- 잔여 HIGH 버그 5건 (BUG-1/2/4/6/7) — Sprint 1 범위 내 처리 중
+- prod 배포 후 main 브랜치 머지 + v0.2.0 태그 필요 (릴리스 워크플로우 업데이트: [docs/WORKFLOW.md](docs/WORKFLOW.md))
 
 ## [0.1.0] - 2026-04-11
 
@@ -121,5 +158,6 @@ Initial release — 전체 시스템 MVP 완성.
   - TrainingControls.test.tsx, GameOverlay.test.tsx
   - ReplayControls.test.tsx, useWebSocket.test.ts
 
-[Unreleased]: https://github.com/shyoon-devops/pikachu-volleyball-rl/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/shyoon-devops/pikachu-volleyball-rl/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/shyoon-devops/pikachu-volleyball-rl/releases/tag/v0.2.0
 [0.1.0]: https://github.com/shyoon-devops/pikachu-volleyball-rl/releases/tag/v0.1.0

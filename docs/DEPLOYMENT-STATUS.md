@@ -6,9 +6,10 @@
 
 | Environment | Version | Commit | Tag | Status | Updated |
 |-------------|---------|--------|-----|--------|---------|
-| **dev** | 0.2.0-dev | `2043e44` | — | Active development | 2026-04-12 |
+| **dev** | 0.2.0-dev | `f4b4dfa` | — | Active development (Sprint 1) | 2026-04-12 |
 | **qa** | 0.2.0 | `d8fc62e` | `v0.2.0` | Awaiting QA deploy | 2026-04-12 |
-| **prod** | 0.1.0 | `41f4fdb` | — | Running (initial) | 2026-04-11 |
+| **prod** | 0.1.0 | `41f4fdb` | `v0.1.0` | Running (main merged) | 2026-04-12 |
+| **main** | 0.1.0 | `fdc41de` | `v0.1.0` | Prod mirror (tagged) | 2026-04-12 |
 
 ## Ports
 
@@ -22,8 +23,8 @@
 
 | Version | QA Deploy | QA Verified | Prod Deploy | Main Merge | Tag | Release Note |
 |---------|-----------|-------------|-------------|------------|-----|--------------|
-| 0.2.0 | Pending | — | — | — | — | [v0.2.0-qa](releases/v0.2.0-qa.md) |
-| 0.1.0 | — | — | 2026-04-11 | — | — | Initial structure |
+| 0.2.0 | Pending | — | — | — | `v0.2.0` (qa) | [v0.2.0-qa](releases/v0.2.0-qa.md) |
+| 0.1.0 | — | — | 2026-04-11 | 2026-04-12 (`fdc41de`) | `v0.1.0` | Initial structure |
 
 ## Pending Actions
 
@@ -31,12 +32,18 @@
 - [ ] QA Engineer: Verify v0.2.0 on QA environment
 - [ ] PM: Approve prod deployment after QA pass
 - [ ] DevOps: Deploy to prod after PM approval
-- [ ] **PM: prod → main 머지 + 버전 태그** (prod 배포 완료 후 필수)
+- [ ] **PM: prod → main 머지 + v0.2.0 태그** (prod v0.2.0 배포 완료 후 필수)
+- [ ] Sprint 1 잔여 버그 수정 완료 후 v0.2.1 릴리스 준비 ([tracker](sprint-tracking/sprint1-v0.2.1.md))
+
+## Completed
+
+- [x] prod → main 머지 + v0.1.0 태그 (2026-04-12, `fdc41de`)
 
 ## Branch State
 
 ```
-dev   2043e44  ← active development (all teams merged)
-qa    d8fc62e  ← v0.2.0 release commit (dev + VERSION/CHANGELOG)
-prod  41f4fdb  ← previous state (awaiting v0.2.0 promotion)
+dev   f4b4dfa  ← active development (trainer PR #28 merged, evaluator sync)
+qa    d8fc62e  ← v0.2.0 release commit (tagged v0.2.0)
+prod  41f4fdb  ← current production (awaiting v0.2.0 promotion)
+main  fdc41de  ← prod mirror with v0.1.0 tag (merged 2026-04-12)
 ```

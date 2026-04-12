@@ -31,6 +31,8 @@ PPO 에이전트가 Rule-based Bot(L1~L5)을 상대로 피카추 배구를 학�
 
 > Inspired by the original [Pikachu Volleyball](https://github.com/gorisanson/pikachu-volleyball) (1997).
 
+**Status**: v0.1.0 production · v0.2.0 QA tagged · Sprint 1 (v0.2.1) in progress — see [sprint tracker](docs/sprint-tracking/sprint1-v0.2.1.md) and [deployment status](docs/DEPLOYMENT-STATUS.md).
+
 ## Quick Start
 
 ```bash
