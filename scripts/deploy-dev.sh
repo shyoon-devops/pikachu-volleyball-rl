@@ -13,7 +13,13 @@ echo "  Frontend: http://192.168.0.248:3000"
 echo "  MongoDB:  localhost:27018"
 echo ""
 
-$DOCKER compose -f docker-compose.dev.yml up --build -d
+# --remove-orphans: kill containers for services removed from the compose file
+# (e.g. the pre-two-server `frontend` service). Without this, orphans linger
+# across refactors, consuming ports and disk.
+$DOCKER compose -f docker-compose.dev.yml up --build -d --remove-orphans
+
+# Reclaim disk from images untagged by the rebuild. Dangling-only — never -a.
+$DOCKER image prune -f >/dev/null 2>&1 || true
 
 echo ""
 echo "=== DEV deployment complete ==="
