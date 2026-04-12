@@ -352,6 +352,152 @@ class LiveFrameCallback(BaseCallback):
             replay_files.pop(0).unlink()
 
 
+class CurriculumCallback(BaseCallback):
+    """Auto-promote bot_level when recent win_rate exceeds threshold.
+
+    Tracks episode outcomes (win/loss) in a sliding window. Once at least
+    ``min_episodes`` have completed, if the rolling win rate is above
+    ``win_rate_threshold``, the bot level is incremented (capped at
+    ``max_level``). The window is reset after each promotion so the next
+    level is evaluated fairly.
+
+    Promotion is applied via ``training_env.env_method("set_bot_level", ...)``,
+    which queues the change to take effect on the next episode reset.
+    """
+
+    def __init__(
+        self,
+        initial_level: int = 1,
+        max_level: int = 5,
+        win_rate_threshold: float = 0.7,
+        min_episodes: int = 20,
+        loop: asyncio.AbstractEventLoop | None = None,
+        queue: asyncio.Queue[dict[str, Any]] | None = None,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.current_level = initial_level
+        self.max_level = max_level
+        self.win_rate_threshold = win_rate_threshold
+        self.min_episodes = min_episodes
+        self.loop = loop
+        self.queue = queue
+        self._recent_results: deque[bool] = deque(maxlen=max(min_episodes * 4, 100))
+
+    def _record_episode(self, won: bool) -> None:
+        self._recent_results.append(won)
+
+    def _should_promote(self) -> bool:
+        if self.current_level >= self.max_level:
+            return False
+        if len(self._recent_results) < self.min_episodes:
+            return False
+        win_rate = sum(self._recent_results) / len(self._recent_results)
+        return win_rate > self.win_rate_threshold
+
+    def _apply_promotion(self) -> None:
+        if self.current_level >= self.max_level:
+            return
+        self.current_level += 1
+        self._recent_results.clear()
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        for info in infos:
+            score1 = info.get("score1", 0)
+            score2 = info.get("score2", 0)
+            if score1 >= MAX_SCORE:
+                self._record_episode(won=True)
+            elif score2 >= MAX_SCORE:
+                self._record_episode(won=False)
+
+        if self._should_promote():
+            new_level = self.current_level + 1
+            try:
+                self.training_env.env_method("set_bot_level", new_level)
+            except Exception:
+                logger.exception("Failed to propagate bot_level to envs")
+                return True
+            logger.info(
+                "Curriculum: promoting bot_level %d -> %d (win_rate=%.2f over %d episodes)",
+                self.current_level, new_level,
+                sum(self._recent_results) / len(self._recent_results),
+                len(self._recent_results),
+            )
+            self._apply_promotion()
+            if self.loop is not None and self.queue is not None:
+                _safe_enqueue(
+                    self.loop, self.queue,
+                    {
+                        "type": "training:curriculum",
+                        "new_level": new_level,
+                        "step": self.num_timesteps,
+                    },
+                )
+        return True
+
+
+class EarlyStoppingCallback(BaseCallback):
+    """Stop training when mean reward plateaus for ``patience`` consecutive checks.
+
+    Evaluation happens every ``check_interval`` timesteps. If the latest
+    mean episode reward does not improve by at least ``min_delta`` over
+    the running best, the patience counter increments. Once the counter
+    reaches ``patience``, ``_on_step`` returns False, which SB3 interprets
+    as a stop signal.
+
+    Regressions (reward drops below best) also consume patience — they are
+    not treated as a fresh baseline, because setting a new, worse best would
+    let a model that has genuinely collapsed "earn back" patience.
+    """
+
+    def __init__(
+        self,
+        patience: int = 5,
+        min_delta: float = 0.01,
+        check_interval: int = 10_000,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.patience = patience
+        self.min_delta = min_delta
+        self.check_interval = check_interval
+        self._best_reward: float = float("-inf")
+        self._patience_counter: int = 0
+        self._episode_rewards: deque[float] = deque(maxlen=100)
+        self.should_stop: bool = False
+
+    def _evaluate_reward(self, mean_reward: float) -> None:
+        if mean_reward >= self._best_reward + self.min_delta:
+            self._best_reward = mean_reward
+            self._patience_counter = 0
+        else:
+            self._patience_counter += 1
+            if self._patience_counter >= self.patience:
+                self.should_stop = True
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        for info in infos:
+            if "episode" in info:
+                self._episode_rewards.append(info["episode"]["r"])
+
+        if self.num_timesteps % self.check_interval != 0:
+            return True
+        if not self._episode_rewards:
+            return True
+
+        mean_reward = float(np.mean(self._episode_rewards))
+        self._evaluate_reward(mean_reward)
+        if self.should_stop:
+            logger.info(
+                "Early stopping triggered at step=%d (best_reward=%.3f, patience=%d)",
+                self.num_timesteps, self._best_reward, self.patience,
+            )
+            return False
+        return True
+
+
 def _serialize_state(state: Any) -> dict[str, Any]:
     """Serialize a GameState to a plain dict for WS frames / replay storage."""
     return {
