@@ -59,7 +59,13 @@ class PikachuVolleyballEnv(gymnasium.Env):
         )
         self.action_space = spaces.Discrete(12)
 
-        self._game = PikachuVolleyball()
+        # RL training disables the post-score freeze: the agent would
+        # otherwise be forced to emit ~20 no-op actions after every scoring
+        # event, wasting steps and feeding stale (grounded-ball) transitions
+        # into the replay buffer. The freeze is purely a display-layer
+        # concern — the render/replay pipeline (callbacks._on_step) uses a
+        # separate PikachuVolleyball() instance that keeps freeze on.
+        self._game = PikachuVolleyball(post_score_freeze=False)
         self._bot = RuleBasedBot(level=bot_level)
         self._steps = 0
         self._prev_score1 = 0
@@ -78,7 +84,7 @@ class PikachuVolleyballEnv(gymnasium.Env):
         options: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         super().reset(seed=seed, options=options)
-        self._game = PikachuVolleyball()
+        self._game = PikachuVolleyball(post_score_freeze=False)
         self._bot = RuleBasedBot(level=self.bot_level)
         state = self._game.reset()
         self._steps = 0
