@@ -196,6 +196,21 @@ class LiveFrameCallback(BaseCallback):
         # trainer.py already imports this module at construction time.
         self._manager = manager
 
+    def _on_training_start(self) -> None:
+        """Seed ``manager.last_frame`` so ``/current_frame`` returns 200 immediately.
+
+        Without this, the endpoint returns 404 for the full warm-up window
+        (``play_interval`` steps, default 5000). Designers hitting refresh
+        during that window saw a blank canvas even though training was
+        running. Seeding a canonical reset snapshot lets the FE paint
+        something the instant training begins; later demo ticks overwrite
+        it with live play frames.
+        """
+        if self._manager is None:
+            return
+        initial_state = PikachuVolleyball().reset()
+        self._manager.last_frame = _serialize_state(initial_state)
+
     def _on_step(self) -> bool:
         if self.num_timesteps % self.play_interval != 0:
             return True
