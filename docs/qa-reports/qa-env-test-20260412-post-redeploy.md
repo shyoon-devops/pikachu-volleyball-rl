@@ -16,13 +16,17 @@ rebuilt QA image in the interim.
 
 ## Summary — massive improvement
 
-| Suite | Before redeploy | After redeploy |
-|-------|:---------------:|:--------------:|
+| Suite | Before redeploy | After redeploy (current) |
+|-------|:---------------:|:------------------------:|
 | `test_sprint1_verification.py` + `test_rate_limiting.py` | 14 pass / 20 fail / 3 skip | **31 pass / 3 fail / 3 skip** |
-| `test_ws_resilience.py` | 11 pass / 3 fail | **4 pass / 3 fail** |
+| `test_ws_resilience.py` (after test-bug fix `0a79eb44`) | 11 pass / 3 fail | **7 pass / 0 fail** |
 
 The wrong-branch deploy theory is confirmed. The new image ships all Sprint 1
 fixes. Remaining failures are smaller, specific issues.
+
+**Update after deeper investigation:** the 3 WS resilience failures were my
+own test bugs, not server regressions — see the BE-1 retraction section
+below. Corrected pass rate on QA is now **38 pass / 3 fail / 3 skip**.
 
 ---
 
@@ -92,31 +96,34 @@ is intentional (common practice for load-balancer probes) or an oversight.
 
 ---
 
-## ❌ BE-1 — WS handshake still unstable under abrupt-close stress
+## ✅ BE-1 WS handshake stall — RETRACTED, not a server regression
 
-3 failures in `test_ws_resilience.py`:
+**Correction (appended after deeper investigation).** The 3 previously-failing
+`test_ws_resilience.py` tests were my own test bugs, not a server regression.
+Fix committed as `0a79eb44`. After the fix: 7/7 pass on QA.
 
-- `TestAbruptDisconnect::test_abrupt_close_does_not_crash_server` — ProtocolError: invalid status code
-- `TestAbruptDisconnect::test_abrupt_close_does_not_affect_sibling` — ProtocolError: invalid status code
-- `TestReconnectRecovery::test_reconnect_can_issue_stop` — TimeoutError on handshake
+Two root causes:
 
-**Changed symptom vs. pre-redeploy.** Before: all three timed out during the
-opening handshake. After redeploy: two of three now receive a non-101 response
-(`ProtocolError: invalid status code`). The third still times out.
+1. **`ws.close(code=1006)` is forbidden by RFC 6455 §7.4.1.** 1006 is a
+   pseudo-code reserved for the library to report abnormal closure; clients
+   may never send it. The `websockets` client validates close codes and
+   raises `ProtocolError: invalid status code` *on the client side* before
+   the frame hits the wire. My "invalid status code" evidence was client-side
+   validation failure, not a server response. Replaced with
+   `ws.transport.abort()` — the correct way to simulate an abrupt TCP-level
+   disconnect without a close frame.
 
-Direct `curl` WS handshake reproduces 101 Switching Protocols and streams
-frames normally. So the issue is specific to the sequence: **abrupt 1006
-closes followed immediately by a new handshake on the same server instance**.
+2. **`_stop` autouse fixture did not wait for server-confirmed stop.** It
+   sent `training:stop` and slept 0.3s. When the previous test left training
+   running, the next test started while the push loops were still broadcasting
+   frames at 30fps, saturating the server event loop and stalling the next WS
+   handshake. Now drains until it sees `training:status{state:stopped}`
+   (up to 5s).
 
-**Hypothesis**: the rate-limit middleware may be counting the WS upgrade
-requests; after a storm of abrupt closes, the next upgrade request hits the
-throttle and returns 429 instead of 101. That would explain "invalid status
-code" — the `websockets` client rejects 429 as a non-switching-protocol
-response.
-
-**Request for Backend:** check whether rate limiting applies to `/ws` upgrade
-requests. If yes, exclude WS upgrades, OR raise the WS-upgrade rate window
-specifically.
+Diagnostic path: probed `/ws` with 200 parallel upgrade requests directly —
+200x `HTTP 101 Switching Protocols`, no rate-limit interference. Server is
+healthy. Rate-limit middleware does NOT cover `/ws` (so my earlier hypothesis
+was also wrong — please disregard).
 
 ---
 
@@ -124,12 +131,12 @@ specifically.
 
 1. ✅ **DevOps redeploy worked** — thank DevOps, no further action on their
    side for this batch.
-2. ⚠️ **Backend: 3 follow-ups**
+2. ⚠️ **Backend: 2 follow-ups**
    - `run_evaluation` 500 under concurrent load — add timeout guard and
      determinism.
    - `/api/health` rate-limit coverage — confirm intent with PM.
-   - Rate-limit middleware should exclude `/ws` upgrade path (hypothesis,
-     please verify).
+   - ~~Rate-limit middleware should exclude `/ws` upgrade path~~ — retracted,
+     already excluded.
 3. ✅ **QA → prod promotion**: once the three above are triaged (fixed or
    PM-waived), QA is promotable.
 
