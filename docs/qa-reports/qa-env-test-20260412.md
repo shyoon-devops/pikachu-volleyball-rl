@@ -194,17 +194,58 @@ Passing areas:
 
 ---
 
+## Dev vs QA comparison — QA image is from the wrong branch
+
+Same `test_sprint1_verification.py + test_rate_limiting.py` suite against
+**dev (`localhost:8001`)** for comparison:
+
+| Check | Dev | QA |
+|-------|:---:|:--:|
+| SEC-1 Path traversal blocked | ✅ | ❌ |
+| SEC-2 CORS attacker origin rejected | ✅ | ❌ |
+| SEC-3 Rate limiting (most endpoints) | ✅ (except `/api/health`) | ❌ (all endpoints) |
+| BUG-3 Concurrent training:start | ✅ | ❌ |
+| BUG-5 null payload | ✅ | ❌ |
+| BE-1 Heartbeat/disconnect-during-broadcast | ✅ | (not re-run, but related BE-1 handshake stall reproduces) |
+| **Dev totals** | **32 pass / 2 fail / 3 skip** | **14 pass / 20 fail / 3 skip** |
+
+Container image SHAs:
+
+| Env | Image | Built | SHA |
+|-----|-------|-------|-----|
+| dev | `pikachu-rl-dev-backend` | 2026-04-11T16:54 | `367884fca502…` |
+| qa  | `pikachu-rl-qa-backend`  | 2026-04-12T03:28 | `d96c32aa3fe6…` |
+| prod | `pikachu-rl-prod-backend` | 2026-04-11T15:20 | `38f8583d5c47…` |
+
+**The QA image is chronologically newer than dev but functionally older.**
+QA was rebuilt at 03:28 today but almost certainly from `main` (pre-Sprint 1)
+rather than from the current dev branch. This is the only explanation for
+every Sprint 1 fix being absent while the image is newer.
+
 ## Recommended action
 
-1. **Confirm QA build version.** SEC-1/2/3, BUG-3, BUG-5 being simultaneously
-   unfixed means the QA container is almost certainly running an old image.
-   Compare QA container SHA vs. dev.
-2. **If QA is current**: re-open SEC-1, SEC-2, SEC-3, BUG-3, BUG-5 as
-   regressions. The fixes either didn't land or were reverted.
-3. **Do not promote QA → prod** until all 23 failures are either fixed or
-   triaged as non-blocking with PM sign-off.
-4. **BE-1 concurrent-handshake stall** is its own separate bug. Same root cause
-   suspicion as BUG-3 — please investigate together.
+1. **DevOps: rebuild `pikachu-rl-qa-backend` from the Sprint 1 branch.** The
+   current QA image (`d96c32aa3fe6…`) does not contain SEC-1/2/3, BUG-3, BUG-5
+   fixes even though it was built today. Best guess: the QA build pipeline is
+   pinned to `main` instead of the dev/Sprint 1 branch.
+2. **After QA redeploy**, re-run:
+   ```bash
+   cd backend && python3 -m pytest \
+     tests/test_sprint1_verification.py \
+     tests/test_rate_limiting.py \
+     tests/test_ws_resilience.py \
+     --base-url http://localhost:8002 -v
+   ```
+3. **Do not promote QA → prod** until post-redeploy suite matches the dev
+   result (≤2 failures, both on `/api/health` rate limiting — triage that one
+   as its own follow-up ticket).
+4. **NEW finding — `/api/health` rate limiting gap** (reproduces on both
+   dev and QA): when the other endpoints were added to the rate-limit
+   middleware, `/api/health` was evidently skipped. This is intentional in some
+   products (to avoid throttling load balancers) but should be explicit. File
+   as `RL-HEALTH-RATE` for Backend Engineer to confirm.
+5. **BE-1 WS handshake stall** — re-verify after QA redeploy. It may be a
+   symptom of the same old-branch issue (pre-fix `ConnectionManager`).
 
 ---
 
