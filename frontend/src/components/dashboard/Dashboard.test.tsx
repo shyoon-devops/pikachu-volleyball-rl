@@ -81,6 +81,32 @@ describe('Dashboard loading state', () => {
     expect(screen.getByRole('heading', { name: /recent games/i })).toBeInTheDocument()
   })
 
+  it('renders exactly one Start button on the whole dashboard when stopped', () => {
+    // Duplicate-Start-button regression guard. Previously the dashboard
+    // shipped two CTAs: one in TrainingControls ("Start") and one in
+    // HyperparamForm ("Start Training"). There must be exactly one now.
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+    })
+    renderDashboard()
+    const startButtons = screen
+      .getAllByRole('button')
+      .filter(b => /^(start|start training)$/i.test(b.textContent?.trim() ?? ''))
+    expect(startButtons).toHaveLength(1)
+    expect(startButtons[0]).toHaveTextContent(/^Start$/)
+  })
+
+  it('toggles primary CTA label Start → Stop when training is running', () => {
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'running', currentStep: 10, currentEpisode: 1 },
+    })
+    renderDashboard()
+    expect(screen.queryByRole('button', { name: /start training/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /stop training/i })).toBeInTheDocument()
+  })
+
   it('does not show the skeleton on a mid-session disconnect if we already have data', () => {
     resetMockState({
       connectionState: 'disconnected',

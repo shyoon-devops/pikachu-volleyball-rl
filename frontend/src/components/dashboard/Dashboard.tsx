@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
+import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { Hyperparams } from '../../lib/types'
@@ -10,6 +12,13 @@ import './Dashboard.css'
 
 export function Dashboard() {
   const { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send } = useTrainingState()
+
+  // Hyperparams + bot_level live at the Dashboard so the single Start
+  // button in <TrainingControls /> can submit them. Do NOT re-introduce a
+  // second Start button inside <HyperparamForm /> — we intentionally
+  // collapsed the two into one CTA.
+  const [params, setParams] = useState<Hyperparams>(DEFAULT_HYPERPARAMS)
+  const [botLevel, setBotLevel] = useState<number>(1)
 
   const score1 = latestFrame?.score1 ?? 0
   const score2 = latestFrame?.score2 ?? 0
@@ -27,7 +36,7 @@ export function Dashboard() {
     return <DashboardSkeleton />
   }
 
-  const handleStart = (params: Hyperparams, botLevel: number) => {
+  const handleStart = () => {
     send('training:start', { hyperparams: params, bot_level: botLevel })
   }
 
@@ -40,7 +49,7 @@ export function Dashboard() {
           connectionState={connectionState}
           reconnectAttempt={reconnectAttempt}
           send={send}
-          onStartWithParams={handleStart}
+          onStart={handleStart}
         />
 
         <div className="dashboard-game-wrapper" role="img" aria-label="Live game canvas — Pikachu Volleyball agent play">
@@ -54,7 +63,13 @@ export function Dashboard() {
         </div>
 
         {isStopped && (
-          <HyperparamForm onSubmit={handleStart} disabled={connectionState !== 'connected'} />
+          <HyperparamForm
+            params={params}
+            botLevel={botLevel}
+            onParamsChange={setParams}
+            onBotLevelChange={setBotLevel}
+            disabled={connectionState !== 'connected'}
+          />
         )}
       </section>
 
