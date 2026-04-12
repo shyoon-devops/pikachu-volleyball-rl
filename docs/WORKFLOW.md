@@ -148,6 +148,72 @@ main (prod)
 
 ---
 
+## Release Creation Procedure
+
+**(2026-04-12 제정 — 태그만 남기고 GitHub Release 를 만들지 않던 관행 교정)**
+
+### 태그 네이밍 체계
+본 프로젝트는 **버전 태그 + 환경 태그** 두 계열을 사용합니다. 두 계열은 분리되어 있으며 동일 커밋을 가리킬 수 있습니다.
+
+| 태그 패턴 | 의미 | 주체 | 가리키는 커밋 |
+|-----------|------|------|----------------|
+| `v{major}.{minor}.{patch}` | 버전 scope 확정 | PM | 해당 버전의 scope 말단 (보통 dev HEAD 스냅샷) |
+| `v{version}-dev` | dev 배포 스냅샷 | DevOps | 배포 시점의 dev 이미지 commit |
+| `v{version}-qa` | qa 배포 스냅샷 | DevOps | 배포 시점의 qa 이미지 commit |
+| `v{version}-prod` | prod 배포 스냅샷 | DevOps | 배포 시점의 prod 이미지 commit |
+
+### PM 절차 — 버전 태그 + GitHub Release
+1. **scope 확정**: CHANGELOG `[X.Y.Z]` 섹션 확정, 포함 커밋 범위 lock.
+2. **release note**: `docs/releases/v{X.Y.Z}.md` 작성 — 아래 § Release Note Structure 참고.
+3. **annotated tag**: `git tag -a v{X.Y.Z} <commit> -m "<요약>"` + `git push github v{X.Y.Z}`.
+4. **GitHub Release 승격 (필수, 태그만 생성 금지)**:
+   ```bash
+   gh release create v{X.Y.Z} --repo shyoon-devops/pikachu-volleyball-rl \
+     --title "v{X.Y.Z} — <short summary>" \
+     --notes-file docs/releases/v{X.Y.Z}.md
+   ```
+5. **VERSION 파일** 갱신: `echo "{X.Y.Z}" > VERSION`.
+6. **CHANGELOG 링크**: 하단 버전 링크 섹션 업데이트.
+7. 검증: `gh release view v{X.Y.Z}` 로 Release 페이지 접근 가능 확인.
+
+### DevOps 절차 — 환경 태그 (배포 시)
+배포 스크립트 (`scripts/deploy-{dev,qa,prod}.sh`) 가 배포 성공 직후 자동 수행해야 합니다 — 자동화 작업은 [#39 ops: deploy-*.sh 에 환경 태그 자동 생성](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/39) 로 추적.
+
+수동 실행 시 절차:
+```bash
+# 배포 성공 직후
+git tag -a v{X.Y.Z}-{env} <deployed-commit> \
+  -m "{env} deployment of v{X.Y.Z}
+  
+  Image: <docker image sha>
+  Built at: <build timestamp>
+  Deployed at: <deploy timestamp>"
+git push github v{X.Y.Z}-{env}
+
+# 이어서 Post-Deploy Doc Update 규칙대로 VERSIONS.yml + DEPLOYMENT-STATUS 갱신
+```
+
+### Release Note Structure
+`docs/releases/TEMPLATE.md` 참조. 최소 포함 필드:
+- 버전 / Tag / Tag target / Cut date / 배포 환경별 상태
+- Summary
+- Security / Blocker / HIGH bug / Backend / Frontend / Infrastructure / CI / RL / Design 섹션
+- Closed issues + Deferred issues
+- QA Verification Checklist (환경 URL 포함)
+- Main Branch Merge 체크리스트 (prod 배포 후 필수 단계)
+
+### Release 생성 중 실패 시
+- 태그만 만들고 GitHub Release 생성 실패 시 **즉시 재시도**. 태그-only 상태는 불완전 릴리스로 간주.
+- 이전 릴리스 생성 누락 발견 시 backfill: `gh release create <existing_tag> --notes-file <note>` 로 소급 생성 가능.
+
+### 2026-04-12 Backfill 기록
+PM 이 그동안 태그만 만들고 Release 를 만들지 않았음. 이 날짜에 다음 backfill 실행:
+- v0.1.0, v0.2.0, v0.2.1 GitHub Release 소급 생성
+- v0.1.0-prod, v0.2.1-qa, v0.2.1-dev 환경 태그 소급 생성
+- DevOps 자동화 요청: #39
+
+---
+
 ## Post-Deploy Doc Update
 
 **(강제 규칙 — 2026-04-12 제정, 문서 drift 재발 방지)**
