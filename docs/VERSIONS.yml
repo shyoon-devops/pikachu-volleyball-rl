@@ -14,7 +14,7 @@
 #   last_verified_at   : when this YAML entry was last confirmed via curl + docker inspect
 
 schema_version: 1
-last_file_update: 2026-04-12T20:50:00+09:00   # backend image_digest fill (dev/qa/prod sha256)
+last_file_update: 2026-04-12T21:40:00+09:00   # Designer D11-D15 + BE perf/dead-letter/migration redeploy (ccd1d9e7)
 authoritative_source: docs/VERSIONS.yml       # this file supersedes README + DEPLOYMENT-STATUS on port/version conflicts
 
 release_history:
@@ -72,73 +72,80 @@ environments:
     host_frontend: 192.168.0.248
     backend:
       port: 8001
-      status: up                              # v0.2.4 force-recreate 완료
+      status: up                              # Designer D11-D15 + BE perf/dead-letter/migration redeploy (ccd1d9e7)
       health_endpoint: /api/health
       live_endpoint: /api/health/live
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
-      commit: dabd84a1                        # runtime code HEAD (image built from this SHA)
-      image: sha256:c337205e0e8996e664bb0e5c780e9b0114f9134e099abd89217a305f2f27187a
-      built_at: 2026-04-12T18:00:00+09:00
-      deployed_at: 2026-04-12T18:15:00+09:00
+      commit: ccd1d9e7                        # runtime code HEAD (image built from this SHA — merge of dev + yoon/devops-engineer)
+      image: sha256:671f6d894229fc26cbfa3832eeb012539a3359b99ab448f018e5830639e903b8
+      built_at: 2026-04-12T21:29:00+09:00
+      deployed_at: 2026-04-12T21:29:00+09:00
       training_state: stopped
       runtime_verified:
-        - "/timeseries endpoint present"
+        - "/timeseries endpoint present (cap=10000, 2 matches)"
         - "ball.is_power_hit flag present"
         - "rally-timeout (RALLY_MAX_FRAMES=600) present"
-        - "backend uptime 2min after force-recreate"
+        - "log_interval: int = 256 at callbacks.py:88 (BE perf hotfix)"
+        - "dead-letter handler (11 matches in ws/)"
+        - "migrate-games-bot-level.py present in scripts/"
     frontend:
       port: 3000
       status: up
-      bundle: assets/index-DqBsWzf5.js        # v0.2.4 bundle (byte-identical across 3 envs)
-      commit: dabd84a1                        # FE build source = runtime SHA
-      built_at: 2026-04-12T18:00:00+09:00
-      deployed_at: 2026-04-12T18:15:00+09:00
+      bundle: assets/index-aOjhpuQQ.js        # Designer D11-D15 redeploy (ccd1d9e7), byte-identical across 3 envs
+      commit: ccd1d9e7                        # FE build source = runtime SHA
+      built_at: 2026-04-12T21:30:00+09:00
+      deployed_at: 2026-04-12T21:35:00+09:00
     mongodb:
       port: 27018
       status: UNKNOWN
     git_branch: dev
-    git_branch_head: d4a89231                 # docs commits (921b0efb + d4a89231) on top of dabd84a1 runtime
-    tag_at_head: null                         # v0.2.4 annotated tag is on dabd84a1, not branch HEAD
-    env_tag: v0.2.4-dev                       # → dabd84a1
-    deploy_pending: false
+    git_branch_head: ca4cb608                 # dev has advanced past runtime (ccd1d9e7) with new ai-engineer Phase 2 commits — not yet deployed
+    tag_at_head: null                         # v0.2.4 annotated tag is on dabd84a1; runtime is ccd1d9e7 (hotfix redeploy above tag)
+    env_tag: v0.2.4-dev                       # → dabd84a1 (tag unchanged; runtime advanced to ccd1d9e7)
+    deploy_pending: true                      # dev HEAD ca4cb608 has 6 commits above runtime ccd1d9e7 — awaiting PM deploy approval
 
   qa:
     host_backend: 192.168.0.250
     host_frontend: 192.168.0.248
     backend:
       port: 8002
-      status: up                              # v0.2.4 배포 완료 (qa backend :8002 복구 + v0.2.4)
+      status: up                              # Designer D11-D15 + BE perf/dead-letter/migration redeploy (ccd1d9e7)
       health_endpoint: /api/health
       live_endpoint: /api/health/live
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
-      commit: dabd84a1
-      image: sha256:d0939d7470a1fc0bb1275f399f6f8d8018a46c95ba79c313b491edaa54d151d7
-      built_at: 2026-04-12T18:00:00+09:00
-      deployed_at: 2026-04-12T18:15:00+09:00
+      commit: ccd1d9e7
+      image: sha256:d6d0a45a91941883bb14c43cac024606073a47ce83439ed8ffd22e056b6eeea5
+      built_at: 2026-04-12T21:34:00+09:00
+      deployed_at: 2026-04-12T21:34:00+09:00
       training_state: stopped
       runtime_verified:
-        - "byte-identical container image as dev (same SHA)"
+        - "built from same ccd1d9e7 SHA as dev (cache-reuse of pip/torch layers)"
+        - "log_interval: int = 256 at callbacks.py:88 (BE perf hotfix)"
+        - "/api/training/status bot_level=1, state=stopped"
+        - "/api/training/timeseries returned 5 reward points (steps 720000-720800)"
     frontend:
       port: 3001
       status: up
-      bundle: assets/index-DqBsWzf5.js        # byte-identical to dev + prod
-      commit: dabd84a1
-      built_at: 2026-04-12T18:00:00+09:00
-      deployed_at: 2026-04-12T18:15:00+09:00
+      bundle: assets/index-aOjhpuQQ.js        # byte-identical to dev + prod
+      commit: ccd1d9e7
+      built_at: 2026-04-12T21:30:00+09:00
+      deployed_at: 2026-04-12T21:35:00+09:00
     mongodb:
       port: 27019
       status: UNKNOWN
     git_branch: qa
-    git_branch_head: d4a89231                 # advanced to dev HEAD (DevOps Option A)
+    git_branch_head: ccd1d9e7                 # auto-advanced by deploy-frontend.sh during 21:34 redeploy (was d4a89231)
     tag_at_head: null
-    env_tag: v0.2.4-qa                        # → dabd84a1 (runtime source)
+    env_tag: v0.2.4-qa                        # → dabd84a1 (tag unchanged; runtime advanced to ccd1d9e7 hotfix)
     deploy_pending: false
     notes: >
-      DevOps Option A (2026-04-12 ~18:30) fast-forwarded qa branch to d4a89231,
-      which contains dabd84a1 (runtime source) + 2 docs commits. Runtime image
-      built from dabd84a1, bundle byte-identical to dev + prod.
+      2026-04-12 ~21:34: Emergency redeploy — qa branch auto-advanced from
+      d4a89231 → ccd1d9e7 via deploy-frontend.sh step [6/6]. Runtime image
+      built from ccd1d9e7 (Designer D11-D15 + BE perf/dead-letter/migration
+      hotfixes). Bundle byte-identical to dev + prod. First production use
+      of auto-advance ref logic — worked as designed.
 
   prod:
     host_backend: 192.168.0.250
@@ -150,36 +157,39 @@ environments:
       live_endpoint: /api/health/live         # v0.2.4 runtime has BE-3 split
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
-      commit: dabd84a1
-      image: sha256:ccd038cef598999da785b854524a16fdca74098000f9a3f3e9908cbbc4d947dc
-      built_at: 2026-04-12T18:00:00+09:00
-      deployed_at: 2026-04-12T18:15:00+09:00
+      commit: ccd1d9e7
+      image: sha256:07f2434cc4ffa25fd681fd128768cc80d9b53590e4a1b73d81a011ac6bd1d96f
+      built_at: 2026-04-12T21:36:00+09:00
+      deployed_at: 2026-04-12T21:36:00+09:00
       training_state: stopped
       runtime_verified:
-        - "v0.1.0-era → v0.2.4 jump (BE-3/SEC-1-3/BUG-1-7/BE-1-7/FE-1-9 + Sprint 2 + v0.2.3 hotfix + v0.2.4 live-UI + hyper-ball)"
-        - "byte-identical container image as dev/qa"
+        - "Designer D11-D15 (dive FX / hyper-ball / floor ring / bot badges / score freeze flash)"
+        - "BE perf/dead-letter/migration hotfixes applied (BE 856f689e + 05ffd073)"
+        - "log_interval: int = 256 at callbacks.py:88 (BE perf hotfix)"
+        - "dead-letter handler (11 matches), /timeseries cap 10000 (2 matches)"
+        - "built from same ccd1d9e7 SHA as dev/qa (cache-reuse)"
     frontend:
       port: 3002
       status: up
-      bundle: assets/index-DqBsWzf5.js
-      commit: dabd84a1
-      built_at: 2026-04-12T18:00:00+09:00
-      deployed_at: 2026-04-12T18:15:00+09:00
+      bundle: assets/index-aOjhpuQQ.js        # Designer D11-D15 redeploy (ccd1d9e7), byte-identical across 3 envs
+      commit: ccd1d9e7                        # FE build source = runtime SHA
+      built_at: 2026-04-12T21:30:00+09:00
+      deployed_at: 2026-04-12T21:35:00+09:00
     mongodb:
       port: 27020
       status: UNKNOWN
     git_branch: prod
-    git_branch_head: d4a89231                 # advanced past v0.1.0-era (41f4fdb1) to dev HEAD
-    tag_at_head: null                         # v0.2.4 annotated tag is on dabd84a1 (runtime)
-    env_tag: v0.2.4-prod                      # → dabd84a1 (runtime source)
+    git_branch_head: ccd1d9e7                 # auto-advanced by deploy-frontend.sh during 21:36 redeploy (was d4a89231)
+    tag_at_head: null                         # v0.2.4 annotated tag is on dabd84a1 (runtime now ccd1d9e7 — hotfix above tag)
+    env_tag: v0.2.4-prod                      # → dabd84a1 (tag unchanged; runtime advanced to ccd1d9e7)
     deploy_pending: false
-    prod_branch_advance_pending: false        # DONE 2026-04-12
+    prod_branch_advance_pending: false        # DONE 2026-04-12 (both 18:30 and 21:36)
     notes: >
-      prod branch advanced from v0.1.0-era 41f4fdb1 to d4a89231 during this
-      deploy window. Runtime image built from dabd84a1. Branch contains docs
-      expansion (921b0efb + d4a89231) on top of runtime. main advance + merge
-      pending DevOps push (VERSIONS/DEPLOYMENT-STATUS will be updated again
-      at that time).
+      2026-04-12 ~21:36: Emergency redeploy — prod branch auto-advanced from
+      d4a89231 → ccd1d9e7 via deploy-frontend.sh step [6/6]. Runtime image
+      built from ccd1d9e7 carrying Designer D11-D15 + BE perf/dead-letter/
+      migration hotfixes. main branch advance to match runtime pending
+      (currently at 018a2be1 per housekeeping main-advance).
 
 # =========================================================================
 # DevOps update protocol:
