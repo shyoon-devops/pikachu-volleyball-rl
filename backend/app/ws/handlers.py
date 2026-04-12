@@ -150,12 +150,23 @@ async def _dispatch(
 async def metrics_push_loop(
     manager: ConnectionManager,
     training_service: TrainingServiceWrapper,
+    metrics_service: Any | None = None,
 ) -> None:
-    """Drain metrics queue and broadcast to all WS clients."""
+    """Drain metrics queue, persist (if configured), and broadcast.
+
+    Persistence is best-effort and happens *before* the broadcast so a live
+    dashboard frame isn't visible ahead of its persisted counterpart — we'd
+    rather eat a few milliseconds of latency on a metric frame than create
+    a user-visible gap in the aggregation endpoint. MetricsService.record
+    swallows its own errors so a Mongo hiccup cannot stall this loop.
+    """
     queue = training_service.manager.metrics_queue
     while True:
         data = await queue.get()
         update_training_metrics(data)
+        if metrics_service is not None:
+            experiment_id = getattr(training_service.manager, "_experiment_id", "") or ""
+            await metrics_service.record(experiment_id=experiment_id, data=data)
         await manager.broadcast({"type": "training:metrics", "payload": data})
 
 

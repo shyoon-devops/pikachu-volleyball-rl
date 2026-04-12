@@ -1,0 +1,101 @@
+- generic [ref=e3]:
+  - link "Skip to main content" [ref=e4] [cursor=pointer]:
+    - /url: "#main-content"
+  - banner [ref=e5]:
+    - heading "Pikachu Volleyball RL" [level=1] [ref=e6]
+    - navigation "Primary" [ref=e7]:
+      - link "Dashboard" [ref=e8] [cursor=pointer]:
+        - /url: /
+      - link "History" [ref=e9] [cursor=pointer]:
+        - /url: /history
+      - link "Evaluation" [ref=e10] [cursor=pointer]:
+        - /url: /evaluation
+    - button "Switch to dark theme" [pressed] [ref=e12] [cursor=pointer]:
+      - generic [ref=e13]:
+        - generic [ref=e14]: ☀
+        - generic [ref=e15]: ☾
+      - generic [ref=e17]: "Theme: light"
+  - main [ref=e18]:
+    - generic [ref=e19]:
+      - region "Game & Controls" [ref=e20]:
+        - heading "Game & Controls" [level=2] [ref=e21]
+        - generic [ref=e22]:
+          - generic [ref=e23]:
+            - heading "Training Controls" [level=3] [ref=e24]
+            - 'status "Connection: stopped" [ref=e25]': stopped
+          - group "Training Controls" [ref=e26]:
+            - button "Start training" [ref=e27] [cursor=pointer]: Start
+          - generic [ref=e28]:
+            - generic [ref=e29]: Bot Level
+            - group "Bot Level" [ref=e30]:
+              - button "Set bot level to 1" [ref=e31] [cursor=pointer]: L1
+              - button "Set bot level to 2" [ref=e32] [cursor=pointer]: L2
+              - button "Set bot level to 3" [ref=e33] [cursor=pointer]: L3
+              - button "Set bot level to 4" [ref=e34] [cursor=pointer]: L4
+              - button "Set bot level to 5" [ref=e35] [cursor=pointer]: L5
+          - generic [ref=e36]:
+            - generic [ref=e37]:
+              - text: "Step:"
+              - strong [ref=e38]: "0"
+            - generic [ref=e39]:
+              - text: "Episode:"
+              - strong [ref=e40]: "0"
+        - img "Live game canvas — Pikachu Volleyball agent play" [ref=e41]:
+          - generic:
+            - generic: "0 : 0"
+        - region "Hyperparameters" [ref=e43]:
+          - heading "Hyperparameters" [level=3] [ref=e44]
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - generic [ref=e47]: learning_rate
+              - spinbutton "learning_rate" [ref=e48]: "0.0003"
+            - generic [ref=e49]:
+              - generic [ref=e50]: n_steps
+              - spinbutton "n_steps" [ref=e51]: "2048"
+            - generic [ref=e52]:
+              - generic [ref=e53]: batch_size
+              - spinbutton "batch_size" [ref=e54]: "64"
+            - generic [ref=e55]:
+              - generic [ref=e56]: gamma
+              - spinbutton "gamma" [ref=e57]: "0.99"
+            - generic [ref=e58]:
+              - generic [ref=e59]: clip_range
+              - spinbutton "clip_range" [ref=e60]: "0.2"
+            - generic [ref=e61]:
+              - generic [ref=e62]: bot_level
+              - combobox "bot_level" [ref=e63]:
+                - option "Level 1" [selected]
+                - option "Level 2"
+                - option "Level 3"
+                - option "Level 4"
+                - option "Level 5"
+          - paragraph [ref=e64]:
+            - text: Adjust values, then press
+            - strong [ref=e65]: Start
+            - text: above to begin training.
+      - region "Training Metrics" [ref=e66]:
+        - heading "Training Metrics" [level=2] [ref=e67]
+        - generic [ref=e69]:
+          - heading "Reward" [level=3] [ref=e70]
+          - generic "EMA smoothing factor" [ref=e72] [cursor=pointer]:
+            - generic [ref=e73]: Smooth off
+            - slider "Smooth off" [ref=e74]: "0"
+        - generic [ref=e77]:
+          - heading "Win Rate" [level=3] [ref=e78]
+          - generic "EMA smoothing factor" [ref=e80] [cursor=pointer]:
+            - generic [ref=e81]: Smooth off
+            - slider "Smooth off" [ref=e82]: "0"
+        - generic [ref=e85]:
+          - heading "Policy Loss" [level=3] [ref=e86]
+          - generic "EMA smoothing factor" [ref=e88] [cursor=pointer]:
+            - generic [ref=e89]: Smooth off
+            - slider "Smooth off" [ref=e90]: "0"
+        - generic [ref=e93]:
+          - heading "Value Loss" [level=3] [ref=e94]
+          - generic "EMA smoothing factor" [ref=e96] [cursor=pointer]:
+            - generic [ref=e97]: Smooth off
+            - slider "Smooth off" [ref=e98]: "0"
+      - region "Recent Games" [ref=e100]:
+        - generic [ref=e101]:
+          - heading "Recent Games" [level=3] [ref=e102]
+          - paragraph [ref=e103]: No games yet.

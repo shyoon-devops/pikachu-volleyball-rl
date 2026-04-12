@@ -89,6 +89,7 @@ export interface PaginatedResponse<T> {
 export type WSClientMessageType =
   | 'training:start'
   | 'training:stop'
+  | 'training:pause'
   | 'training:resume'
   | 'training:set_level'
   | 'replay:request'
