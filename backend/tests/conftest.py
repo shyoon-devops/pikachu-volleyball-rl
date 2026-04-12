@@ -62,9 +62,20 @@ class FakeReplayService:
         return []
 
 
+def _make_queue_mock(maxsize: int) -> MagicMock:
+    """Build a queue mock that satisfies the health check's qsize/maxsize reads."""
+    m = MagicMock()
+    m.qsize = MagicMock(return_value=0)
+    m.maxsize = maxsize
+    return m
+
+
 @asynccontextmanager
 async def _test_lifespan(app):
-    app.state.mongo_client = MagicMock()
+    mongo_client = MagicMock()
+    # Health check awaits `mongo_client.admin.command("ping")`.
+    mongo_client.admin.command = AsyncMock(return_value={"ok": 1})
+    app.state.mongo_client = mongo_client
     app.state.db = MagicMock()
     app.state.game_service = FakeGameService()
     app.state.replay_service = FakeReplayService()
@@ -73,9 +84,11 @@ async def _test_lifespan(app):
     mock_manager.start = AsyncMock(return_value="test-experiment-id")
     mock_manager.stop = AsyncMock()
     mock_manager.resume = AsyncMock()
-    mock_manager.metrics_queue = AsyncMock()
-    mock_manager.frames_queue = AsyncMock()
-    mock_manager.results_queue = AsyncMock()
+    mock_manager.metrics_queue = _make_queue_mock(500)
+    mock_manager.frames_queue = _make_queue_mock(100)
+    mock_manager.results_queue = _make_queue_mock(200)
+    # Health check inspects `manager._thread`; MagicMock is fine (is_alive() returns a mock truthy value).
+    mock_manager._thread = None
 
     app.state.training_service = TrainingServiceWrapper.__new__(TrainingServiceWrapper)
     app.state.training_service.manager = mock_manager
