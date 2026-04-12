@@ -395,7 +395,7 @@ async def training_timeseries(
         description=f"Metric name. One of: {', '.join(sorted(_TIMESERIES_METRICS))}.",
     ),
     limit: int = Query(
-        100, ge=1, le=1000,
+        1000, ge=1, le=1000,
         description="Maximum number of points, newest last.",
     ),
     experiment_id: str | None = Query(

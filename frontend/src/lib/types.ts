@@ -14,6 +14,27 @@ export interface BallState {
   vx: number
   vy: number
   rotation: number
+  /**
+   * Power-hit flag (per-frame). Authoritative source once BE starts
+   * emitting it on `training:frame` messages. Optional so the FE can
+   * keep shipping before BE lands the field — in the meantime the
+   * canvas falls back to its velocity heuristic. Once BE emits it the
+   * heuristic gets removed in favor of this flag (see GameCanvas
+   * POWER_HIT_SPEED TODO).
+   */
+  isPowerHit?: boolean
+  /**
+   * Historical ball positions (t-1 and t-2) matching the original
+   * Pikachu Volleyball engine's `previousX/Y` and
+   * `previousPreviousX/Y`. Optional — if BE does not include them we
+   * maintain a 3-slot ring buffer on the client instead (Mode B, per
+   * 2026-04-12 PM decision). Prefer BE values when present since FE
+   * buffering drifts under slow-WS conditions.
+   */
+  previousX?: number
+  previousY?: number
+  previousPreviousX?: number
+  previousPreviousY?: number
 }
 
 export interface GameState {

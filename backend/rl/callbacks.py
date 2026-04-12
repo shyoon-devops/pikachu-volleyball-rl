@@ -332,6 +332,10 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             "vx": state.ball.vx,
             "vy": state.ball.vy,
             "rotation": state.ball.rotation,
+            # Gate for FE hyper-ball / trail rendering on power-hit frames.
+            # Defensive getattr so replays pickled before this field was
+            # added still decode; missing → treat as not a power hit.
+            "is_power_hit": bool(getattr(state.ball, "is_power_hit", False)),
         },
         "score1": state.score1,
         "score2": state.score2,

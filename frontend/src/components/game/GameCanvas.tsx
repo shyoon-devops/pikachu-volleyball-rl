@@ -10,6 +10,10 @@ import {
   Texture,
 } from 'pixi.js'
 import type { GameState } from '../../lib/types'
+import {
+  computePowerHitTrail,
+  type BallHistoryPoint,
+} from './powerHitTrail'
 import './GameCanvas.css'
 
 // ── Original game constants (from physics.js) ──
@@ -24,8 +28,11 @@ const PLAYER_GROUND_Y = 244
 const SHADOW_Y = 273
 const NUM_CLOUDS = 10
 
-// Power-hit detection threshold (heuristic — backend doesn't send isPowerHit)
-const POWER_HIT_SPEED = 25
+// How many server ball positions to keep for the power-hit trail.
+// Original engine renders ballHyper at ball.previousX/Y (t-1) and
+// ballTrail at ball.previousPreviousX/Y (t-2) — so we need a 3-slot
+// ring buffer [t-2, t-1, t] when BE doesn't include those fields.
+const BALL_HISTORY_LEN = 3
 
 const SPRITE_SHEET_PATH = '/assets/sprite_sheet.json'
 
@@ -69,6 +76,16 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
       vx: next.ball.vx,
       vy: next.ball.vy,
       rotation: lerp(prev.ball.rotation ?? 0, next.ball.rotation ?? 0, t),
+      // Power-hit flag + historical positions are NOT interpolated —
+      // they are per-frame authoritative signals from the engine.
+      // Taking `next` value preserves the original game's visual
+      // semantics (hyper/trail sprites render at discrete historical
+      // positions, not smoothed ones).
+      isPowerHit: next.ball.isPowerHit,
+      previousX: next.ball.previousX,
+      previousY: next.ball.previousY,
+      previousPreviousX: next.ball.previousPreviousX,
+      previousPreviousY: next.ball.previousPreviousY,
     },
     score1: next.score1,
     score2: next.score2,
@@ -415,7 +432,12 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
   const spritesRef = useRef<SpriteObjects | null>(null)
   const prevStateRef = useRef<GameState | null>(null)
   const currentStateRef = useRef<GameState | null>(null)
-  const prevBallRef = useRef<{ x: number; y: number } | null>(null)
+  // Ring buffer of the last 3 server ball positions [t-2, t-1, t].
+  // Populated each time a new gameState arrives (authoritative 30fps
+  // server tick) — NOT on the 60fps rAF loop, so the sprites always
+  // render at discrete historical positions matching the original
+  // engine's `previousX` / `previousPreviousX` semantics.
+  const ballHistoryRef = useRef<BallHistoryPoint[]>([])
   const lerpFactorRef = useRef(0)
   const animFrameRef = useRef(0)
   const frameCounterRef = useRef(0)
@@ -499,6 +521,15 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
       currentStateRef.current = gameState
       lerpFactorRef.current = 0
       frameCounterRef.current++
+      // Maintain 3-slot ring buffer of server ball positions. Only the
+      // last BALL_HISTORY_LEN entries are kept. The buffer feeds the
+      // power-hit trail; see computePowerHitTrail() for how it's read.
+      const hist = ballHistoryRef.current
+      const pt: BallHistoryPoint = { x: gameState.ball.x, y: gameState.ball.y }
+      ballHistoryRef.current =
+        hist.length < BALL_HISTORY_LEN
+          ? [...hist, pt]
+          : [...hist.slice(hist.length - (BALL_HISTORY_LEN - 1)), pt]
     }
   }, [gameState])
 
@@ -552,23 +583,21 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
     sprites.ball.gotoAndStop(Math.min(ballFrame, sprites.ball.totalFrames - 1))
     sprites.shadowBall.x = state.ball.x
 
-    // ── Ball power-hit effects (heuristic: high speed = power hit) ──
-    const ballSpeed = Math.sqrt(state.ball.vx * state.ball.vx + state.ball.vy * state.ball.vy)
-    const isPowerHit = ballSpeed > POWER_HIT_SPEED
-    const prev = prevBallRef.current
-
-    if (isPowerHit && prev) {
-      sprites.ballHyper.x = prev.x
-      sprites.ballHyper.y = prev.y
-      sprites.ballHyper.visible = true
-      sprites.ballTrail.x = (prev.x + state.ball.x) / 2
-      sprites.ballTrail.y = (prev.y + state.ball.y) / 2
-      sprites.ballTrail.visible = true
-    } else {
-      sprites.ballHyper.visible = false
-      sprites.ballTrail.visible = false
+    // ── Ball power-hit effects (authoritative: BE `is_power_hit`) ──
+    // Trail sprite positions come from the pure helper so the logic
+    // stays testable without a PixiJS stage. Heuristic-based detection
+    // was removed 2026-04-12 per PM decision (Mode B): BE is the sole
+    // source of truth for `isPowerHit` and the FE ring buffer supplies
+    // previous positions when BE doesn't include them inline.
+    const trail = computePowerHitTrail(state.ball, ballHistoryRef.current)
+    sprites.ballHyper.visible = trail.visible
+    sprites.ballTrail.visible = trail.visible
+    if (trail.visible) {
+      sprites.ballHyper.x = trail.hyper.x
+      sprites.ballHyper.y = trail.hyper.y
+      sprites.ballTrail.x = trail.trail.x
+      sprites.ballTrail.y = trail.trail.y
     }
-    prevBallRef.current = { x: state.ball.x, y: state.ball.y }
 
     // ── Score boards ──
     updateScoreBoard(sprites.scoreBoard1, state.score1)

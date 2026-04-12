@@ -125,12 +125,23 @@ async def _dispatch(
             })
             return
         params: WsTrainingStartPayload = msg.payload  # type: ignore[assignment]
+        # If the caller omitted bot_level, carry over the current difficulty
+        # from status instead of silently dropping to L1 — the dashboard is
+        # the single source of truth for difficulty via training:set_level.
+        effective_bot_level = (
+            params.bot_level
+            if params.bot_level is not None
+            else current["bot_level"]
+        )
         experiment_id = await training_service.start(
             hyperparams=params.hyperparams,
-            bot_level=params.bot_level,
+            bot_level=effective_bot_level,
             total_timesteps=params.total_timesteps,
         )
-        logger.info("Training started: experiment=%s bot_level=%d", experiment_id, params.bot_level)
+        logger.info(
+            "Training started: experiment=%s bot_level=%d",
+            experiment_id, effective_bot_level,
+        )
         await _emit_status(ws, manager, {
             "type": "training:status",
             "payload": {"state": "running", "experiment_id": experiment_id},

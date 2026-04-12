@@ -660,3 +660,59 @@ class TestPunchEffectMarkersDoNotMovePosition:
         dy = game._state.ball.y - ball_y_before
         assert abs(dx) < 50  # bounded by power-hit vx magnitude
         assert abs(dy) < 50
+
+
+class TestBallIsPowerHitFlag:
+    """Ball carries an is_power_hit flag for FE hyper/trail rendering.
+
+    Matches original physics.js: ball.isPowerHit is set true inside the
+    power-hit branch of processCollisionBetweenBallAndPlayer, false in
+    the non-power-hit branch. Persists between collisions until the next
+    collision flips it.
+    """
+
+    def test_flag_starts_false_on_fresh_ball(self) -> None:
+        game = PikachuVolleyball()
+        state = game.reset()
+        assert state.ball.is_power_hit is False
+
+    def test_power_hit_collision_sets_flag_true(self) -> None:
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.player1.is_jumping = True
+        game._state.player1.y = PLAYER_GROUND_Y - 40
+        game._state.ball.x = game._state.player1.x
+        game._state.ball.y = game._state.player1.y
+        game._state.ball.vx = 0
+        game._state.ball.vy = 3
+        power = PlayerInput(x_dir=1, y_dir=-1, power_hit=True)
+        state = game.step(power, NOOP)
+        assert state.ball.is_power_hit is True
+
+    def test_non_power_collision_sets_flag_false(self) -> None:
+        game = PikachuVolleyball()
+        game.reset()
+        # Not jumping — collision cannot be a power hit.
+        game._state.player1.is_jumping = False
+        game._state.ball.x = game._state.player1.x
+        game._state.ball.y = game._state.player1.y - PLAYER_HALF_LENGTH + 1
+        game._state.ball.vx = 0
+        game._state.ball.vy = 5
+        # Pre-seed True so we can observe the flip to False.
+        game._state.ball.is_power_hit = True
+        state = game.step(NOOP, NOOP)
+        assert state.ball.is_power_hit is False
+
+    def test_flag_persists_between_collisions(self) -> None:
+        """Flag keeps its last-collision value when no new collision occurs."""
+        game = PikachuVolleyball()
+        game.reset()
+        # Park the ball far from both players so no collision fires.
+        game._state.ball.x = NET_PILLAR_X
+        game._state.ball.y = 50
+        game._state.ball.vx = 0
+        game._state.ball.vy = 0
+        game._state.ball.is_power_hit = True  # prior power hit
+        state = game.step(NOOP, NOOP)
+        # No collision happened this frame → flag unchanged.
+        assert state.ball.is_power_hit is True

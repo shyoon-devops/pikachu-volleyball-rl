@@ -7,12 +7,8 @@ import './HyperparamForm.css'
 interface HyperparamFormProps {
   /** Current hyperparameter values (controlled). */
   params: Hyperparams
-  /** Selected bot level to start training against (controlled). */
-  botLevel: number
   /** Emitted when any hyperparameter field changes. */
   onParamsChange: (next: Hyperparams) => void
-  /** Emitted when bot level select changes. */
-  onBotLevelChange: (level: number) => void
   /** Disable all inputs (e.g. while disconnected). */
   disabled: boolean
 }
@@ -26,16 +22,25 @@ const FIELD_KEYS: Array<keyof Hyperparams> = [
 ]
 
 /**
- * HyperparamForm — a controlled input form for PPO hyperparameters and the
- * starting bot level. Intentionally does NOT render a submit button: the
- * single Start control lives in <TrainingControls /> to avoid a
- * duplicate-CTA UX bug. Submit the values via that button.
+ * HyperparamForm — a controlled input form for PPO hyperparameters.
+ *
+ * Option A (2026-04-12): bot_level was removed from this form. The
+ * dashboard has a single source of truth for difficulty — the
+ * "Bot Level" L1–L5 buttons in <TrainingControls /> bound to
+ * ``status.botLevel``. Clicking those fires ``training:set_level``
+ * directly (accepted in any state including 'stopped'); the next
+ * ``training:start`` carries no ``bot_level`` field, and the BE
+ * dispatcher substitutes ``status.bot_level`` (handlers.py:131-135,
+ * schemas.py:92). This eliminates the two-source inconsistency where
+ * the form's dropdown silently overrode a freshly-set level.
+ *
+ * Intentionally does NOT render a submit button: the single Start
+ * control lives in <TrainingControls /> to avoid a duplicate-CTA UX
+ * regression. Submit via that button.
  */
 export function HyperparamForm({
   params,
-  botLevel,
   onParamsChange,
-  onBotLevelChange,
   disabled,
 }: HyperparamFormProps) {
   const handleFieldChange = (key: keyof Hyperparams, value: string) => {
@@ -73,26 +78,11 @@ export function HyperparamForm({
             </div>
           )
         })}
-        <div>
-          <label className="hyperparam-form-label" htmlFor="hyperparam-bot-level">
-            bot_level
-          </label>
-          <select
-            id="hyperparam-bot-level"
-            value={botLevel}
-            onChange={e => onBotLevelChange(Number(e.target.value))}
-            className="hyperparam-form-select"
-            disabled={disabled}
-          >
-            {[1, 2, 3, 4, 5].map(l => (
-              <option key={l} value={l}>Level {l}</option>
-            ))}
-          </select>
-        </div>
       </div>
 
       <p className="hyperparam-form-hint">
         Adjust values, then press <strong>Start</strong> above to begin training.
+        Bot level is picked via the <strong>L1–L5</strong> buttons above.
       </p>
     </section>
   )

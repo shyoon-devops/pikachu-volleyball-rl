@@ -139,6 +139,22 @@ describe('TrainingControls', () => {
     expect(send).toHaveBeenCalledWith('training:set_level', { level: 3 })
   })
 
+  it('bot level buttons fire training:set_level when state=stopped (Option A carry-over)', () => {
+    // Option A depends on this path: before Start, the user picks a
+    // level here; BE accepts training:set_level regardless of state
+    // (backend/rl/trainer.py:223 — no state guard), updates
+    // status.botLevel, and the next training:start (which omits
+    // bot_level) picks it up via schemas.py:92.
+    //
+    // A regression that disabled these buttons while stopped would
+    // silently trap Option A — the user could "pick" L5 but ship L1.
+    const { send } = renderControls({ status: { state: 'stopped' } })
+    const lvl5 = screen.getByLabelText('Set bot level to 5')
+    expect(lvl5).not.toBeDisabled()
+    fireEvent.click(lvl5)
+    expect(send).toHaveBeenCalledWith('training:set_level', { level: 5 })
+  })
+
   it('displays step and episode counters', () => {
     renderControls({ status: { currentStep: 5000, currentEpisode: 250 } })
     expect(screen.getByText('5,000')).toBeInTheDocument()

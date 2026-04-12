@@ -48,7 +48,11 @@ type RouteResponder = (url: string) => {
  * returns independently.
  */
 function installFetchRouter(responder: RouteResponder) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+  // Accept the optional `init` param to match `fetch`'s runtime signature.
+  // Declared as `unknown` + underscore so it's documented-as-ignored in
+  // one place instead of triggering no-unused-vars everywhere.
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, ..._init: [RequestInit?]) => {
+    void _init
     const url = typeof input === 'string' ? input : input.toString()
     const { ok, status, payload } = responder(url)
     return {
@@ -277,43 +281,24 @@ describe('useTrainingState — REST hydration (CRITICAL: refresh wipes graph/gam
     })
   })
 
-  it('seeds the metrics chart from /api/training/metrics/aggregate on mount', async () => {
-    installFetchRouter(url => {
-      if (url.startsWith('/api/training/metrics/aggregate')) {
-        return {
-          ok: true,
-          payload: {
-            data: [
-              {
-                bucket_start: '2026-04-12T10:00:00Z',
-                count: 100,
-                step_max: 1000,
-                avg_mean_reward: 0.5,
-                avg_win_rate: 0.3,
-                avg_policy_loss: 0.01,
-                avg_value_loss: 0.02,
-              },
-              {
-                bucket_start: '2026-04-12T10:01:00Z',
-                count: 100,
-                step_max: 2000,
-                avg_mean_reward: 0.6,
-                avg_win_rate: 0.4,
-                avg_policy_loss: 0.009,
-                avg_value_loss: 0.018,
-              },
-            ],
-            count: 2,
-            bucket: '1m',
-          },
-        }
-      }
+  // Metrics REST hydration is intentionally DISABLED as a P0 stopgap
+  // (2026-04-12). The aggregate endpoint returns 1-minute-bucket
+  // averages, which diverge visibly from the live WS per-snapshot
+  // stream and caused a "refresh shows different data" bug.
+  //
+  // Re-enable (via /api/training/timeseries) once BE lands the raw
+  // endpoint; see useTrainingState.ts TODO block for the rollout plan.
+  it('does NOT call /api/training/metrics/aggregate on mount (P0 stopgap)', async () => {
+    const fetchMock = installFetchRouter(url => {
       if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
       if (url.startsWith('/api/training/status')) {
         return {
           ok: true,
           payload: { state: 'stopped', current_step: 0, current_episode: 0 },
         }
+      }
+      if (url.startsWith('/api/training/metrics/aggregate')) {
+        return { ok: true, payload: EMPTY_METRICS_PAYLOAD }
       }
       return { ok: false, status: 404, payload: {} }
     })
@@ -324,9 +309,22 @@ describe('useTrainingState — REST hydration (CRITICAL: refresh wipes graph/gam
       </TrainingStateProvider>,
     )
 
+    // Wait for the mount-phase fetches to settle (status + games fire).
     await waitFor(() => {
-      expect(screen.getByTestId('metrics-count').textContent).toBe('2')
+      const statusCalls = fetchMock.mock.calls.filter(([u]) =>
+        typeof u === 'string' && u.startsWith('/api/training/status'),
+      )
+      expect(statusCalls.length).toBeGreaterThanOrEqual(1)
     })
+
+    // No aggregate call happened. Live WS is the only metrics source.
+    const aggregateCalls = fetchMock.mock.calls.filter(([u]) =>
+      typeof u === 'string' && u.startsWith('/api/training/metrics/aggregate'),
+    )
+    expect(aggregateCalls.length).toBe(0)
+
+    // Metrics list stays empty on mount.
+    expect(screen.getByTestId('metrics-count').textContent).toBe('0')
   })
 })
 

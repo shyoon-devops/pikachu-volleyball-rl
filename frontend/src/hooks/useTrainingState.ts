@@ -4,7 +4,9 @@ import {
   snakeToCamel,
   getTrainingStatus,
   getRecentGames,
-  getMetricsHistory,
+  // getMetricsHistory intentionally NOT imported — see metrics-hydration
+  // TODO block below. Re-enable (via getTimeseries) once BE lands
+  // /api/training/timeseries per API spec v0.2.4.
   getCurrentFrame,
   stopTraining,
   pauseTraining,
@@ -135,26 +137,51 @@ export function useTrainingStateImpl(): TrainingState {
     return () => { cancelled = true }
   }, [])
 
-  // Seed charts + recent-games table + game canvas from REST on mount.
-  // WS streams the live data going forward, but a refresh used to wipe
-  // all three panels since we started from empty state. REST gives us
-  // the current snapshot; the running WS then appends new points on top.
+  // Seed recent-games table + game canvas from REST on mount. WS streams
+  // the live data going forward, but a refresh used to wipe both panels
+  // since we started from empty state. REST gives us the current
+  // snapshot; the running WS then appends new points on top.
   //
   // `/api/training/current_frame` (API spec v0.2.4) lets the game canvas
   // repaint immediately after refresh instead of waiting ~30ms for the
   // first WS `training:frame`. Returns null when training isn't running —
   // in that case we leave latestFrame null and the canvas renders its
   // idle placeholder.
+  //
+  // ────────────────────────────────────────────────────────────────
+  // METRICS HYDRATION DISABLED (P0 stopgap, 2026-04-12)
+  // ────────────────────────────────────────────────────────────────
+  // `/api/training/metrics/aggregate` returns 1-minute-wall-clock
+  // buckets with AVG(mean_reward, win_rate, policy_loss, value_loss)
+  // plotted against bucket step_max. Live WS `training:metrics`
+  // streams per-snapshot raw values plotted against actual step.
+  //
+  // Seeding the live chart from the aggregate endpoint caused a
+  // user-reported "refresh shows different data" bug: same (step, Y)
+  // pair yielded different values because the REST point was an
+  // average of several snapshots and the live point was a single
+  // snapshot. Disabling hydration makes the chart start empty on
+  // refresh and fill in from WS — at least it no longer lies.
+  //
+  // TODO(FE): Re-enable via `getTimeseries(experimentId, sinceStep)`
+  // once BE lands `GET /api/training/timeseries` (API spec v0.2.4).
+  // That endpoint returns raw per-snapshot points matching the live
+  // WS resolution 1:1. At that point also add dedup + step-sort merge
+  // so the seed + live stream join cleanly:
+  //
+  //     setMetrics(prev => {
+  //       const byStep = new Map<number, TrainingMetrics>()
+  //       for (const m of history) byStep.set(m.step, m)
+  //       for (const m of prev) byStep.set(m.step, m)  // live wins
+  //       return [...byStep.values()]
+  //         .sort((a, b) => a.step - b.step)
+  //         .slice(-MAX_METRICS_POINTS)
+  //     })
+  //
+  // See docs/NOTICE-FRONTEND-METRICS-HYDRATION.md for the PM-approved
+  // rollout plan.
   useEffect(() => {
     let cancelled = false
-    getMetricsHistory('1m')
-      .then(history => {
-        if (cancelled || history.length === 0) return
-        // Only seed if we don't already have live data from the WS
-        // (avoids clobbering mid-session arrivals on slow responses).
-        setMetrics(prev => (prev.length > 0 ? prev : history))
-      })
-      .catch(() => { /* best-effort */ })
     getRecentGames(SEED_RECENT_GAMES)
       .then(games => {
         if (cancelled || games.length === 0) return

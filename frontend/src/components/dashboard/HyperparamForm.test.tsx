@@ -3,24 +3,18 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { HyperparamForm } from './HyperparamForm'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 
-function renderForm(overrides: {
-  disabled?: boolean
-  botLevel?: number
-} = {}) {
+function renderForm(overrides: { disabled?: boolean } = {}) {
   const onParamsChange = vi.fn()
-  const onBotLevelChange = vi.fn()
 
   render(
     <HyperparamForm
       params={DEFAULT_HYPERPARAMS}
-      botLevel={overrides.botLevel ?? 1}
       onParamsChange={onParamsChange}
-      onBotLevelChange={onBotLevelChange}
       disabled={overrides.disabled ?? false}
     />,
   )
 
-  return { onParamsChange, onBotLevelChange }
+  return { onParamsChange }
 }
 
 describe('HyperparamForm', () => {
@@ -56,23 +50,35 @@ describe('HyperparamForm', () => {
     )
   })
 
-
-  it('emits onBotLevelChange when the select changes', () => {
-    const { onBotLevelChange } = renderForm()
-    const select = screen.getByLabelText('bot_level') as HTMLSelectElement
-    fireEvent.change(select, { target: { value: '4' } })
-    expect(onBotLevelChange).toHaveBeenCalledWith(4)
+  it('does NOT render a bot_level control (Option A — single source is TrainingControls)', () => {
+    renderForm()
+    // The old duplicated dropdown was the root cause of the two-source
+    // bot-level inconsistency: picking L5 on TrainingControls could be
+    // silently overwritten by starting training with this form's L1
+    // default. Removing it is the fix — guard against re-introduction.
+    expect(screen.queryByLabelText('bot_level')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
   })
 
-  it('disables all inputs when disabled=true', () => {
+  it('disables all hyperparam inputs when disabled=true', () => {
     renderForm({ disabled: true })
     expect(screen.getByLabelText('learning_rate')).toBeDisabled()
-    expect(screen.getByLabelText('bot_level')).toBeDisabled()
+    expect(screen.getByLabelText('n_steps')).toBeDisabled()
+    expect(screen.getByLabelText('batch_size')).toBeDisabled()
+    expect(screen.getByLabelText('gamma')).toBeDisabled()
+    expect(screen.getByLabelText('clip_range')).toBeDisabled()
   })
 
   it('points the user to the Start button with a hint', () => {
     renderForm()
-    // Text is broken by a <strong>, so match on a stable suffix.
+    // Text is broken by <strong> tags, so match on stable fragments.
     expect(screen.getByText(/above to begin training/i)).toBeInTheDocument()
+  })
+
+  it('tells the user where bot level is picked (single source of truth)', () => {
+    renderForm()
+    // Hint must point at the L1–L5 buttons rather than a dropdown in
+    // this form — so the user doesn't hunt for a missing control.
+    expect(screen.getByText(/L1.?L5/)).toBeInTheDocument()
   })
 })
