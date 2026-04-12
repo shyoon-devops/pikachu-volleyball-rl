@@ -6,7 +6,6 @@ from backend.game.constants import (
     BALL_GROUND_Y,
     GRAVITY,
     MAX_SCORE,
-    NET_PILLAR_TOP_Y,
     NET_PILLAR_X,
     PLAYER_GROUND_Y,
     PLAYER_HALF_LENGTH,
