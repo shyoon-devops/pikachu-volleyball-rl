@@ -35,6 +35,19 @@ export interface BallState {
   previousY?: number
   previousPreviousX?: number
   previousPreviousY?: number
+  /**
+   * Bottom-hit (punch) radial-effect anchor, emitted by BE on the frame
+   * a punch lands so the FE can render an expanding ring centered at
+   * the impact point. `punchEffectRadius` grows tick-by-tick on the
+   * engine side; FE reads the authoritative value each frame rather
+   * than animating locally. All three fields are optional until the
+   * engine WS payload ships them (AI Engineer track, 2026-04-12). Wire
+   * name is snake_case (`punch_effect_x/y/radius`) — snakeToCamel in
+   * useTrainingState.handleFrame produces these camelCase keys.
+   */
+  punchEffectX?: number
+  punchEffectY?: number
+  punchEffectRadius?: number
 }
 
 export interface GameState {
