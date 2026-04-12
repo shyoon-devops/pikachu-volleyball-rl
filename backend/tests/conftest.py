@@ -159,6 +159,22 @@ async def _test_lifespan(app):
     pass
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--base-url",
+        default="http://localhost:8001",
+        help="Base URL for regression tests (default: dev)",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "load: marks tests that exert heavy concurrency/load "
+        "(deselect with -m 'not load')",
+    )
+
+
 @pytest.fixture
 def rl_env():
     from backend.rl.env import PikachuVolleyballEnv
