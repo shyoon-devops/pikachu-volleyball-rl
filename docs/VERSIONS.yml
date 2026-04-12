@@ -14,16 +14,34 @@
 #   last_verified_at   : when this YAML entry was last confirmed via curl + docker inspect
 
 schema_version: 1
-last_file_update: 2026-04-12T16:40:00+09:00   # v0.2.3 tag cut — supersedes v0.2.2 (never deployed)
+last_file_update: 2026-04-12T18:40:00+09:00   # v0.2.4 SHA map re-alignment (DevOps Option A)
 authoritative_source: docs/VERSIONS.yml       # this file supersedes README + DEPLOYMENT-STATUS on port/version conflicts
 
 release_history:
+  - version: v0.2.4
+    tag_target: dabd84a1                      # actual runtime source (built container image)
+    doc_head: d4a89231                        # dev HEAD with CHANGELOG + release note expansion on top of dabd84a1
+    cut_at: 2026-04-12T18:20:00+09:00
+    deployed_envs: [dev, qa, prod]
+    scope: "4 CRITICAL (live-UI hydration, optimistic controls, BE stop/pause halt, rally-timeout safety valve) + hyper-ball power-hit visual + /timeseries endpoint + bot_level Option A single source + promote.sh backend restart fix"
+    bundle: assets/index-DqBsWzf5.js
+    env_tags:
+      v0.2.4-dev: dabd84a1
+      v0.2.4-qa: dabd84a1
+      v0.2.4-prod: dabd84a1
+    notes: >
+      DevOps Option A (2026-04-12 ~18:30): qa branch fast-forwarded to dabd84a1,
+      prod branch advanced to d4a89231 (docs-ahead by 2 commits — runtime unchanged).
+      main branch advance to d4a89231 pending DevOps push. All env tags anchor to
+      dabd84a1 = actual runtime image source; CHANGELOG + release note content
+      lives at d4a89231 (docs-only delta).
   - version: v0.2.3
-    tag_target: 77b871dd
+    tag_target: 737a088f
     cut_at: 2026-04-12T16:40:00+09:00
-    deployed_envs: []                         # pending DevOps
+    deployed_envs: [dev, qa, prod]
     supersedes: v0.2.2                        # v0.2.2 tagged but never deployed
     scope: "v0.2.2 QA blocker hotfix bundle (BE-6 WS broadcast + net-collision + bot variance)"
+    superseded_by: v0.2.4
   - version: v0.2.2
     tag_target: 2582886b
     cut_at: 2026-04-12T16:03:00+09:00
@@ -35,6 +53,7 @@ release_history:
     cut_at: 2026-04-12T00:00:00+09:00
     deployed_envs: [dev, qa]
     scope: "Sprint 1 (16 bugs + BE-1/BE-2/BE-3 + BUG-1..7)"
+    superseded_by: v0.2.3
   - version: v0.2.0
     tag_target: d8fc62e
     cut_at: 2026-04-11T00:00:00+09:00
@@ -45,6 +64,7 @@ release_history:
     cut_at: 2026-04-11T00:00:00+09:00
     deployed_envs: [prod]
     scope: "Initial release"
+    superseded_by: v0.2.4
 
 environments:
   dev:
@@ -52,97 +72,114 @@ environments:
     host_frontend: 192.168.0.248
     backend:
       port: 8001
-      status: stale            # v0.2.2 tagged in git but deploy not executed yet — dev server still running v0.2.1 (482df2d1)
+      status: up                              # v0.2.4 force-recreate 완료
       health_endpoint: /api/health
-      live_endpoint: /api/health/live   # present (BE-3 verified in v0.2.1)
-      ready_endpoint: /api/health/ready # present
-      openapi_version_field: "0.1.0"    # hardcoded in FastAPI app, not reliable
-      commit: UNKNOWN          # DevOps to fill in (#38 + v0.2.2 redeploy)
-      image: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
-      training_state: stopped  # verified 2026-04-12
+      live_endpoint: /api/health/live
+      ready_endpoint: /api/health/ready
+      openapi_version_field: "0.2.4"
+      commit: dabd84a1                        # runtime code HEAD (image built from this SHA)
+      image: UNKNOWN                          # DevOps to fill docker inspect digest
+      built_at: 2026-04-12T18:00:00+09:00
+      deployed_at: 2026-04-12T18:15:00+09:00
+      training_state: stopped
+      runtime_verified:
+        - "/timeseries endpoint present"
+        - "ball.is_power_hit flag present"
+        - "rally-timeout (RALLY_MAX_FRAMES=600) present"
+        - "backend uptime 2min after force-recreate"
     frontend:
       port: 3000
-      status: stale            # serving v0.2.1 bundle index-CAYlGd5L.js until v0.2.2 frontend rebuild
-      bundle: assets/index-CAYlGd5L.js
-      commit: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
+      status: up
+      bundle: assets/index-DqBsWzf5.js        # v0.2.4 bundle (byte-identical across 3 envs)
+      commit: dabd84a1                        # FE build source = runtime SHA
+      built_at: 2026-04-12T18:00:00+09:00
+      deployed_at: 2026-04-12T18:15:00+09:00
     mongodb:
-      port: UNKNOWN            # documented :27018 — unverified
+      port: 27018
       status: UNKNOWN
     git_branch: dev
-    git_branch_head: 77b871dd  # v0.2.3 tag target — 3 hotfixes on top of 2582886b (v0.2.2)
-    tag_at_head: v0.2.3        # tag points here (annotated). v0.2.2 tag at 2582886b retained but superseded.
-    deploy_pending: true       # runtime still v0.2.1 until DevOps executes v0.2.3 deploy-{backend,frontend}.sh dev
-    notes: >
-      v0.2.3 tag cut at 77b871dd on 2026-04-12 16:40 +09:00. Supersedes v0.2.2
-      (tagged at 2582886b but never deployed). Includes Sprint 2 scope + 3 QA
-      blocker hotfixes (BE-6 WS broadcast 91c7233d, net-collision vx bf6397cc,
-      bot variance knobs 6af36c0c). Runtime still on v0.2.1 — waiting on
-      DevOps to execute v0.2.3 full-stack deploy (dev→qa→prod). Trainer PR #42
-      + Evaluator PR #44 deferred to post-v0.2.3.
+    git_branch_head: d4a89231                 # docs commits (921b0efb + d4a89231) on top of dabd84a1 runtime
+    tag_at_head: null                         # v0.2.4 annotated tag is on dabd84a1, not branch HEAD
+    env_tag: v0.2.4-dev                       # → dabd84a1
+    deploy_pending: false
 
   qa:
     host_backend: 192.168.0.250
     host_frontend: 192.168.0.248
     backend:
-      port: 8002               # documented; currently DOWN
-      status: down             # verified via curl 2026-04-12 — ISSUE #38
-      commit: UNKNOWN
+      port: 8002
+      status: up                              # v0.2.4 배포 완료 (qa backend :8002 복구 + v0.2.4)
+      health_endpoint: /api/health
+      live_endpoint: /api/health/live
+      ready_endpoint: /api/health/ready
+      openapi_version_field: "0.2.4"
+      commit: dabd84a1
       image: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
+      built_at: 2026-04-12T18:00:00+09:00
+      deployed_at: 2026-04-12T18:15:00+09:00
+      training_state: stopped
+      runtime_verified:
+        - "byte-identical container image as dev (same SHA)"
     frontend:
       port: 3001
       status: up
-      bundle: assets/index-CAYlGd5L.js   # byte-identical to dev + prod
-      commit: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
+      bundle: assets/index-DqBsWzf5.js        # byte-identical to dev + prod
+      commit: dabd84a1
+      built_at: 2026-04-12T18:00:00+09:00
+      deployed_at: 2026-04-12T18:15:00+09:00
     mongodb:
-      port: UNKNOWN
+      port: 27019
       status: UNKNOWN
     git_branch: qa
-    git_branch_head: 1baa3e3b  # "chore: promote dev to qa" (includes BE-2/BE-3)
+    git_branch_head: d4a89231                 # advanced to dev HEAD (DevOps Option A)
     tag_at_head: null
+    env_tag: v0.2.4-qa                        # → dabd84a1 (runtime source)
+    deploy_pending: false
     notes: >
-      Backend currently down. Git branch includes v0.2.1 scope via re-promotion,
-      but nothing is actually serving.
+      DevOps Option A (2026-04-12 ~18:30) fast-forwarded qa branch to d4a89231,
+      which contains dabd84a1 (runtime source) + 2 docs commits. Runtime image
+      built from dabd84a1, bundle byte-identical to dev + prod.
 
   prod:
     host_backend: 192.168.0.250
     host_frontend: 192.168.0.248
     backend:
-      port: 8003               # VERIFIED — previously documented :8000 was wrong
+      port: 8003
       status: up
       health_endpoint: /api/health
-      live_endpoint: MISSING   # /api/health/live returns 404 — pre-BE-3 code
-      ready_endpoint: MISSING  # /api/health/ready returns 404
-      openapi_version_field: "0.1.0"
-      commit: UNKNOWN          # DevOps to fill; feature set suggests pre-v0.2.1
+      live_endpoint: /api/health/live         # v0.2.4 runtime has BE-3 split
+      ready_endpoint: /api/health/ready
+      openapi_version_field: "0.2.4"
+      commit: dabd84a1
       image: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
+      built_at: 2026-04-12T18:00:00+09:00
+      deployed_at: 2026-04-12T18:15:00+09:00
       training_state: stopped
+      runtime_verified:
+        - "v0.1.0-era → v0.2.4 jump (BE-3/SEC-1-3/BUG-1-7/BE-1-7/FE-1-9 + Sprint 2 + v0.2.3 hotfix + v0.2.4 live-UI + hyper-ball)"
+        - "byte-identical container image as dev/qa"
     frontend:
-      port: 3002               # VERIFIED — previously documented :5173 was wrong
+      port: 3002
       status: up
-      bundle: assets/index-CAYlGd5L.js   # byte-identical to dev + qa
-      commit: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
+      bundle: assets/index-DqBsWzf5.js
+      commit: dabd84a1
+      built_at: 2026-04-12T18:00:00+09:00
+      deployed_at: 2026-04-12T18:15:00+09:00
     mongodb:
-      port: 27020              # per PM report, unverified by curl (mongodb wire protocol)
+      port: 27020
       status: UNKNOWN
     git_branch: prod
-    git_branch_head: 41f4fdb1
-    tag_at_head: null          # v0.1.0 tag is on main (fdc41de), prod has drifted
+    git_branch_head: d4a89231                 # advanced past v0.1.0-era (41f4fdb1) to dev HEAD
+    tag_at_head: null                         # v0.2.4 annotated tag is on dabd84a1 (runtime)
+    env_tag: v0.2.4-prod                      # → dabd84a1 (runtime source)
+    deploy_pending: false
+    prod_branch_advance_pending: false        # DONE 2026-04-12
     notes: >
-      Running pre-BE-3 / pre-BUG-2 code. v0.2.1 NOT deployed despite v0.2.1 tag
-      existing on github/dev. Prod backend returns hardcoded {"status":"ok"} to
-      /api/health (the exact behavior BUG-2 was filed against).
+      prod branch advanced from v0.1.0-era 41f4fdb1 to d4a89231 during this
+      deploy window. Runtime image built from dabd84a1. Branch contains docs
+      expansion (921b0efb + d4a89231) on top of runtime. main advance + merge
+      pending DevOps push (VERSIONS/DEPLOYMENT-STATUS will be updated again
+      at that time).
 
 # =========================================================================
 # DevOps update protocol:

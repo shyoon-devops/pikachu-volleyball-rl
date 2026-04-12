@@ -9,37 +9,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 v0.2.4 이후 scope. Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) + Evaluator PR #44 (E1-E10 baseline comparator / batch eval / history / timeseries / Elo tracker) 후속 릴리스 후보.
 
-## [0.2.4] - 2026-04-12 (post-v0.2.3 live-UI + engine-stall hotfix bundle / dev HEAD 20c00b70)
+## [0.2.4] - 2026-04-12 (post-v0.2.3 live-UI + engine + hyper-ball bundle / dev HEAD dabd84a1)
 
-v0.2.3 을 3 환경(dev/qa/prod)에 배포한 직후 PM 의 실사용 테스트에서 확인된 4 CRITICAL 이슈 긴급 수정. 3건은 live-UI 제어 불가 (WS 상태 동기화, 새로고침 복원, Stop/Pause 실제 중단) + 1건은 엔진 무한 rally deadlock. 어느 하나도 해소되지 않으면 사용자/RL 모두 정상 훈련 사이클을 돌릴 수 없는 상태.
+v0.2.3 을 3 환경(dev/qa/prod)에 배포한 직후 PM 의 실사용 테스트 + 추가 UX 리서치로 식별한 4 CRITICAL 수정 + 6 UX/정합성 개선의 번들. 모두 같은 deploy window 에서 dev 에 착지했고 DevOps 가 전 환경에 `index-DqBsWzf5` bundle 로 단일 배포.
 
 ### Fixed — Live-UI CRITICAL
 
-- **FE REST hydration on mount + reconnect** (`bd6cea5a`): `fix(ui): sync training status from REST on mount + reconnect (CRITICAL)` — `useTrainingStateImpl` 이 `status={state:'stopped', ...}` 하드코딩으로 시작하고 `training:status` WS 메시지는 *state change* 시에만 브로드캐스트되었기 때문에, 훈련이 돌아가는 중에 페이지를 새로고침하면 Start 버튼만 보이고 Stop 버튼이 없어서 사용자가 개입할 수 없었음. mount 시 `GET /api/training/status` + 재연결 시 re-fetch 로 복원
-- **FE optimistic Stop/Pause/level + REST hydration for graphs/games** (`06519a42`): `fix(ui): optimistic Stop/Pause/level + REST hydration for graphs/games (CRITICAL)` — 4 user-reported 버그 해소 (Stop 무반응, Pause 무반응, 새로고침 시 그래프/최근경기 패널 공백, Bot Level 버튼 선택 표시 없음). `wsSend` 를 optimistic local state 로 감싸고 mount 시 `/api/training/metrics/aggregate` + `/api/games?limit=20` + 게임 캔버스 REST seed 로 즉시 복원
-- **BE stop/pause 실제 중단 + step/episode metrics broadcast** (`ee1b48ae`): `fix(training): stop/pause actually halt training + broadcast step/episode metrics` — QA 의 Stop/Pause no-op + step/episode counter 0/0 고착 원인 근본 해결. `TrainingManager` 에 `threading.Event` pair (stop + pause) 를 SB3 `CallbackList` 를 통해 worker thread 에 연결 → 실제 unwinding. `LiveFrameCallback` 이 `last_frame` 을 갱신해 새로고침 시 캔버스 즉시 repaint. `GET /api/training/status` 에 `bot_level`/`experiment_id`/`started_at` 추가. 상태변이 REST 엔드포인트(`/stop`, `/pause`, `/resume`, `/set_level`) 가 `training:status` 를 broadcast 하도록 통일 — WS control surface 와 REST control surface 가 완전 대칭
+- **FE REST hydration on mount + reconnect** (`bd6cea5a`): `useTrainingStateImpl` 이 `status={state:'stopped', ...}` 하드코딩으로 시작하고 `training:status` WS 메시지는 *state change* 시에만 브로드캐스트되어, 훈련 중 새로고침 시 Start 버튼만 보이고 Stop 이 사라져 개입 불가. mount 시 `GET /api/training/status` + 재연결 시 re-fetch 로 복원
+- **FE optimistic Stop/Pause/level + REST hydration for graphs/games** (`06519a42`): 4 user-reported 버그 해소 (Stop 무반응, Pause 무반응, 새로고침 시 그래프/최근경기 패널 공백, Bot Level 버튼 선택 표시 없음). `wsSend` 를 optimistic local state 로 감싸고 mount 시 `/api/training/metrics/aggregate` + `/api/games?limit=20` + 게임 캔버스 REST seed 로 즉시 복원
+- **BE stop/pause 실제 중단 + step/episode metrics broadcast** (`ee1b48ae`): Stop/Pause no-op + step/episode counter 0/0 고착 근본 해결. `TrainingManager` 에 `threading.Event` pair (stop + pause) 를 SB3 `CallbackList` 에 연결 → worker thread 실제 unwinding. `LiveFrameCallback` 이 `last_frame` 갱신해 새로고침 시 캔버스 즉시 repaint. `GET /api/training/status` 에 `bot_level`/`experiment_id`/`started_at` 추가. REST `/stop`/`/pause`/`/resume`/`/set_level` 이 `training:status` broadcast 수행 → WS control surface 와 완전 대칭
 
 ### Fixed — Engine/RL CRITICAL
 
-- **Rally-timeout safety valve + RL truncation** (`913fca5f`): `fix(engine): add rally-timeout safety valve + RL truncation (hotfix)` — weak RL policy 가 자기 쪽에서 무한 self-toss 로 rally 를 끌어 다음 게임으로 진행하지 못하던 deadlock. 선행 reward-shaping(`f8ea6126`)만으로는 penalty 는 줬으나 bound 가 없었음. (C) 엔진 net-crossing timeout: `GameState.frames_since_net_crossing` + `round_ended_by_timeout` 도입, 600 frames (10s @ 60fps) net 미통과 시 ball 미보유 side 에 point + fresh serve. (D) env 에피소드 truncation: `truncated=True` + `_RALLY_TIMEOUT_PENALTY` 로 loss-shaped terminal 신호 → PPO 가 reward farm 으로 악용하지 않도록. `backend/tests/test_engine.py::TestRallyTimeout` 5 케이스 신설 (타임아웃 point 할당, crossing 시 counter 리셋, 비-크로싱 증가, reset 시 클리어, 정상 ground 은 timeout 플래그 OFF)
+- **Rally-timeout safety valve + RL truncation** (`913fca5f`): weak RL policy 무한 self-toss deadlock 방지. (C) 엔진 600 frames (10s @ 60fps) net 미통과 시 ball 미보유 side 에 point + fresh serve (`GameState.frames_since_net_crossing` + `round_ended_by_timeout`). (D) env 에피소드 truncation + `_RALLY_TIMEOUT_PENALTY` 로 PPO 에 loss-shaped terminal 신호. `test_engine.py::TestRallyTimeout` 5 케이스
+
+### Fixed — Metrics chart consistency
+
+- **REST metrics hydration 비활성화 (P0 stopgap)** (`eaec7ba8`): 훈련 메트릭 차트가 새로고침 전후 같은 X(step) 에서 다른 Y 값을 보이던 문제. 원인은 WS `training:metrics`(per-snapshot raw) + REST `/metrics/aggregate`(1-min bucket AVG) 의 값 도메인 불일치. FE 가 REST 하이드레이션을 끄고 WS 만을 신뢰 — 후속 `/timeseries` 엔드포인트 (`581e2a58`) 가 정답 대체
+
+### Added — Hyper-ball (power hit) 시각 피드백
+
+- **Engine `ball.is_power_hit` authoritative flag** (`3b4303df`): FE `ballSpeed > 25` heuristic 이 실제 power hit 다수 누락 + 잔류 속도에서 false positive. gorisanson/pikachu-volleyball 원본의 `ball.isPowerHit` (physics.js:725/727, view.js:513) 를 BallState + WS `training:frame` payload 로 포트
+- **Types `BallState.isPowerHit` + `previousX/Y` + `previousPreviousX/Y`** (`d48d8a15`): FE 가 BE emitter 도착 전까지 undefined 로 기존 동작 유지하도록 Optional. 원본 t-1 / t-2 position 필드 정렬로 trail 렌더링 준비
+- **Canvas authoritative power-hit trail + 3-slot history** (`33f6b868`): `computePowerHitTrail(ball, history)` 순수 함수 + 3-slot 히스토리 버퍼. 원본 sprite 위치를 그대로 재현. `powerHitTrail.test.ts` 단위 스위트 신설
+- **FE keyboard-input spec 재조사** (`15c702ca`): "Enter 강타 unused" 사용자 피드백에 대한 원본 재조사 문서화. 현 FE 는 spectator-only 로 키보드 핸들러 없음 — 장래 인풋 구현 시 원본 바인딩 유지 (P1: D/G/R/V + Z power + F alt, P2: 대칭)
+
+### Added — Dashboard `/timeseries` 엔드포인트
+
+- **`GET /api/training/metrics/timeseries`** (`581e2a58`): FE-8 대시보드 하이드레이션 최종 계약 확정. `{step, value, timestamp}` 포인트 shape (timestamp 서버-스탬프 ISO-8601 UTC, persist 이후 non-null). default limit 100 → 1000 으로 확장 (새로고침 후 전체 trailing window 필요). `MetricsService.recent_points` 가 `timestamp` projection + naive datetime 을 UTC 로 정규화
+
+### Changed — Bot level single source of truth (Option A)
+
+- **WS `training:start.bot_level` Optional** (`d1728344`): 기존 기본값 1 로 인해 버튼으로 L5 선택 후 Start 시 L1 로 silent reset 되던 회귀 방지. Optional 시 dispatcher 가 `status.bot_level` 을 carry over
+- **FE Option A: `status.botLevel` single source** (`f63d7aab`): Training Controls L1-L5 + Hyperparameters dropdown 의 두 store 충돌 제거. PM 결정 (2026-04-12) — status.botLevel 이 유일한 진실
+- **Option A contract lock test** (`dabd84a1`): (1) dashboard `training:start` payload 가 bot_level 을 omit 하는지 + (2) L-buttons 이 stopped state 에서 clickable 유지되는지 불변 보호
+- **Fetch mock init param TS lint 통과** (`ca6c8fe3`): `_init?: RequestInit` drift 에서 `@typescript-eslint/no-unused-vars` 회피 — rest-arg + 명시적 void
 
 ### Changed — Deploy infra (related)
 
-- **`scripts/promote.sh` backend container restart 누락 수정** (`63e29b58`): v0.2.3 배포 시 frontend bundle 만 교체되고 backend 컨테이너는 옛 이미지로 유지되던 인시던트 대응. 자세한 내용은 `docs/incidents/20260412-dev-backend-stale.md`
+- **`scripts/promote.sh` backend container restart 누락 수정** (`63e29b58`): v0.2.3 배포 시 frontend bundle 만 교체되고 backend 컨테이너가 옛 이미지로 유지되던 인시던트 대응. 자세한 내용은 `docs/incidents/20260412-dev-backend-stale.md`
 
 ### Deployment
 
-- **v0.2.4 는 v0.2.3 위 3 commit 누적 번들** — DevOps 3 환경 재배포 진행 중. env tag `v0.2.4-{dev,qa,prod}` 각 배포 완료 시점 생성
-- **prod 는 v0.2.3 → v0.2.4 patch** — v0.2.3 이 prod 도달한 최초 릴리스가 된 직후의 hotfix
-- **frontend bundle prefix**: `JHqpaRFn` (v0.2.3 배포분에서 확인) — v0.2.4 rebuild 후 해시 갱신 예정
+- **3 환경(dev/qa/prod) 에 동일 bundle `index-DqBsWzf5` 배포 완료** (DevOps 보고: 2026-04-12, backend uptime 2분, force-recreate 완료). 컨테이너 신 코드 검증: `/timeseries` + `ball.is_power_hit` + rally-timeout 모두 포함
+- **env tag `v0.2.4-{dev,qa,prod}`** — 동일 commit (dev HEAD `dabd84a1`) 에 부착 (3 환경이 byte-identical bundle)
+- **prod 브랜치 forward** — `github/prod` 는 v0.1.0-era `41f4fdbb` 에 고착되어 있었음. v0.2.4 런타임 정합을 위해 dev HEAD 로 advance + main 머지
 
 ### Not in v0.2.4 (deferred)
 
-- Trainer PR #42 / Evaluator PR #44 (v0.2.5+ 후보)
+- Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum) — v0.2.5+
+- Evaluator PR #44 (E1-E10 baseline / batch eval / history / timeseries / Elo) — v0.2.5+
+- Keyboard input handler 실구현 (이번은 spec 문서화만)
 
 ### Rollback
 
-- target `v0.2.3` (`737a088f`). 단 v0.2.3 의 live-UI 이슈 3건이 다시 노출되므로 실제 롤백 시 사용자 훈련 제어 불가 복귀 → forward-fix 권장
+- target `v0.2.3` (`737a088f`). 단 live-UI 3 CRITICAL + 엔진 rally-deadlock + 차트 불일치 + L-level silent reset 이 재노출 → forward-fix 권장
 
 ## [0.2.3] - 2026-04-12 (v0.2.2 QA blocker 3 hotfix / dev HEAD 77b871dd)
 
