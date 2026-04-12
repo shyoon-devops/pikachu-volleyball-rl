@@ -1,0 +1,116 @@
+:root {
+  /* ── Surface / Background ────────────────────────────── */
+  --color-bg-primary:    #0f1117;
+  --color-bg-secondary:  #161822;
+  --color-bg-card:       rgba(22, 24, 34, 0.75);
+  --color-bg-elevated:   #1c1f2e;
+  --color-bg-hover:      #232638;
+  --color-bg-input:      #0d0e14;
+
+  /* ── Borders ─────────────────────────────────────────── */
+  --color-border:        rgba(255, 255, 255, 0.06);
+  --color-border-strong: rgba(255, 255, 255, 0.12);
+  --color-border-accent: rgba(255, 215, 0, 0.25);
+
+  /* ── Text ────────────────────────────────────────────── */
+  --color-text-primary:   #e8e9ed;
+  --color-text-secondary: #8b8fa3;
+  --color-text-muted:     #5a5e72;
+  --color-text-inverse:   #0f1117;
+
+  /* ── Accent: Pikachu Yellow ──────────────────────────── */
+  --color-accent:        #ffd700;
+  --color-accent-dim:    rgba(255, 215, 0, 0.15);
+  --color-accent-hover:  #ffe44d;
+
+  /* ── Electric Blue ───────────────────────────────────── */
+  --color-blue:          #4fc3f7;
+  --color-blue-dim:      rgba(79, 195, 247, 0.15);
+
+  /* ── Semantic ────────────────────────────────────────── */
+  --color-success:       #4ade80;
+  --color-success-dim:   rgba(74, 222, 128, 0.12);
+  --color-danger:        #f87171;
+  --color-danger-dim:    rgba(248, 113, 113, 0.12);
+  --color-warning:       #fbbf24;
+  --color-warning-dim:   rgba(251, 191, 36, 0.12);
+  --color-info:          #60a5fa;
+  --color-info-dim:      rgba(96, 165, 250, 0.12);
+
+  /* ── Chart / Neon palette ────────────────────────────── */
+  --color-chart-green:   #22c55e;
+  --color-chart-blue:    #3b82f6;
+  --color-chart-purple:  #a855f7;
+  --color-chart-orange:  #f59e0b;
+  --color-chart-red:     #ef4444;
+  --color-chart-cyan:    #06b6d4;
+
+  /* ── Game field ──────────────────────────────────────── */
+  --color-court-sky:     #1a2744;
+  --color-court-grass:   #1b5e20;
+  --color-court-grass-light: #2e7d32;
+  --color-player1:       #ffd700;
+  --color-player2:       #4fc3f7;
+  --color-ball:          #ffeb3b;
+  --color-net:           rgba(255, 255, 255, 0.65);
+
+  /* ── Typography ──────────────────────────────────────── */
+  --font-sans:  'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:  'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+
+  --text-xs:    clamp(0.6875rem, 0.65rem + 0.15vw, 0.75rem);   /* 11-12 */
+  --text-sm:    clamp(0.75rem,   0.7rem  + 0.2vw,  0.8125rem); /* 12-13 */
+  --text-base:  clamp(0.8125rem, 0.78rem + 0.2vw,  0.875rem);  /* 13-14 */
+  --text-lg:    clamp(0.9375rem, 0.9rem  + 0.2vw,  1rem);      /* 15-16 */
+  --text-xl:    clamp(1.125rem,  1rem    + 0.3vw,  1.25rem);    /* 18-20 */
+  --text-2xl:   clamp(1.5rem,    1.3rem  + 0.5vw,  1.75rem);   /* 24-28 */
+  --text-3xl:   clamp(2rem,      1.6rem  + 0.8vw,  2.5rem);    /* 32-40 */
+
+  --leading-tight:  1.25;
+  --leading-normal: 1.5;
+  --leading-loose:  1.75;
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* ── Spacing ─────────────────────────────────────────── */
+  --space-1:  0.25rem;   /* 4  */
+  --space-2:  0.5rem;    /* 8  */
+  --space-3:  0.75rem;   /* 12 */
+  --space-4:  1rem;      /* 16 */
+  --space-5:  1.25rem;   /* 20 */
+  --space-6:  1.5rem;    /* 24 */
+  --space-8:  2rem;      /* 32 */
+  --space-10: 2.5rem;    /* 40 */
+  --space-12: 3rem;      /* 48 */
+  --space-16: 4rem;      /* 64 */
+
+  /* ── Border Radius ───────────────────────────────────── */
+  --radius-sm:   4px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-xl:   16px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ─────────────────────────────────────────── */
+  --shadow-sm:   0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md:   0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg:   0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-glow-accent: 0 0 20px rgba(255, 215, 0, 0.15);
+  --shadow-glow-blue:   0 0 20px rgba(79, 195, 247, 0.15);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  /* ── Transitions ─────────────────────────────────────── */
+  --duration-fast:   120ms;
+  --duration-normal: 200ms;
+  --duration-slow:   350ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Layout ──────────────────────────────────────────── */
+  --content-max-width: 1440px;
+  --navbar-height: 52px;
+  --sidebar-width: 280px;
+}

@@ -1,0 +1,62 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  HyperparamForm.css — 하이퍼파라미터 입력 폼
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  Designer: FE에게 HyperparamForm.tsx에 아래 변경 요청:
+ *
+ *  1. import './HyperparamForm.css' 추가
+ *  2. <form>에 className="hyperparam-form card" 추가
+ *  3. grid <div>에 className="hyperparam-form__grid" 추가
+ *  4. 각 필드 wrapper <div>에 className="hyperparam-form__field" 추가
+ *  5. submit <button>에 className="btn btn-success hyperparam-form__submit" 추가
+ *  6. 위 요소들의 inline style={{}} 제거
+ *     (label, input, select의 inline style 포함)
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.hyperparam-form h3 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+}
+
+.hyperparam-form__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.hyperparam-form__field label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  display: block;
+  margin-bottom: 2px;
+  font-family: var(--font-mono);
+}
+
+.hyperparam-form__field input,
+.hyperparam-form__field select {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.hyperparam-form__field input:focus,
+.hyperparam-form__field select:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-dim);
+  outline: none;
+}
+
+.hyperparam-form__submit {
+  width: 100%;
+}

@@ -1,0 +1,151 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  EvalPanel.css — 모델 평가 패널
+ * ═══════════════════════════════════════════════════════════
+ *
+ *  Designer: FE에게 EvalPanel.tsx에 아래 변경 요청:
+ *
+ *  1. import './EvalPanel.css' 추가
+ *  2. 루트 <div>에 className="eval-panel" 추가
+ *  3. <h2>에 className="eval-panel__title" 추가
+ *  4. 에러 <div>에 className="eval-panel__error" 추가
+ *  5. 폼 카드 <div>에 className="eval-panel__form card" 추가
+ *  6. 폼 필드 행 <div>에 className="eval-panel__form-fields" 추가
+ *  7. 각 필드 wrapper <div>에 className="eval-panel__field" 추가
+ *  8. Run 버튼에 className="btn btn-primary" 추가
+ *  9. 필터 행 <div>에 className="eval-panel__filter" 추가
+ *  10. 필터 라벨 <span>에 className="eval-panel__filter-label" 추가
+ *  11. 필터 버튼들에 className="btn btn-ghost" + active 시 "active" 추가
+ *  12. 결과 테이블 <div>에 className="eval-panel__table card" 추가
+ *  13. 로딩 <div>에 className="eval-panel__loading" 추가
+ *  14. 위 요소들의 inline style={{}} 제거
+ *
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.eval-panel {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.eval-panel__title {
+  font-size: var(--text-xl);
+  color: var(--color-text-secondary);
+  margin: 0;
+  font-weight: var(--weight-medium);
+}
+
+.eval-panel__error {
+  padding: var(--space-3);
+  background: var(--color-danger-dim);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.eval-panel__form h3 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+}
+
+.eval-panel__form-fields {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.eval-panel__field label {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  display: block;
+  margin-bottom: 2px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.eval-panel__field select,
+.eval-panel__field input {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.eval-panel__field select:focus,
+.eval-panel__field input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-accent-dim);
+  outline: none;
+}
+
+.eval-panel__filter {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.eval-panel__filter-label {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.eval-panel__table {
+  overflow: hidden;
+  padding: 0;
+}
+
+.eval-panel__table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.eval-panel__table th {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.eval-panel__table td {
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.eval-panel__table tbody tr:hover {
+  background: var(--color-bg-hover);
+}
+
+.eval-panel__table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.eval-panel__table tbody tr:nth-child(even):hover {
+  background: var(--color-bg-hover);
+}
+
+.eval-panel__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-12);
+  color: var(--color-text-muted);
+}
