@@ -8,6 +8,7 @@ import {
   Sprite,
   AnimatedSprite,
   Texture,
+  TextureSource,
 } from 'pixi.js'
 import type { GameState } from '../../lib/types'
 import {
@@ -15,6 +16,13 @@ import {
   type BallHistoryPoint,
 } from './powerHitTrail'
 import './GameCanvas.css'
+
+// Pixel-art rendering: force NEAREST filter globally so texture atlas tiles do
+// not bleed their edge texels into neighboring transparent gutter pixels under
+// DPR>1 sub-pixel sampling. Without this PixiJS v8 defaults to LINEAR, which
+// produced visible RGB vertical stripes along the tiled sky background.
+// Must be set before Assets.load() so sprite_sheet.png inherits the mode.
+TextureSource.defaultOptions.scaleMode = 'nearest'
 
 // ── Original game constants (from physics.js) ──
 const COURT_WIDTH = 432
@@ -456,9 +464,14 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
         width: COURT_WIDTH,
         height: COURT_HEIGHT,
         background: 0x1a1a2e,
-        antialias: true,
+        // Pixel-art game — smoothing produces sub-pixel texel bleed which
+        // manifested as RGB vertical stripes on the tiled sky.
+        antialias: false,
         resolution: window.devicePixelRatio || 1,
         autoDensity: true,
+        // Snap sprite positions to integer pixels to further prevent
+        // sub-pixel sampling of atlas edge texels.
+        roundPixels: true,
       })
 
       if (destroyed) {
