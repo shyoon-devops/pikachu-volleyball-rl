@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useWebSocket } from './useWebSocket'
-import { snakeToCamel } from '../lib/api'
+import { snakeToCamel, getTrainingStatus } from '../lib/api'
 import type {
   GameState,
   TrainingMetrics,
@@ -85,6 +85,38 @@ export function useTrainingStateImpl(): TrainingState {
     ]
     return () => { unsubs.forEach(u => u()) }
   }, [subscribe, handleMetrics, handleFrame, handleStatus, handleGameResult])
+
+  // Sync authoritative training state from REST on mount and again whenever
+  // the WebSocket reconnects. WS broadcasts `training:status` only when the
+  // state *changes*, so a page refresh or mid-session reconnect could leave
+  // the UI showing the default 'stopped' state while training is actually
+  // running — reported as the refresh-shows-Start / Stop-not-wired bug.
+  useEffect(() => {
+    if (connectionState !== 'connected') return
+    let cancelled = false
+    getTrainingStatus()
+      .then(fresh => {
+        if (cancelled) return
+        setStatus(prev => ({ ...prev, ...fresh }))
+      })
+      .catch(() => {
+        // REST probe is best-effort; WS remains the live channel.
+      })
+    return () => { cancelled = true }
+  }, [connectionState])
+
+  // First-mount REST probe, even before the WebSocket opens, so the header
+  // and primary CTA are correct on refresh regardless of WS timing.
+  useEffect(() => {
+    let cancelled = false
+    getTrainingStatus()
+      .then(fresh => {
+        if (cancelled) return
+        setStatus(prev => ({ ...prev, ...fresh }))
+      })
+      .catch(() => { /* best-effort */ })
+    return () => { cancelled = true }
+  }, [])
 
   return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send }
 }
