@@ -142,16 +142,45 @@ was also wrong — please disregard).
 
 ---
 
+## Full-suite stability note (appended later)
+
+When running the four suites together in one pytest invocation against QA
+(13-minute run), 3 additional tests fail intermittently that all pass in
+isolation:
+
+- `test_disconnect_during_broadcast` — keepalive ping timeout
+- `test_start_returns_running_status_with_experiment_id` — running status
+  not received within 5s
+- `test_stop_then_resume` — resume status not received within 5s
+
+Pattern: late-in-suite tests hit a 5s timeout waiting for server response.
+Most likely a combination of (a) my e2e test timeouts being too tight for a
+loaded QA instance and (b) the server's GC/event-loop pressure after 10+
+minutes of burst-rate-limit tests.
+
+**Isolated-run pass rate:** 38/44 (excluding the 2 known `/api/health`
+rate-limit fails + 3 test_sprint1 skips).
+**Full-suite pass rate:** 43/48.
+
+Treat full-suite flakes as informational for now; will investigate test
+robustness separately. No known server regression.
+
+---
+
 ## Reproduce
 
 ```bash
 cd backend
-# Full re-verification (3 failures expected post-redeploy on current image)
+# Full re-verification (2 deterministic failures expected: /api/health
+# rate-limit both in test_burst_triggers_429 and the rate_limiting burst)
 python3 -m pytest \
   tests/test_sprint1_verification.py \
   tests/test_rate_limiting.py \
   tests/test_ws_resilience.py \
+  tests/test_e2e_training_flow.py \
   --base-url http://localhost:8002 -v
 ```
 
-Full results: 35 pass / 6 fail / 3 skip on `dab203bf580e…`.
+Full-suite results: 43 pass / 5 fail / 3 skip on `dab203bf580e…`.
+Isolated-suite results: 38 pass / 2 fail / 3 skip (the 2 `/api/health`
+rate-limit cases).
