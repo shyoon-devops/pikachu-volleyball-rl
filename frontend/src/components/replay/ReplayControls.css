@@ -72,7 +72,7 @@
 .replay-controls-speed-btn[data-active="true"],
 .replay-controls-speed-btn.active {
   background: var(--color-blue);
-  color: #fff;
+  color: var(--color-text-inverse);
   border-color: transparent;
   box-shadow: 0 0 12px var(--color-blue-dim);
 }
@@ -121,4 +121,23 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg-elevated);
+}
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .replay-controls-bar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .replay-controls-frame-info {
+    width: 100%;
+    margin-left: 0;
+    text-align: right;
+    order: -1;
+  }
+
+  .replay-controls-shortcuts {
+    gap: var(--space-1);
+  }
 }

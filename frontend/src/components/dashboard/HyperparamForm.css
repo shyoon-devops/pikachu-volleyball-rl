@@ -28,7 +28,7 @@
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   display: block;
-  margin-bottom: 2px;
+  margin-bottom: var(--space-1);
   font-family: var(--font-mono);
 }
 
@@ -67,7 +67,7 @@
 
 .hyperparam-form-submit:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 0 16px rgba(74, 222, 128, 0.25);
+  box-shadow: var(--shadow-glow-green);
 }
 
 .hyperparam-form-submit:disabled {

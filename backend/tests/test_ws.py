@@ -89,3 +89,25 @@ def test_ws_valid_set_level(client):
         resp = ws.receive_json()
         assert resp["type"] == "training:status"
         assert resp["payload"]["bot_level"] == 3
+
+
+def test_ws_pong_updates_liveness(client, app_instance):
+    """Client pong message updates the connection's last-pong time (BUG-4)."""
+    import time
+    ws_manager = app_instance.state.ws_manager
+
+    with client.websocket_connect("/ws") as ws:
+        # Grab the accepted WebSocket (single active connection).
+        assert ws_manager.active_count == 1
+        accepted_ws = next(iter(ws_manager._connections))
+        before = ws_manager._last_pong.get(accepted_ws, 0.0)
+
+        time.sleep(0.02)
+        ws.send_json({"type": "pong", "payload": {}})
+        # Give the server a beat to process; a follow-up round-trip synchronizes.
+        ws.send_json({"type": "training:stop", "payload": {}})
+        resp = ws.receive_json()
+        assert resp["type"] == "training:status"
+
+        after = ws_manager._last_pong.get(accepted_ws, 0.0)
+        assert after > before, "pong should update last_pong timestamp"

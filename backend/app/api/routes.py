@@ -1,21 +1,131 @@
 """REST API endpoints — see docs/PLAN.md section 3.1."""
 
 import asyncio
+import logging
 import os
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Limit concurrent evaluations (each can run minutes)
 _eval_semaphore = asyncio.Semaphore(1)
 
+# Health check thresholds
+_DISK_USAGE_THRESHOLD = 0.90  # 90%
+_QUEUE_DEPTH_WARN_RATIO = 0.90  # warn if a queue is >=90% full
+_MONGO_PING_TIMEOUT = 2.0  # seconds
+
+
+async def _check_mongo(request: Request) -> dict:
+    """Ping MongoDB; return {ok, latency_ms, error?}."""
+    client = getattr(request.app.state, "mongo_client", None)
+    if client is None:
+        return {"ok": False, "error": "mongo_client not initialized"}
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    try:
+        await asyncio.wait_for(client.admin.command("ping"), timeout=_MONGO_PING_TIMEOUT)
+        return {"ok": True, "latency_ms": round((loop.time() - start) * 1000, 2)}
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": f"ping timed out after {_MONGO_PING_TIMEOUT}s"}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def _check_disk() -> dict:
+    """Check disk usage against threshold.
+
+    Falls back to the current working directory when REPLAY_DIR is missing —
+    a non-existent data directory is a configuration concern, not disk
+    saturation.
+    """
+    candidates = [os.getenv("REPLAY_DIR", "./replays"), "."]
+    for path in candidates:
+        if path and Path(path).exists():
+            try:
+                usage = shutil.disk_usage(path)
+                ratio = usage.used / usage.total if usage.total else 0.0
+                return {
+                    "ok": ratio < _DISK_USAGE_THRESHOLD,
+                    "used_ratio": round(ratio, 4),
+                    "free_bytes": usage.free,
+                    "threshold": _DISK_USAGE_THRESHOLD,
+                    "path": path,
+                }
+            except Exception as e:
+                return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return {"ok": False, "error": "no usable path for disk check"}
+
+
+def _check_training(request: Request) -> dict:
+    """Check training thread liveness relative to reported status."""
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is None:
+        return {"ok": True, "state": "uninitialized"}
+    manager = getattr(training_service, "manager", None)
+    state = getattr(manager, "status", "stopped") if manager is not None else "stopped"
+    thread = getattr(manager, "_thread", None) if manager is not None else None
+    alive = bool(thread and thread.is_alive())
+    # If reported "running" but thread is dead, that's a failure.
+    if state == "running" and not alive:
+        return {"ok": False, "state": state, "thread_alive": False,
+                "error": "status=running but thread is not alive"}
+    return {"ok": True, "state": state, "thread_alive": alive}
+
+
+def _check_queues(request: Request) -> dict:
+    """Report queue depths; flag not-ok only if a bounded queue is saturated."""
+    training_service = getattr(request.app.state, "training_service", None)
+    manager = getattr(training_service, "manager", None) if training_service else None
+    if manager is None:
+        return {"ok": True, "queues": {}}
+    depths: dict[str, dict] = {}
+    saturated = False
+    for name in ("metrics_queue", "frames_queue", "results_queue"):
+        q = getattr(manager, name, None)
+        if q is None:
+            continue
+        size = q.qsize()
+        maxsize = q.maxsize
+        ratio = (size / maxsize) if maxsize else 0.0
+        depths[name] = {"size": size, "maxsize": maxsize, "ratio": round(ratio, 3)}
+        if maxsize and ratio >= _QUEUE_DEPTH_WARN_RATIO:
+            saturated = True
+    return {"ok": not saturated, "queues": depths}
+
 
 @router.get("/health")
-async def health_check():
-    return {"status": "ok"}
+async def health_check(request: Request):
+    """Report live health of core subsystems.
+
+    Returns 200 when all checks pass, 503 if any critical check fails.
+    """
+    mongo = await _check_mongo(request)
+    disk = _check_disk()
+    training = _check_training(request)
+    queues = _check_queues(request)
+
+    # Mongo and disk are hard dependencies; training/queue saturation degrade status.
+    healthy = mongo["ok"] and disk["ok"] and training["ok"] and queues["ok"]
+    payload = {
+        "status": "ok" if healthy else "unhealthy",
+        "checks": {
+            "mongo": mongo,
+            "disk": disk,
+            "training": training,
+            "queues": queues,
+        },
+    }
+    if not healthy:
+        logger.warning("Health check failed: %s", payload)
+        return JSONResponse(status_code=503, content=payload)
+    return payload
 
 
 @router.get("/training/status")
@@ -46,12 +156,19 @@ async def get_game(request: Request, game_id: str):
 
 
 @router.get("/replays")
-async def list_replays(request: Request):
+async def list_replays(
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+):
     replay_service = getattr(request.app.state, "replay_service", None)
     if replay_service is None:
-        return {"replays": []}
-    replays = await replay_service.list_replays()
-    return {"replays": replays}
+        return {"replays": [], "total": 0, "page": page, "limit": limit}
+    all_replays = await replay_service.list_replays()
+    total = len(all_replays)
+    start = (page - 1) * limit
+    sliced = all_replays[start : start + limit]
+    return {"replays": sliced, "total": total, "page": page, "limit": limit}
 
 
 @router.get("/replays/{game_id}")
@@ -62,19 +179,24 @@ async def get_replay(request: Request, game_id: str):
     frames = await replay_service.load_replay(game_id)
     if not frames:
         raise HTTPException(status_code=404, detail="Replay not found")
-    return {"frames": frames}
+    # Include linked game record if available
+    game_service = request.app.state.game_service
+    game = await game_service.get_game_by_game_id(game_id)
+    return {"game_id": game_id, "frames": frames, "game": game}
 
 
 @router.get("/models")
 async def list_models():
-    model_dir = Path(os.getenv("MODEL_DIR", "./models"))
+    model_dir = Path(os.getenv("MODEL_DIR", "./models")).resolve()
     if not model_dir.exists():
         return {"models": []}
     files = sorted(model_dir.rglob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # Only include files that resolve within the model directory
+    safe_files = [f for f in files if str(f.resolve()).startswith(str(model_dir))]
     return {
         "models": [
             {"path": str(f.relative_to(model_dir)), "size_bytes": f.stat().st_size}
-            for f in files
+            for f in safe_files
         ]
     }
 

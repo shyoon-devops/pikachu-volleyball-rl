@@ -145,15 +145,15 @@
   color: var(--color-text-inverse);
 }
 .training-controls-btn--start:hover:not(:disabled) {
-  box-shadow: 0 0 16px rgba(74, 222, 128, 0.25);
+  box-shadow: var(--shadow-glow-green);
 }
 
 .training-controls-btn--stop {
   background: var(--color-danger);
-  color: #fff;
+  color: var(--color-text-primary);
 }
 .training-controls-btn--stop:hover:not(:disabled) {
-  box-shadow: 0 0 16px rgba(248, 113, 113, 0.25);
+  box-shadow: var(--shadow-glow-red);
 }
 
 .training-controls-btn--resume {
@@ -161,7 +161,7 @@
   color: var(--color-text-inverse);
 }
 .training-controls-btn--resume:hover:not(:disabled) {
-  box-shadow: 0 0 16px rgba(79, 195, 247, 0.25);
+  box-shadow: var(--shadow-glow-blue);
 }
 
 .training-controls-level {
@@ -205,7 +205,7 @@
 .training-controls-level-btn[data-active="true"],
 .training-controls-level-btn.active {
   background: var(--color-blue);
-  color: #fff;
+  color: var(--color-text-inverse);
   border-color: transparent;
 }
 

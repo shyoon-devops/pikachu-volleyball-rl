@@ -16,7 +16,9 @@ class ReplayService:
         self._max_count = max_count
 
     async def save_replay(self, game_id: str, frames: list[dict[str, Any]]) -> None:
-        path = self._dir / f"{game_id}.msgpack"
+        path = self._safe_path(game_id)
+        if path is None:
+            raise ValueError(f"Invalid game_id: {game_id}")
         packed = msgpack.packb(frames, use_bin_type=True)
         await asyncio.to_thread(path.write_bytes, packed)
         await self.cleanup_old_replays()
@@ -32,9 +34,18 @@ class ReplayService:
             for f in files
         ]
 
+    def _safe_path(self, game_id: str) -> Path | None:
+        """Resolve path and reject traversal attempts."""
+        if not game_id or "/" in game_id or "\\" in game_id or ".." in game_id:
+            return None
+        path = (self._dir / f"{game_id}.msgpack").resolve()
+        if not str(path).startswith(str(self._dir.resolve())):
+            return None
+        return path
+
     async def load_replay(self, game_id: str) -> list[dict[str, Any]]:
-        path = self._dir / f"{game_id}.msgpack"
-        if not path.exists():
+        path = self._safe_path(game_id)
+        if path is None or not path.exists():
             return []
         raw = await asyncio.to_thread(path.read_bytes)
         frames = msgpack.unpackb(raw, raw=False)

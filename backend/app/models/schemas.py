@@ -1,5 +1,6 @@
 """MongoDB document schemas (Pydantic v2)."""
 
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -9,6 +10,7 @@ class GameRecord(BaseModel):
     """Single game result document."""
 
     id: str | None = Field(None, alias="_id")
+    game_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     experiment_id: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     bot_level: int = Field(ge=1, le=5)
