@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/_common.sh"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -31,7 +34,7 @@ check_container() {
     local project="$1"
     local service="$2"
     local status
-    status="$(docker compose -p "$project" ps --format '{{.Status}}' "$service" 2>/dev/null || echo "")"
+    status="$($DOCKER compose -p "$project" ps --format '{{.Status}}' "$service" 2>/dev/null || echo "")"
     if [ -z "$status" ]; then
         echo -e "${RED}NOT RUNNING${NC}"
     elif echo "$status" | grep -qi "up"; then
@@ -62,8 +65,8 @@ for i in "${!ENVS[@]}"; do
     echo "--- ${ENV_UPPER} ---"
     echo "  MongoDB  (:${MONGO_PORT})  : $(check_container "$PROJECT" mongodb)"
     echo "  Backend  (:${BACKEND_PORT})  : $(check_container "$PROJECT" backend)"
-    echo "  Frontend (:${FRONTEND_PORT})  : $(check_container "$PROJECT" frontend)"
-    echo "  Health   : $(check_health "http://localhost:${BACKEND_PORT}/api/health")"
+    echo "  Frontend (:${FRONTEND_PORT})  : $(check_health "http://192.168.0.248:${FRONTEND_PORT}")"
+    echo "  API      : $(check_health "http://localhost:${BACKEND_PORT}/api/health")"
     echo ""
 done
 

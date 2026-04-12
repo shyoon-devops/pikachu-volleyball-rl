@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from backend.app.api.routes import router
+from backend.app.metrics import setup_instrumentator
 from backend.app.middleware.rate_limit import RateLimitMiddleware
 from backend.app.services.eval_service import EvalServiceWrapper
 from backend.app.services.game_service import GameService
@@ -85,6 +86,8 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api")
+
+setup_instrumentator(app)
 
 
 @app.websocket("/ws")

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
+from backend.app.metrics import update_training_metrics
 from backend.app.models.schemas import (
     WsReplayRequestPayload,
     WsSetLevelPayload,
@@ -128,6 +129,7 @@ async def metrics_push_loop(
     queue = training_service.manager.metrics_queue
     while True:
         data = await queue.get()
+        update_training_metrics(data)
         await manager.broadcast({"type": "training:metrics", "payload": data})
 
 

@@ -6,6 +6,14 @@ on:
       version:
         description: "Release version (e.g. 0.2.0)"
         required: true
+      skip_training_check:
+        description: "Skip training status check"
+        type: boolean
+        default: false
+
+concurrency:
+  group: cd-prod
+  cancel-in-progress: false
 
 jobs:
   deploy-prod:
@@ -14,15 +22,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check training status
+        if: ${{ !inputs.skip_training_check }}
+        run: |
+          echo "Checking if training is active on prod..."
+          HEALTH=$(curl -sf http://localhost:8003/api/health 2>/dev/null || echo '{}')
+          echo "Prod backend: $HEALTH"
+
+      - name: Snapshot current state
+        run: |
+          echo "=== Pre-deploy snapshot ==="
+          docker compose -f docker-compose.prod.yml ps 2>/dev/null || true
+          echo "${{ inputs.version }}" > /tmp/deploy-version
+
       - name: Tag release
         run: |
-          echo "${{ github.event.inputs.version }}" > VERSION
+          echo "${{ inputs.version }}" > VERSION
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add VERSION
-          git commit -m "chore: release v${{ github.event.inputs.version }}" || true
-          git tag -a "v${{ github.event.inputs.version }}" -m "Release v${{ github.event.inputs.version }}"
+          git commit -m "chore: release v${{ inputs.version }}" || true
+          git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"
           git push origin HEAD --tags
 
-      - name: Deploy
-        run: bash scripts/deploy-prod.sh
+      - name: Deploy backend
+        run: |
+          docker compose -f docker-compose.prod.yml up --build -d
+          echo "Waiting for healthy status..."
+          timeout 90 bash -c 'until curl -sf http://localhost:8003/api/health; do sleep 3; done'
+
+      - name: Deploy frontend to yoonbian-2
+        run: bash scripts/deploy-frontend.sh prod
+
+      - name: Verify deployment
+        run: |
+          echo "=== Post-deploy verification ==="
+          echo "Backend health:"
+          curl -sf http://localhost:8003/api/health
+          echo ""
+          echo "Frontend proxy (yoonbian-2):"
+          ssh -o ConnectTimeout=5 -i ~/.ssh/id_ed25519_yoonbian-2 yoon@192.168.0.248 \
+            "curl -sf --connect-timeout 5 http://localhost:3002/api/health"
+          echo ""
+          echo "=== Deployed v${{ inputs.version }} ==="
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "!!! Deployment failed — rolling back ==="
+          docker compose -f docker-compose.prod.yml down
+          docker compose -f docker-compose.prod.yml up -d
+          echo "Rollback complete. Check logs manually."

@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+
+# Environment
+.env
+
+# Models & Replays (binary artifacts)
+models/*.zip
+replays/*.msgpack
+
+# Docker
+mongo_data/
+
+# Backups (binary artifacts)
+backups/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
