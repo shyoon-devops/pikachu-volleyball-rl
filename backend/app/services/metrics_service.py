@@ -231,7 +231,7 @@ class MetricsService:
         # projection would emit ``None`` entries that crash the chart.
         match[field] = {"$exists": True}
 
-        projection = {"_id": 0, "step": 1, field: 1}
+        projection = {"_id": 0, "step": 1, "timestamp": 1, field: 1}
 
         async def _run() -> list[dict[str, Any]]:
             cursor = (
@@ -242,10 +242,24 @@ class MetricsService:
             docs = await cursor.to_list(length=limit)
             # Return newest-last so the FE can simply ``push`` new WS frames.
             docs.reverse()
-            return [
-                {"step": d.get("step", 0), "value": d.get(field, 0.0)}
-                for d in docs
-            ]
+            out: list[dict[str, Any]] = []
+            for d in docs:
+                ts = d.get("timestamp")
+                # Normalise to ISO-8601 UTC so the FE doesn't have to know
+                # about Mongo BSON datetime. ``None`` when absent — keeps the
+                # shape stable for consumers that expect the key.
+                if isinstance(ts, datetime):
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    ts_iso: str | None = ts.astimezone(timezone.utc).isoformat()
+                else:
+                    ts_iso = None
+                out.append({
+                    "step": d.get("step", 0),
+                    "value": d.get(field, 0.0),
+                    "timestamp": ts_iso,
+                })
+            return out
 
         return await with_mongo_retry(_run, op_name="metrics_recent_points")
 
