@@ -1,6 +1,8 @@
 # Deployment Status
 
-> Last verified: **2026-04-12** — this file is rewritten from scratch based on **actual curl probes** of the running environments. Previous revisions contained fabricated ports and versions. Source of truth going forward: `docs/VERSIONS.yml`.
+> Last verified: **2026-04-12 16:05 +09:00** — this file is rewritten from scratch based on **actual curl probes** of the running environments. Previous revisions contained fabricated ports and versions. Source of truth going forward: `docs/VERSIONS.yml`.
+>
+> **v0.2.2 tag cut at dev HEAD `2582886b` on 2026-04-12 16:03 +09:00** — runtime deploy pending. Once DevOps executes dev→qa→prod, every environment below moves from v0.2.1 (or pre-BE-3) to v0.2.2.
 >
 > Ground rule: **any port change requires a PM-side doc update BEFORE the deploy**. See [WORKFLOW.md § Port Change Policy](WORKFLOW.md#port-change-policy).
 
@@ -50,11 +52,14 @@ Commit hashes and build times are **UNKNOWN** until DevOps reports in #38. Do no
 
 ## 3. Release History (verifiable facts only)
 
-| Version | Tag created | Tag target | Deployed to prod? | main merged? | Release note |
-|---------|-------------|------------|-------------------|--------------|--------------|
-| v0.1.0 | 2026-04-11 | prod HEAD at the time | Yes (running on `:8003` as of this writing — inferred from feature set) | Yes — main @ `fdc41de` | Initial structure |
-| v0.2.0 | 2026-04-11 | `d8fc62e` (release commit) | **No** — prod still on pre-BE-3 code | No | [releases/v0.2.0-qa.md](releases/v0.2.0-qa.md) |
-| v0.2.1 | 2026-04-12 | `482df2d1` on github/dev | **No** — prod `:8003` lacks BE-3 `/health/live` | No | CHANGELOG [0.2.1] section |
+| Version | Tag created | Tag target | GitHub Release | Deployed to prod? | main merged? | Release note |
+|---------|-------------|------------|----------------|-------------------|--------------|--------------|
+| v0.1.0 | 2026-04-11 | prod HEAD at the time | ✅ | Yes (running on `:8003` — inferred from feature set) | Yes — main @ `fdc41de` | [releases/v0.1.0.md](releases/v0.1.0.md) |
+| v0.2.0 | 2026-04-11 | `d8fc62e` (release commit) | ✅ | **No** — prod still on pre-BE-3 code | No | [releases/v0.2.0-qa.md](releases/v0.2.0-qa.md) |
+| v0.2.1 | 2026-04-12 | `482df2d1` on github/dev | ✅ | **No** — prod `:8003` lacks BE-3 `/health/live` | No | [releases/v0.2.1.md](releases/v0.2.1.md) |
+| v0.2.2 | **2026-04-12 16:03** | `2582886b` on github/dev (post product-manager merge) | ✅ | **No** — DevOps deploy pending | No | [releases/v0.2.2.md](releases/v0.2.2.md) |
+
+Env-specific tags present: `v0.1.0-prod` (41f4fdb1), `v0.2.1-dev` (482df2d1), `v0.2.1-qa` (1baa3e3b). `v0.2.2-{dev,qa,prod}` to be created by DevOps after each environment deploy (per WORKFLOW.md § Release Creation Procedure).
 
 **Correction to earlier documents:** Previous `DEPLOYMENT-STATUS.md` claimed "v0.2.0 running on prod" or "main merged with v0.2.0 tag" at various points. Curl evidence shows prod has only v0.1.0-era code. That claim was wrong.
 
@@ -62,11 +67,13 @@ Commit hashes and build times are **UNKNOWN** until DevOps reports in #38. Do no
 
 ## 4. Pending Actions (ordered)
 
-1. **DevOps #38** — provide commit hashes, build times, MongoDB ports, QA-backend-down reason within 30 minutes of file time
-2. **PM** — on receiving #38 response, rewrite this file Section 1 + VERSIONS.yml with filled-in values; remove all UNKNOWN markers
-3. **#37 prod promotion** — still blocked on precondition (b) FE 중복 Start 버튼 + (c) smoke test; further blocked now that prod is confirmed to be on pre-BE-3 code (means this is a real v0.1.0 → v0.2.1 promotion, not a patch)
-4. **DevOps** — restart qa backend (:8002 or new port) so QA can verify v0.2.1
-5. **DevOps** — confirm frontend deploy policy (single dist on 3 ports vs. 3 builds) and either (a) document it in WORKFLOW, or (b) fix so each env gets its own build
+1. **DevOps v0.2.2 deploy GO** — 새 태그 `v0.2.2` (target `2582886b`) 를 dev→qa→prod 전 환경 배포. env tag `v0.2.2-{dev,qa,prod}` 각 배포 시점에 생성 필수. Smoke test 통과 후 다음 환경 진행.
+2. **DevOps #38** — provide commit hashes, build times, MongoDB ports, QA-backend-down reason within 30 minutes of file time
+3. **PM** — 각 환경 배포 완료 보고 수신 후 30분 내 이 파일 Section 1 + VERSIONS.yml 의 commit/image/deployed_at 채움 (WORKFLOW.md § Post-Deploy Doc Update)
+4. **#37 prod promotion** — v0.2.2 로 번들 승격 (prod 가 v0.1.0 → v0.2.2 jump). Precondition: qa smoke test + 16-bug regression 통과
+5. **DevOps** — restart qa backend (:8002) 복구 선행 (#38) → v0.2.2 qa 검증 블로커
+6. **DevOps** — frontend 번들 정책 확인: `v0.2.2` 빌드가 3 환경에 **별도** rsync 되는지 검증 (현재 3 포트 byte-identical)
+7. **PM (prod 승격 후)** — prod → main 머지 + `v0.2.2` 태그 main reachable 확인 + `git push github main --tags`
 
 ---
 
@@ -89,10 +96,10 @@ All other Sprint 1 issues (#3, #9, #10, #11, #12, #13–#19, #20, #21, #22, #23,
 ## 6. Branch State (git facts, not deploy facts)
 
 ```
-dev    482df2d1  feat(api): TTL cache + unified pagination envelope (BE-2)        ← v0.2.1 tag here
-qa     1baa3e3b  chore: promote dev to qa                                          ← BE-2/BE-3 재승격
-prod   41f4fdb1  fix: resolve conflict markers in dev branch frontend files       ← v0.1.0 근방
-main   fdc41de   prod mirror                                                      ← v0.1.0 태그
+dev    2582886b  chore: merge product-manager — v0.2.2 release docs               ← v0.2.2 tag here
+qa     1baa3e3b  chore: promote dev to qa                                          ← v0.2.1-qa (re-promoted), awaiting dev→qa for v0.2.2
+prod   41f4fdb1  fix: resolve conflict markers in dev branch frontend files       ← v0.1.0 근방, v0.1.0-prod env tag
+main   fdc41de   prod mirror                                                      ← v0.1.0 태그 on main HEAD
 ```
 
 Git branch ≠ running build. The running prod backend is v0.1.0-era code per `/api/health` shape, which matches the git `prod` branch content.
