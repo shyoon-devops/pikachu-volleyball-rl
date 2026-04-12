@@ -187,9 +187,11 @@ class PikachuVolleyball:
 
         Post-score freeze (when enabled): if the previous frame ended the
         round, subsequent calls tick down `post_score_freeze_frames` without
-        advancing physics. When the counter reaches zero the engine either
-        swaps in a fresh serving state (match ongoing) or holds the final
-        state forever (match ended — score already at MAX_SCORE).
+        advancing physics. The freeze tick ALWAYS runs — even on the
+        match-winning point — so consumer loops can rely on freeze expiry
+        to signal "replay done". When the counter reaches zero the engine
+        either swaps in a fresh serving state (match ongoing) or falls
+        through to the match-over guard on the next call (match ended).
         """
         state = self._state
 
@@ -204,19 +206,16 @@ class PikachuVolleyball:
                 0, state.ball.punch_effect_radius - 2
             )
 
-        # Match-over guard. Once either player has reached MAX_SCORE the
-        # engine refuses to advance physics — this preserves the final
-        # grounded-ball scene for the replay viewer and makes repeated
-        # step() calls after termination a no-op (same contract the
-        # original game enforces via its `gameEnd` state).
-        if state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE:
-            state.is_round_over = True
-            return state
-
-        # Freeze-frame pass-through. Runs BEFORE the per-frame clearing of
-        # round-over flags so viewers see `is_round_over=True` for the whole
-        # freeze window. Physics / inputs are intentionally ignored; the
-        # grounded ball position stays pinned until the hold ends.
+        # Freeze-frame pass-through. MUST run BEFORE the match-over guard
+        # below so the hold also ticks down on the match-winning point —
+        # otherwise the guard returns early every frame and freeze stays
+        # pinned at POST_SCORE_FREEZE_FRAMES forever, wedging any consumer
+        # loop that relies on freeze expiry to exit (e.g. the play-and-save
+        # callback in backend/rl/callbacks.py). Runs BEFORE the per-frame
+        # clearing of round-over flags so viewers see `is_round_over=True`
+        # for the whole freeze window. Physics / inputs are intentionally
+        # ignored; the grounded ball position stays pinned until the hold
+        # ends.
         if state.post_score_freeze_frames > 0:
             state.post_score_freeze_frames -= 1
             state.frame += 1
@@ -235,6 +234,20 @@ class PikachuVolleyball:
                 self._state = new
                 self._prev_ball_x = float(new.ball.x)
                 return new
+            # When freeze expires at MAX_SCORE, fall through on the NEXT
+            # step() call to the match-over guard below, which will then
+            # hold the final state permanently.
+            return state
+
+        # Match-over guard. Once freeze has fully expired and either player
+        # has reached MAX_SCORE the engine refuses to advance physics —
+        # this preserves the final grounded-ball scene for the replay
+        # viewer and makes repeated step() calls after termination a no-op
+        # (same contract the original game enforces via its `gameEnd`
+        # state). Consumer loops that want to end cleanly at match-end
+        # should exit when `score >= MAX_SCORE and freeze == 0`.
+        if state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE:
+            state.is_round_over = True
             return state
 
         state.is_round_over = False
