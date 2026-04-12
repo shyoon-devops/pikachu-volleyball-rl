@@ -27,9 +27,11 @@ fi
 
 PROMOTION="$1"
 
+REMOTE="${GIT_REMOTE:-github}"
+
 case "$PROMOTION" in
     dev-to-qa)
-        SOURCE_BRANCH="develop"
+        SOURCE_BRANCH="dev"
         TARGET_BRANCH="qa"
         DEPLOY_SCRIPT="$SCRIPT_DIR/deploy-qa.sh"
         ;;
@@ -43,25 +45,35 @@ case "$PROMOTION" in
         ;;
 esac
 
-echo "=== Promoting: $SOURCE_BRANCH -> $TARGET_BRANCH ==="
+echo "=== Promoting: $SOURCE_BRANCH -> $TARGET_BRANCH (remote: $REMOTE) ==="
 echo ""
 
 CURRENT_BRANCH="$(git branch --show-current)"
 
-# Fetch latest
-git fetch origin
+# Verify target branch not checked out in another worktree
+if git worktree list --porcelain | grep -q "^branch refs/heads/$TARGET_BRANCH$"; then
+    WT_PATH="$(git worktree list | awk -v br="[$TARGET_BRANCH]" '$NF==br {print $1}')"
+    if [ "$WT_PATH" != "$PROJECT_DIR" ]; then
+        echo "ERROR: '$TARGET_BRANCH' is checked out in another worktree: $WT_PATH"
+        echo "Free it up or run promote.sh from there."
+        exit 1
+    fi
+fi
+
+# Fetch latest from remote
+git fetch "$REMOTE" "$SOURCE_BRANCH" "$TARGET_BRANCH"
 
 # Checkout target and merge
 git checkout "$TARGET_BRANCH"
-git pull origin "$TARGET_BRANCH"
-git merge "origin/$SOURCE_BRANCH" --no-edit -m "chore: promote $SOURCE_BRANCH to $TARGET_BRANCH"
+git pull --ff-only "$REMOTE" "$TARGET_BRANCH"
+git merge "$REMOTE/$SOURCE_BRANCH" --no-ff -m "chore: promote $SOURCE_BRANCH to $TARGET_BRANCH"
 
 echo ""
-echo "Merge complete. Pushing to origin..."
-git push origin "$TARGET_BRANCH"
+echo "Merge complete. Pushing to $REMOTE..."
+git push "$REMOTE" "$TARGET_BRANCH"
 
 echo ""
-echo "Running deployment..."
+echo "Running deployment: $DEPLOY_SCRIPT"
 bash "$DEPLOY_SCRIPT"
 
 # Return to original branch

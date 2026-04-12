@@ -13,7 +13,9 @@ echo "  Frontend: http://192.168.0.248:3001"
 echo "  MongoDB:  localhost:27019"
 echo ""
 
-$DOCKER compose -f docker-compose.qa.yml up --build -d
+$DOCKER compose -f docker-compose.qa.yml up --build -d --remove-orphans
+
+$DOCKER image prune -f >/dev/null 2>&1 || true
 
 echo ""
 echo "=== QA deployment complete ==="

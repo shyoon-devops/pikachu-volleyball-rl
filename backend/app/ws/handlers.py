@@ -73,6 +73,36 @@ async def _send_error(ws: WebSocket, code: str, message: str) -> None:
     )
 
 
+async def _emit_status(
+    ws: WebSocket,
+    manager: ConnectionManager | None,
+    message: dict[str, Any],
+) -> None:
+    """Fan out a training:status transition to every connected client.
+
+    Hotfix for BE-6 regression: we previously acked state changes to the
+    requesting socket only (``ws.send_json``). After BE-6's parallel-broadcast
+    refactor that left other tabs — e.g. a second dashboard open on the same
+    session, or FE-8's ``TrainingStateProvider`` mounted in a neighboring
+    window — stuck on a stale "stopped" view while training was actually
+    running, because they never saw the status frame.
+
+    training:status is a *session-wide* transition; every live client needs
+    it. Error rejections like training:error remain per-requester because
+    they answer one caller's specific action, not a global state change.
+
+    ``manager`` is typed ``Optional`` only so the function is safe to call
+    from tests that exercise ``_dispatch`` without a full lifespan; in
+    production ``ws_endpoint`` always supplies it.
+    """
+    if manager is not None:
+        await manager.broadcast(message)
+    else:
+        # Defensive fallback — keeps the dispatcher usable in isolation
+        # without forcing callers to build a ConnectionManager.
+        await ws.send_json(message)
+
+
 async def _dispatch(
     ws: WebSocket,
     msg: ParsedMessage,
@@ -88,6 +118,7 @@ async def _dispatch(
     if msg.type == "training:start":
         current = training_service.status()
         if current["state"] == "running":
+            # Rejection is caller-specific — don't broadcast it.
             await ws.send_json({
                 "type": "training:error",
                 "payload": {"message": "Training is already running"},
@@ -100,7 +131,7 @@ async def _dispatch(
             total_timesteps=params.total_timesteps,
         )
         logger.info("Training started: experiment=%s bot_level=%d", experiment_id, params.bot_level)
-        await ws.send_json({
+        await _emit_status(ws, manager, {
             "type": "training:status",
             "payload": {"state": "running", "experiment_id": experiment_id},
         })
@@ -108,7 +139,7 @@ async def _dispatch(
     elif msg.type == "training:stop":
         await training_service.stop()
         logger.info("Training stopped")
-        await ws.send_json({
+        await _emit_status(ws, manager, {
             "type": "training:status",
             "payload": {"state": "stopped"},
         })
@@ -116,7 +147,7 @@ async def _dispatch(
     elif msg.type == "training:resume":
         await training_service.resume()
         logger.info("Training resumed")
-        await ws.send_json({
+        await _emit_status(ws, manager, {
             "type": "training:status",
             "payload": {"state": "running"},
         })
@@ -124,7 +155,7 @@ async def _dispatch(
     elif msg.type == "training:set_level":
         params_lvl: WsSetLevelPayload = msg.payload  # type: ignore[assignment]
         training_service.set_bot_level(params_lvl.level)
-        await ws.send_json({
+        await _emit_status(ws, manager, {
             "type": "training:status",
             "payload": {
                 "state": training_service.status()["state"],
@@ -150,12 +181,23 @@ async def _dispatch(
 async def metrics_push_loop(
     manager: ConnectionManager,
     training_service: TrainingServiceWrapper,
+    metrics_service: Any | None = None,
 ) -> None:
-    """Drain metrics queue and broadcast to all WS clients."""
+    """Drain metrics queue, persist (if configured), and broadcast.
+
+    Persistence is best-effort and happens *before* the broadcast so a live
+    dashboard frame isn't visible ahead of its persisted counterpart — we'd
+    rather eat a few milliseconds of latency on a metric frame than create
+    a user-visible gap in the aggregation endpoint. MetricsService.record
+    swallows its own errors so a Mongo hiccup cannot stall this loop.
+    """
     queue = training_service.manager.metrics_queue
     while True:
         data = await queue.get()
         update_training_metrics(data)
+        if metrics_service is not None:
+            experiment_id = getattr(training_service.manager, "_experiment_id", "") or ""
+            await metrics_service.record(experiment_id=experiment_id, data=data)
         await manager.broadcast({"type": "training:metrics", "payload": data})
 
 
