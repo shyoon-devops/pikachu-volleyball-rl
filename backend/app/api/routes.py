@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
+from backend.app.logging_config import process_uptime_seconds
 from backend.app.metrics import (
     MONGO_PING_LATENCY,
     MONGO_PING_OK,
@@ -141,12 +142,22 @@ def _check_queues(request: Request) -> dict:
     return {"ok": not saturated, "queues": depths}
 
 
-@router.get("/health")
-async def health_check(request: Request):
-    """Report live health of core subsystems.
+def _uptime_seconds(request: Request) -> float:
+    started = getattr(request.app.state, "started_at_monotonic", None)
+    return round(process_uptime_seconds(started), 3)
 
-    Returns 200 when all checks pass, 503 if any critical check fails.
+
+@router.get("/health/live")
+async def health_live(request: Request):
+    """Liveness probe — the process is up and event loop is responsive.
+
+    Used by k8s ``livenessProbe``: if this fails the pod gets restarted, so
+    we deliberately avoid any external I/O here. Answering is evidence enough.
     """
+    return {"status": "live", "uptime_seconds": _uptime_seconds(request)}
+
+
+async def _readiness_payload(request: Request) -> tuple[dict, bool]:
     mongo = await _check_mongo(request)
     disk = _check_disk()
     training = _check_training(request)
@@ -156,6 +167,7 @@ async def health_check(request: Request):
     healthy = mongo["ok"] and disk["ok"] and training["ok"] and queues["ok"]
     payload = {
         "status": "ok" if healthy else "unhealthy",
+        "uptime_seconds": _uptime_seconds(request),
         "checks": {
             "mongo": mongo,
             "disk": disk,
@@ -163,6 +175,31 @@ async def health_check(request: Request):
             "queues": queues,
         },
     }
+    return payload, healthy
+
+
+@router.get("/health/ready")
+async def health_ready(request: Request):
+    """Readiness probe — all critical dependencies are usable.
+
+    Used by k8s ``readinessProbe``: if this fails the pod stays alive but is
+    removed from the service mesh until it recovers.
+    """
+    payload, healthy = await _readiness_payload(request)
+    if not healthy:
+        logger.warning("Readiness check failed: %s", payload)
+        return JSONResponse(status_code=503, content=payload)
+    return payload
+
+
+@router.get("/health")
+async def health_check(request: Request):
+    """Backward-compatible health check — delegates to readiness.
+
+    Returns 200 when all checks pass, 503 if any critical check fails. Prefer
+    ``/api/health/live`` and ``/api/health/ready`` for probe configurations.
+    """
+    payload, healthy = await _readiness_payload(request)
     if not healthy:
         logger.warning("Health check failed: %s", payload)
         return JSONResponse(status_code=503, content=payload)
