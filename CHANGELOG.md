@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-v0.2.3 이후 scope. Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) + Evaluator PR #44 (E1-E10 baseline comparator / batch eval / history / timeseries / Elo tracker) 후속 릴리스 후보.
+v0.2.4 이후 scope. Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) + Evaluator PR #44 (E1-E10 baseline comparator / batch eval / history / timeseries / Elo tracker) 후속 릴리스 후보.
+
+## [0.2.4] - 2026-04-12 (post-v0.2.3 live-UI hotfix bundle / dev HEAD ee1b48ae)
+
+v0.2.3 을 3 환경(dev/qa/prod)에 배포한 직후 PM 의 실사용 테스트에서 확인된 3 CRITICAL 이슈 긴급 수정. WS 상태 동기화, 새로고침 복원, Stop/Pause 실제 중단 동작 — 어느 하나도 해소되지 않으면 사용자가 훈련을 제어할 수 없는 상태.
+
+### Fixed — Live-UI CRITICAL
+
+- **FE REST hydration on mount + reconnect** (`bd6cea5a`): `fix(ui): sync training status from REST on mount + reconnect (CRITICAL)` — `useTrainingStateImpl` 이 `status={state:'stopped', ...}` 하드코딩으로 시작하고 `training:status` WS 메시지는 *state change* 시에만 브로드캐스트되었기 때문에, 훈련이 돌아가는 중에 페이지를 새로고침하면 Start 버튼만 보이고 Stop 버튼이 없어서 사용자가 개입할 수 없었음. mount 시 `GET /api/training/status` + 재연결 시 re-fetch 로 복원
+- **FE optimistic Stop/Pause/level + REST hydration for graphs/games** (`06519a42`): `fix(ui): optimistic Stop/Pause/level + REST hydration for graphs/games (CRITICAL)` — 4 user-reported 버그 해소 (Stop 무반응, Pause 무반응, 새로고침 시 그래프/최근경기 패널 공백, Bot Level 버튼 선택 표시 없음). `wsSend` 를 optimistic local state 로 감싸고 mount 시 `/api/training/metrics/aggregate` + `/api/games?limit=20` + 게임 캔버스 REST seed 로 즉시 복원
+- **BE stop/pause 실제 중단 + step/episode metrics broadcast** (`ee1b48ae`): `fix(training): stop/pause actually halt training + broadcast step/episode metrics` — QA 의 Stop/Pause no-op + step/episode counter 0/0 고착 원인 근본 해결. `TrainingManager` 에 `threading.Event` pair (stop + pause) 를 SB3 `CallbackList` 를 통해 worker thread 에 연결 → 실제 unwinding. `LiveFrameCallback` 이 `last_frame` 을 갱신해 새로고침 시 캔버스 즉시 repaint. `GET /api/training/status` 에 `bot_level`/`experiment_id`/`started_at` 추가. 상태변이 REST 엔드포인트(`/stop`, `/pause`, `/resume`, `/set_level`) 가 `training:status` 를 broadcast 하도록 통일 — WS control surface 와 REST control surface 가 완전 대칭
+
+### Changed — Deploy infra (related)
+
+- **`scripts/promote.sh` backend container restart 누락 수정** (`63e29b58`): v0.2.3 배포 시 frontend bundle 만 교체되고 backend 컨테이너는 옛 이미지로 유지되던 인시던트 대응. 자세한 내용은 `docs/incidents/20260412-dev-backend-stale.md`
+
+### Deployment
+
+- **v0.2.4 는 v0.2.3 위 3 commit 누적 번들** — DevOps 3 환경 재배포 진행 중. env tag `v0.2.4-{dev,qa,prod}` 각 배포 완료 시점 생성
+- **prod 는 v0.2.3 → v0.2.4 patch** — v0.2.3 이 prod 도달한 최초 릴리스가 된 직후의 hotfix
+- **frontend bundle prefix**: `JHqpaRFn` (v0.2.3 배포분에서 확인) — v0.2.4 rebuild 후 해시 갱신 예정
+
+### Not in v0.2.4 (deferred)
+
+- Trainer PR #42 / Evaluator PR #44 (v0.2.5+ 후보)
+
+### Rollback
+
+- target `v0.2.3` (`737a088f`). 단 v0.2.3 의 live-UI 이슈 3건이 다시 노출되므로 실제 롤백 시 사용자 훈련 제어 불가 복귀 → forward-fix 권장
 
 ## [0.2.3] - 2026-04-12 (v0.2.2 QA blocker 3 hotfix / dev HEAD 77b871dd)
 
