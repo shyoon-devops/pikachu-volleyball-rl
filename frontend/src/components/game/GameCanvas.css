@@ -2,29 +2,16 @@
  * ═══════════════════════════════════════════════════════════
  *  GameCanvas.css — 게임 캔버스 컨테이너 스타일
  * ═══════════════════════════════════════════════════════════
+ *  FE className 매핑:
+ *    .game-canvas  (PixiJS Application이 주입하는 <canvas> 를 감싸는 래퍼)
  *
- *  ── PixiJS 스프라이트 전환 요청 (FE 작업) ──
- *
- *  원본 스프라이트 시트가 frontend/public/assets/에 추가됨:
- *    - sprite_sheet.png + sprite_sheet.json (TexturePacker/PixiJS 호환)
- *    - SPRITE_GUIDE.md에 프레임별 상세 문서 포함
- *
- *  현재: Graphics API로 단색 도형 (원, 사각형)
- *  목표: 원본 피카츄 배구 스프라이트 기반 렌더링
- *
- *  FE에게 요청:
- *    1. Assets.load('/assets/sprite_sheet.json')으로 스프라이트 시트 로드
- *    2. drawFrame() → Sprite/AnimatedSprite 기반 렌더링 전환
- *    3. 배경: sky_blue 타일 + mountain + ground 3단 + net_pillar
- *    4. 피카츄: state별 28프레임 AnimatedSprite
- *    5. 공: 포케볼 5프레임 회전 + 파워히트 이펙트
- *    6. 구름 10개 + 파도 애니메이션
- *    7. 그림자 (shadow 스프라이트)
- *    8. 점수: number_0~9 스프라이트 (CSS 오버레이 대체)
- *    9. 사운드: /assets/sounds/ 효과음 연동
- *
- *  자세한 프레임 매핑은 SPRITE_GUIDE.md 참고
- *
+ *  구성:
+ *    - PixiJS가 원본 피카추 배구 스프라이트(432×304) 기반으로 렌더링
+ *    - 스프라이트: sky_blue 타일, mountain, ground 3단, net_pillar,
+ *      pikachu 28프레임, ball 5프레임 + hyper/trail, 구름 10개,
+ *      파도 27타일, 그림자, 점수(number 스프라이트)
+ *    - 스프라이트 로드 실패 시 Graphics API 폴백
+ *  자세한 프레임 매핑은 public/assets/SPRITE_GUIDE.md 참고
  * ═══════════════════════════════════════════════════════════
  */
 
@@ -37,14 +24,25 @@
               inset 0 0 60px rgba(0, 0, 0, 0.2);
   aspect-ratio: 432 / 304;
   background: var(--color-canvas-bg);
+  /* 래퍼가 사용 가능한 가로폭 안에서 스케일되도록 보장 */
+  width: 100%;
+  max-width: 100%;
 }
 
-/* canvas 요소 자체에 적용 (PixiJS가 생성하는 canvas) */
+/*
+ * PixiJS가 생성하는 내부 <canvas> 는 TSX에서 inline width/height (px) 가
+ * 적용된다. inline 스타일이 외부 CSS 의 width 선언을 무시하기 때문에
+ * max-width 를 사용해 좁은 화면에서도 가로 오버플로 없이 축소되도록 한다.
+ * (max-width 는 inline width 를 상한으로 제한하므로 inline 과 충돌하지 않는다.)
+ *
+ * border-radius 는 래퍼의 overflow:hidden 이 처리하므로 내부 canvas 에는
+ * 따로 걸지 않는다 (이중 라운딩 방지).
+ */
 .game-canvas canvas {
   display: block;
-  border-radius: var(--radius-lg);
-  width: 100%;
-  height: 100%;
+  max-width: 100%;
+  height: auto;
+  /* 픽셀 아트 스프라이트 보존 — 보간/스무딩 끔 */
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
