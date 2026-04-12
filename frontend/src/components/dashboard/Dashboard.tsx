@@ -8,6 +8,7 @@ import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { Hyperparams } from '../../lib/types'
+import { formatBotLevel } from '../../lib/formatGame'
 import './Dashboard.css'
 
 export function Dashboard() {
@@ -106,7 +107,7 @@ export function Dashboard() {
                   {recentGames.slice(0, 20).map((g, i) => (
                     <tr key={g.id}>
                       <td className="text-muted">{i + 1}</td>
-                      <td>L{g.botLevel}</td>
+                      <td>{formatBotLevel(g.botLevel)}</td>
                       <td>
                         <span className="score-p1">{g.score1}</span>
                         {' : '}

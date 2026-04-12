@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getGames, getAvailableReplays } from '../../lib/api'
 import type { GameRecord, ReplayInfo } from '../../lib/types'
+import { formatBotLevel } from '../../lib/formatGame'
 import './ReplayList.css'
 
 export function ReplayList() {
@@ -97,7 +98,7 @@ export function ReplayList() {
                   <td className="text-muted">
                     {new Date(g.timestamp).toLocaleString()}
                   </td>
-                  <td>L{g.botLevel}</td>
+                  <td>{formatBotLevel(g.botLevel)}</td>
                   <td>
                     <span className="score-p1">{g.score1}</span>
                     {' : '}

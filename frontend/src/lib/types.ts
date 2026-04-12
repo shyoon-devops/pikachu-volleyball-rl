@@ -68,7 +68,16 @@ export interface TrainingStatus {
 export interface GameRecord {
   id: string
   timestamp: string
-  botLevel: number
+  /** Bot difficulty (1-5). Optional because the WS `game:result`
+   *  broadcast currently omits `bot_level` — the BE enqueues a result
+   *  dict without it (backend/rl/callbacks.py:236-242) and the
+   *  dispatcher broadcasts that raw dict unchanged
+   *  (backend/app/ws/handlers.py:357). REST `/api/games` validates the
+   *  field via Pydantic so hydration from REST always has it. Until
+   *  BE fixes the enqueue path, live rows from WS can lack this —
+   *  consumers must treat it as optional and fall back to "?". See
+   *  docs/NOTICE-BE-GAMERESULT-MISSING-FIELDS.md. */
+  botLevel?: number
   score1: number
   score2: number
   winner: number
