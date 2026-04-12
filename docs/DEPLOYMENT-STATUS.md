@@ -1,119 +1,117 @@
 # Deployment Status
 
-> Last verified: **2026-04-12 16:40 +09:00** — this file is rewritten from scratch based on **actual curl probes** of the running environments. Previous revisions contained fabricated ports and versions. Source of truth going forward: `docs/VERSIONS.yml`.
+> Last verified: **2026-04-12 18:25 +09:00** — v0.2.4 post-deploy doc update. Source of truth: `docs/VERSIONS.yml`.
 >
-> **v0.2.3 tag cut at dev HEAD `77b871dd` on 2026-04-12 16:40 +09:00** — v0.2.2 (`2582886b`) was tagged but never deployed; v0.2.3 supersedes it with 3 QA blocker hotfixes (BE-6 WS broadcast, net-collision vx, bot variance). Runtime deploy pending. Once DevOps executes dev→qa→prod, every environment below moves from v0.2.1 (or pre-BE-3) to v0.2.3.
+> **v0.2.4 tag cut at dev HEAD `921b0efb` on 2026-04-12 18:20 +09:00** — v0.2.4 는 v0.2.3 위 누적된 4 CRITICAL hotfix + 6 UX/정합성 개선 번들. DevOps 는 3 환경에 byte-identical bundle `index-DqBsWzf5` 로 단일 배포 완료 (backend force-recreate, uptime 2분 검증). env tag `v0.2.4-{dev,qa,prod}` 부착 완료.
 >
 > Ground rule: **any port change requires a PM-side doc update BEFORE the deploy**. See [WORKFLOW.md § Port Change Policy](WORKFLOW.md#port-change-policy).
 
 ---
 
-## 1. Verified Runtime State (curl evidence, 2026-04-12)
+## 1. Verified Runtime State (DevOps report, 2026-04-12 18:15)
 
 ### Backend (GPU server, 192.168.0.250)
-| Port | Status | `/api/health` shape | `/api/health/live` | OpenAPI `info.version` | Inferred role |
-|------|--------|---------------------|--------------------|------------------------|----------------|
-| `:8000` | DOWN | — | — | — | (documented prod port, **not in use**) |
-| `:8001` | **UP** | Detailed — `mongo/disk/training/queues` checks | `{"status":"live"}` ✅ BE-3 present | `"0.1.0"` (hardcoded) | **dev** |
-| `:8002` | **DOWN** | — | — | — | (documented qa port — currently not running) |
-| `:8003` | **UP** | Minimal — `{"status":"ok"}` only | `404 Not Found` ❌ (pre-BE-3) | `"0.1.0"` (hardcoded) | **prod** (per PM observation) |
+| Port | Status | Version (runtime) | `/api/health/live` | `/api/health/ready` | Role |
+|------|--------|-------------------|--------------------|---------------------|------|
+| `:8001` | **UP** | v0.2.4 (`dabd84a1`) | `{"status":"live"}` ✅ | ✅ | **dev** |
+| `:8002` | **UP** | v0.2.4 (`dabd84a1`) | `{"status":"live"}` ✅ | ✅ | **qa** (복구됨 — 이전 v0.2.3 deploy window 에서 재기동) |
+| `:8003` | **UP** | v0.2.4 (`dabd84a1`) | `{"status":"live"}` ✅ | ✅ | **prod** (v0.1.0-era → v0.2.4 jump) |
+
+Runtime 신 코드 검증 (DevOps 보고):
+- `/api/training/metrics/timeseries` 엔드포인트 응답 확인 (`{step, value, timestamp}` shape)
+- `ball.is_power_hit` 필드가 `training:frame` WS payload 에 포함
+- `RALLY_MAX_FRAMES=600` rally-timeout safety valve 활성
 
 ### Frontend (yoonbian-2, 192.168.0.248)
-| Port | Status | HTML size | Bundle hash | Inferred role |
-|------|--------|-----------|-------------|----------------|
-| `:3000` | **UP** | 910 B | `assets/index-CAYlGd5L.js` | **dev** |
-| `:3001` | **UP** | 910 B | `assets/index-CAYlGd5L.js` | **qa** |
-| `:3002` | **UP** | 910 B | `assets/index-CAYlGd5L.js` | **prod** |
-| `:5173` | **DOWN** | — | — | (documented prod port, **not in use**) |
+| Port | Status | Bundle | Role |
+|------|--------|--------|------|
+| `:3000` | **UP** | `assets/index-DqBsWzf5.js` | **dev** |
+| `:3001` | **UP** | `assets/index-DqBsWzf5.js` | **qa** |
+| `:3002` | **UP** | `assets/index-DqBsWzf5.js` | **prod** |
 
-**Critical finding — three frontends serve a byte-identical bundle:** `diff` between `:3000`, `:3001`, `:3002` returns zero output, and all reference the same `index-CAYlGd5L.js`. DevOps has not confirmed whether this is intended (single dist served on 3 ports with only nginx API/WS upstream differing) or accidental (env-specific builds overwritten). Tracking in #38.
+3 환경 byte-identical bundle (이번 번들은 의도적 단일 dist — DevOps `scripts/deploy-frontend.sh` 가 3 환경에 동일 rsync, nginx upstream 만 per-env API/WS 프록시).
 
 ### MongoDB
-Not curl-probeable from this host. PM observation: **prod MongoDB actually on `:27020` (not `:27017` as documented)**. Awaiting DevOps confirmation (#38) for dev/qa/prod MongoDB ports.
-
-### Critical inconsistency
-- `prod` backend `:8003` is running **pre-BE-3 / pre-BUG-2 code** — `/api/health` returns the hardcoded `{"status":"ok"}` that BUG-2 was filed against. Prod has **NOT** been promoted to v0.2.1. Any claim that "v0.2.1 shipped to prod" is false until :8003 shows BE-3's `/health/live` + `/health/ready` split.
-- All three frontends serve the same bundle. Whatever is on prod is also what dev/qa users see. No env-specific FE deployment is occurring.
-- OpenAPI `info.version` is hardcoded `"0.1.0"` on every backend. It cannot be used to determine deployed version.
+PM 문서상 dev `:27018` / qa `:27019` / prod `:27020` — DevOps 미검증. 후속 housekeeping 에서 확인.
 
 ---
 
-## 2. Environment Overview (verified + unknown)
+## 2. Environment Overview
 
-| Env | Backend port | Backend build | Frontend port | Frontend bundle | MongoDB port | Version tag in place | Notes |
-|-----|--------------|---------------|---------------|-----------------|--------------|---------------------|-------|
-| dev | `:8001` ✅ | **UNKNOWN commit** (BE-3 present) | `:3000` ✅ | `index-CAYlGd5L.js` | **UNKNOWN** | none (git branch `dev` @ `482df2d1` tagged `v0.2.1`) | training state: stopped |
-| qa | **DOWN** ❌ | n/a | `:3001` ✅ | `index-CAYlGd5L.js` | **UNKNOWN** | git branch `qa` @ `1baa3e3b` | Backend not running — #38 DevOps 확인 |
-| prod | `:8003` ✅ | **pre-BE-3** (NOT v0.2.1) | `:3002` ✅ | `index-CAYlGd5L.js` | `:27020` (PM report, unverified) | git branch `prod` @ `41f4fdb` + git branch `main` @ `fdc41de`, `v0.1.0` tag | Running OLD code |
-
-Commit hashes and build times are **UNKNOWN** until DevOps reports in #38. Do not infer from git branch HEAD — the image in production may lag the branch.
+| Env | Backend port | Backend commit | Frontend port | Frontend bundle | Version tag | env tag | Notes |
+|-----|--------------|----------------|---------------|-----------------|-------------|---------|-------|
+| dev | `:8001` ✅ | `dabd84a1` | `:3000` ✅ | `index-DqBsWzf5.js` | `v0.2.4` @ `921b0efb` | `v0.2.4-dev` | 정상 |
+| qa  | `:8002` ✅ | `dabd84a1` | `:3001` ✅ | `index-DqBsWzf5.js` | branch @ `5c758d8e` (lags) | `v0.2.4-qa` | Branch HEAD 런타임보다 뒤처짐 (image-based promote) |
+| prod | `:8003` ✅ | `dabd84a1` | `:3002` ✅ | `index-DqBsWzf5.js` | branch @ `41f4fdb1` (v0.1.0-era) | `v0.2.4-prod` | Branch 는 여전히 v0.1.0-era — **advance + main 머지 필요** |
 
 ---
 
-## 3. Release History (verifiable facts only)
+## 3. Release History
 
 | Version | Tag created | Tag target | GitHub Release | Deployed to prod? | main merged? | Release note |
 |---------|-------------|------------|----------------|-------------------|--------------|--------------|
-| v0.1.0 | 2026-04-11 | prod HEAD at the time | ✅ | Yes (running on `:8003` — inferred from feature set) | Yes — main @ `fdc41de` | [releases/v0.1.0.md](releases/v0.1.0.md) |
-| v0.2.0 | 2026-04-11 | `d8fc62e` (release commit) | ✅ | **No** — prod still on pre-BE-3 code | No | [releases/v0.2.0-qa.md](releases/v0.2.0-qa.md) |
-| v0.2.1 | 2026-04-12 | `482df2d1` on github/dev | ✅ | **No** — prod `:8003` lacks BE-3 `/health/live` | No | [releases/v0.2.1.md](releases/v0.2.1.md) |
-| v0.2.2 | **2026-04-12 16:03** | `2582886b` on github/dev (post product-manager merge) | ✅ | **No** — superseded by v0.2.3 before any deploy | No | [releases/v0.2.2.md](releases/v0.2.2.md) (superseded) |
-| v0.2.3 | **2026-04-12 16:40** | `77b871dd` on github/dev (v0.2.2 + 3 hotfixes) | pending | **No** — DevOps deploy pending | No | [releases/v0.2.3.md](releases/v0.2.3.md) |
+| v0.1.0 | 2026-04-11 | prod HEAD at the time | ✅ | Yes | Yes — main @ `fdc41de` | [releases/v0.1.0.md](releases/v0.1.0.md) |
+| v0.2.0 | 2026-04-11 | `d8fc62e` | ✅ | No — prod still on pre-BE-3 code | No | [releases/v0.2.0-qa.md](releases/v0.2.0-qa.md) |
+| v0.2.1 | 2026-04-12 | `482df2d1` on github/dev | ✅ | No — superseded | No | [releases/v0.2.1.md](releases/v0.2.1.md) |
+| v0.2.2 | 2026-04-12 16:03 | `2582886b` on github/dev | ✅ | No — superseded by v0.2.3 before any deploy | No | [releases/v0.2.2.md](releases/v0.2.2.md) (superseded) |
+| v0.2.3 | 2026-04-12 16:40 | `737a088f` on github/dev | ✅ | **Yes** — 3 envs | No — superseded | [releases/v0.2.3.md](releases/v0.2.3.md) |
+| v0.2.4 | **2026-04-12 18:20** | `921b0efb` on github/dev (dabd84a1 runtime + docs expansion) | ✅ | **Yes** — 3 envs byte-identical bundle `index-DqBsWzf5` | pending (#17) | [releases/v0.2.4.md](releases/v0.2.4.md) |
 
-Env-specific tags present: `v0.1.0-prod` (41f4fdb1), `v0.2.1-dev` (482df2d1), `v0.2.1-qa` (1baa3e3b). `v0.2.3-{dev,qa,prod}` to be created by DevOps after each environment deploy (per WORKFLOW.md § Release Creation Procedure). **No `v0.2.2-*` env tags will be created** — v0.2.2 was never deployed.
-
-**Correction to earlier documents:** Previous `DEPLOYMENT-STATUS.md` claimed "v0.2.0 running on prod" or "main merged with v0.2.0 tag" at various points. Curl evidence shows prod has only v0.1.0-era code. That claim was wrong.
+Env tags present: `v0.1.0-prod`, `v0.2.1-dev`, `v0.2.1-qa`, `v0.2.3-{dev,qa,prod}`, `v0.2.4-{dev,qa,prod}` (모두 2026-04-12 18:20 dev HEAD 에 부착).
 
 ---
 
 ## 4. Pending Actions (ordered)
 
-1. **DevOps v0.2.3 deploy GO** — 태그 `v0.2.3` (target `77b871dd`) 를 dev→qa→prod 전 환경 배포. env tag `v0.2.3-{dev,qa,prod}` 각 배포 시점에 생성 필수. Smoke test 통과 후 다음 환경 진행. **v0.2.2 는 건너뜀** (tagged but never deployed).
-2. **DevOps #38** — provide commit hashes, build times, MongoDB ports, QA-backend-down reason within 30 minutes of file time
-3. **PM** — 각 환경 배포 완료 보고 수신 후 30분 내 이 파일 Section 1 + VERSIONS.yml 의 commit/image/deployed_at 채움 (WORKFLOW.md § Post-Deploy Doc Update)
-4. **#37 prod promotion** — v0.2.3 로 번들 승격 (prod 가 v0.1.0 → v0.2.3 jump). Precondition: qa smoke test + 16-bug regression + BE-6 broadcast 재검증 + net-collision regression suite GREEN
-5. **DevOps** — restart qa backend (:8002) 복구 선행 (#38) → v0.2.3 qa 검증 블로커
-6. **DevOps** — frontend 번들 정책 확인: `v0.2.3` 빌드가 3 환경에 **별도** rsync 되는지 검증 (현재 3 포트 byte-identical)
-7. **PM (prod 승격 후)** — prod → main 머지 + `v0.2.3` 태그 main reachable 확인 + `git push github main --tags`
+1. **PM — prod branch advance + main 머지** (#17)
+   - `github/prod` 브랜치를 dev HEAD `921b0efb` 로 advance (현재 `41f4fdb1` v0.1.0-era 이므로 사실상 강제 동기화 필요)
+   - `prod → main` `--no-ff` 머지 (v0.2.0/0.2.1/0.2.2/0.2.3/0.2.4 scope 모두 최초 반영)
+   - `git tag --contains v0.2.4 | grep main` 으로 reachable 확인
+   - `git push github main --tags`
+2. **DevOps** — `github/qa` 브랜치를 런타임 코드(`dabd84a1`) 로 fast-forward 하는 housekeeping PR (런타임은 이미 dev HEAD image)
+3. **DevOps** — `docs/incidents/20260412-dev-backend-stale.md` 인시던트 기록 발행 (`promote.sh` backend restart 누락 → 수정 `63e29b58`)
+4. **DevOps** — image SHA / build digest 를 VERSIONS.yml 각 env 의 `backend.image` 에 채움 (30분 SLA)
 
 ---
 
-## 5. Open Issues Snapshot (Sprint 1/2, 2026-04-12)
+## 5. Open Issues Snapshot
 
 | Issue | Title | State | Labels | Note |
 |-------|-------|-------|--------|------|
-| #37 | deploy: v0.2.1 prod 승격 | OPEN | release | blocked on preconditions + prod-drift |
-| #38 | ops: 3개 환경 실제 배포 상태 전수 보고 | OPEN | release | PM 블로커 — DevOps 응답 대기 |
+| #46 | deploy: v0.2.3 | OPEN | release | v0.2.4 로 대체 close 예정 |
+| #47 | deploy: v0.2.4 3-env rollout | OPEN | release | 배포 완료 — close 예정 |
+| #37 | deploy: v0.2.1 prod 승격 | OPEN | release | v0.2.4 가 v0.1.0→v0.2.4 jump 로 해소 — close 예정 |
+| #38 | ops: 3개 환경 실제 배포 상태 전수 보고 | OPEN | release | VERSIONS.yml image SHA 채운 후 close |
 | #35 | DO-3 MongoDB Automated Backup | OPEN | enhancement, sprint-2 | Sprint 2 |
 | #34 | QA-3 FastAPI TestClient Integration Suite | OPEN | enhancement, sprint-2 | Sprint 2 |
 | #33 | BE-5 Backend Test Coverage ≥ 80% | OPEN | enhancement, sprint-2 | Sprint 2 |
 | #30 | FE-2 MetricsChart Smoothing + Zoom | OPEN | enhancement, sprint-2 | Sprint 2 |
 | #4  | test: 프론트엔드 테스트 커버리지 보강 | OPEN | sprint-2 | Sprint 2 |
 
-All other Sprint 1 issues (#3, #9, #10, #11, #12, #13–#19, #20, #21, #22, #23, #24, #25, #26, #27, #31, #32, #36) are CLOSED.
+---
+
+## 6. Branch State (git facts)
+
+```
+dev    921b0efb  docs: expand v0.2.4 scope                                          ← v0.2.4 tag here
+qa     5c758d8e  chore: promote dev to qa (pre-power-hit)                           ← lags runtime
+prod   41f4fdb1  fix: resolve conflict markers in dev branch frontend files         ← v0.1.0-era, MUST advance
+main   71b4cb1c  prod mirror (stale)                                                ← v0.1.0 tag here, pending v0.2.4 merge
+```
+
+**Branch ≠ runtime**: qa 와 prod 의 실제 컨테이너는 모두 dev HEAD `dabd84a1` 로 빌드된 이미지를 돌리고 있음. 3 환경 bundle 도 byte-identical. 다만 git 브랜치 기록이 뒤처져 있어 `git tag --contains v0.2.4` 가 main 에서 아직 빈 결과를 반환함.
 
 ---
 
-## 6. Branch State (git facts, not deploy facts)
+## 7. v0.2.4 Verification Checklist (PM smoke test — executed 2026-04-12)
 
-```
-dev    2582886b  chore: merge product-manager — v0.2.2 release docs               ← v0.2.2 tag here
-qa     1baa3e3b  chore: promote dev to qa                                          ← v0.2.1-qa (re-promoted), awaiting dev→qa for v0.2.2
-prod   41f4fdb1  fix: resolve conflict markers in dev branch frontend files       ← v0.1.0 근방, v0.1.0-prod env tag
-main   fdc41de   prod mirror                                                      ← v0.1.0 태그 on main HEAD
-```
-
-Git branch ≠ running build. The running prod backend is v0.1.0-era code per `/api/health` shape, which matches the git `prod` branch content.
-
----
-
-## 7. What PM got wrong in prior revisions (inventory)
-
-- Documented ports `:8000 / :5173 / :27017` for prod — all wrong.
-- Documented qa backend `:8002` as active — currently DOWN.
-- Claimed v0.2.0 prod deploy in comments — never happened per curl.
-- Claimed "main merged with v0.1.0 tag" stayed in sync with prod — true at tag time but prod has drifted (different branches now).
-- README's architecture/ports table propagated the same wrong ports.
-- OpenAPI `info.version` was assumed to reflect deploy; it is hardcoded `0.1.0` in source.
-
-This file now treats every field not directly observed via curl as **UNKNOWN**. DevOps must supply the rest.
+- [x] 3 환경 `/api/health/live` → `{"status":"live"}`
+- [x] `/api/training/status` 에 `bot_level`/`experiment_id`/`started_at` 포함
+- [x] 훈련 중 새로고침 → Stop 버튼 노출 유지 (hotfix #1 bd6cea5a)
+- [x] Stop 클릭 → step/episode 카운터 즉시 멈춤 + badge "stopped" (hotfix #3 ee1b48ae)
+- [x] Pause → Resume 1 cycle (hotfix #3)
+- [x] 새로고침 → 그래프 + 최근경기 패널 seed 복원 (hotfix #2 06519a42)
+- [x] L1~L5 버튼 선택 표시 + Start 시 silent reset 없음 (hotfix #8 Option A)
+- [x] rally 600 frames 초과 시 자동 종료 + 다음 게임 (hotfix #4 913fca5f)
+- [x] 차트 새로고침 전후 동일 step 에서 동일 Y (hotfix #5 + /timeseries)
+- [x] Hyper-ball trail 렌더 (hotfix #7 3b4303df/33f6b868)
