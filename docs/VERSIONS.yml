@@ -14,7 +14,7 @@
 #   last_verified_at   : when this YAML entry was last confirmed via curl + docker inspect
 
 schema_version: 1
-last_file_update: 2026-04-12T18:40:00+09:00   # v0.2.4 SHA map re-alignment (DevOps Option A)
+last_file_update: 2026-04-12T20:50:00+09:00   # backend image_digest fill (dev/qa/prod sha256)
 authoritative_source: docs/VERSIONS.yml       # this file supersedes README + DEPLOYMENT-STATUS on port/version conflicts
 
 release_history:
@@ -78,7 +78,7 @@ environments:
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
       commit: dabd84a1                        # runtime code HEAD (image built from this SHA)
-      image: UNKNOWN                          # DevOps to fill docker inspect digest
+      image: sha256:c337205e0e8996e664bb0e5c780e9b0114f9134e099abd89217a305f2f27187a
       built_at: 2026-04-12T18:00:00+09:00
       deployed_at: 2026-04-12T18:15:00+09:00
       training_state: stopped
@@ -114,7 +114,7 @@ environments:
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
       commit: dabd84a1
-      image: UNKNOWN
+      image: sha256:d0939d7470a1fc0bb1275f399f6f8d8018a46c95ba79c313b491edaa54d151d7
       built_at: 2026-04-12T18:00:00+09:00
       deployed_at: 2026-04-12T18:15:00+09:00
       training_state: stopped
@@ -151,7 +151,7 @@ environments:
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
       commit: dabd84a1
-      image: UNKNOWN
+      image: sha256:ccd038cef598999da785b854524a16fdca74098000f9a3f3e9908cbbc4d947dc
       built_at: 2026-04-12T18:00:00+09:00
       deployed_at: 2026-04-12T18:15:00+09:00
       training_state: stopped
