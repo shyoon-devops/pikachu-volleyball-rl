@@ -13,12 +13,17 @@ import './Dashboard.css'
 export function Dashboard() {
   const { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send } = useTrainingState()
 
-  // Hyperparams + bot_level live at the Dashboard so the single Start
-  // button in <TrainingControls /> can submit them. Do NOT re-introduce a
-  // second Start button inside <HyperparamForm /> — we intentionally
-  // collapsed the two into one CTA.
+  // Hyperparams live at the Dashboard so the single Start button in
+  // <TrainingControls /> can submit them. Do NOT re-introduce a second
+  // Start button inside <HyperparamForm /> — we intentionally collapsed
+  // the two into one CTA.
+  //
+  // bot_level is intentionally NOT held here (Option A, 2026-04-12): it
+  // lives exclusively on ``status.botLevel`` — the L1–L5 buttons in
+  // <TrainingControls /> mutate it via training:set_level, and the BE
+  // dispatcher carries it over into training:start when the payload
+  // omits ``bot_level`` (schemas.py:92, handlers.py:131-135).
   const [params, setParams] = useState<Hyperparams>(DEFAULT_HYPERPARAMS)
-  const [botLevel, setBotLevel] = useState<number>(1)
 
   const score1 = latestFrame?.score1 ?? 0
   const score2 = latestFrame?.score2 ?? 0
@@ -37,7 +42,10 @@ export function Dashboard() {
   }
 
   const handleStart = () => {
-    send('training:start', { hyperparams: params, bot_level: botLevel })
+    // Option A: bot_level omitted — BE uses status.bot_level (set via the
+    // L1–L5 buttons in <TrainingControls />). Sending it here would
+    // silently override a level the user just picked.
+    send('training:start', { hyperparams: params })
   }
 
   return (
@@ -65,9 +73,7 @@ export function Dashboard() {
         {isStopped && (
           <HyperparamForm
             params={params}
-            botLevel={botLevel}
             onParamsChange={setParams}
-            onBotLevelChange={setBotLevel}
             disabled={connectionState !== 'connected'}
           />
         )}
