@@ -4,6 +4,7 @@ import { Dashboard } from './components/dashboard/Dashboard'
 import { ReplayList } from './components/replay/ReplayList'
 import { ReplayPlayer } from './components/replay/ReplayPlayer'
 import { EvalPanel } from './components/evaluation/EvalPanel'
+import { ThemeToggle } from './components/ThemeToggle'
 import './App.css'
 
 function App() {
@@ -27,6 +28,9 @@ function App() {
               Evaluation
             </NavLink>
           </nav>
+          <div className="app-header-actions">
+            <ThemeToggle />
+          </div>
         </header>
 
         <main id="main-content" role="main" tabIndex={-1}>

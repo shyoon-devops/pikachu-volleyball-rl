@@ -88,6 +88,17 @@ main:focus {
   gap: var(--space-1);
 }
 
+/*
+ * .app-header-actions — right-aligned slot for header controls (e.g. ThemeToggle).
+ * FE scaffolding; Designer: feel free to refine spacing + separator.
+ */
+.app-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .app-nav-link {
   position: relative;
   padding: var(--space-2) var(--space-3);
