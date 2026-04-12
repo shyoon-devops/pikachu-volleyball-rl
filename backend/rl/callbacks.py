@@ -194,8 +194,20 @@ class LiveFrameCallback(BaseCallback):
         if self.num_timesteps % self.play_interval != 0:
             return True
 
+        # Snapshot the level + experiment id at demo-start so that (a) a
+        # mid-run set_bot_level picks up *here* for the in-process demo
+        # opponent without needing a vec-env restart, and (b) the saved
+        # GameRecord reflects what was actually played this demo — not
+        # a stale __init__ cache (the silent-L1 bug prior to this fix).
+        if self._manager is not None:
+            current_bot_level = int(getattr(self._manager, "_bot_level", self.bot_level))
+            current_experiment_id = str(getattr(self._manager, "_experiment_id", "") or "")
+        else:
+            current_bot_level = self.bot_level
+            current_experiment_id = ""
+
         game = PikachuVolleyball()
-        bot = RuleBasedBot(level=self.bot_level)
+        bot = RuleBasedBot(level=current_bot_level)
         state = game.reset()
         frames: list[dict[str, Any]] = []
         prev_ball_x = float(state.ball.x)
@@ -233,8 +245,14 @@ class LiveFrameCallback(BaseCallback):
 
         game_id = str(uuid.uuid4())
         # No "type" key — handlers.results_push_loop wraps the payload.
+        # bot_level and experiment_id MUST be present: the ws handler no
+        # longer coerces missing values to a silent L1 default (that was
+        # the root cause of every saved game appearing as L1 in
+        # /api/games regardless of the user's actual training level).
         result = {
             "game_id": game_id,
+            "experiment_id": current_experiment_id,
+            "bot_level": current_bot_level,
             "score1": state.score1,
             "score2": state.score2,
             "winner": 1 if state.score1 >= MAX_SCORE else 2,
