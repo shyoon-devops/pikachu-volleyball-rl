@@ -39,18 +39,28 @@ async def _check_mongo(request: Request) -> dict:
 
 
 def _check_disk() -> dict:
-    """Check disk usage against threshold."""
-    try:
-        usage = shutil.disk_usage(os.getenv("REPLAY_DIR", "./replays") or ".")
-        ratio = usage.used / usage.total if usage.total else 0.0
-        return {
-            "ok": ratio < _DISK_USAGE_THRESHOLD,
-            "used_ratio": round(ratio, 4),
-            "free_bytes": usage.free,
-            "threshold": _DISK_USAGE_THRESHOLD,
-        }
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    """Check disk usage against threshold.
+
+    Falls back to the current working directory when REPLAY_DIR is missing —
+    a non-existent data directory is a configuration concern, not disk
+    saturation.
+    """
+    candidates = [os.getenv("REPLAY_DIR", "./replays"), "."]
+    for path in candidates:
+        if path and Path(path).exists():
+            try:
+                usage = shutil.disk_usage(path)
+                ratio = usage.used / usage.total if usage.total else 0.0
+                return {
+                    "ok": ratio < _DISK_USAGE_THRESHOLD,
+                    "used_ratio": round(ratio, 4),
+                    "free_bytes": usage.free,
+                    "threshold": _DISK_USAGE_THRESHOLD,
+                    "path": path,
+                }
+            except Exception as e:
+                return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return {"ok": False, "error": "no usable path for disk check"}
 
 
 def _check_training(request: Request) -> dict:

@@ -1,4 +1,5 @@
-"""Shared test fixtures — mocks MongoDB so tests run without a live instance."""
+"""Shared test fixtures — mocks MongoDB so tests run without a live instance,
+and provides RL/game fixtures for trainer/env tests."""
 
 from __future__ import annotations
 
@@ -87,7 +88,7 @@ async def _test_lifespan(app):
     mock_manager.metrics_queue = _make_queue_mock(500)
     mock_manager.frames_queue = _make_queue_mock(100)
     mock_manager.results_queue = _make_queue_mock(200)
-    # Health check inspects `manager._thread`; MagicMock is fine (is_alive() returns a mock truthy value).
+    # Health check inspects manager._thread; None means no running training.
     mock_manager._thread = None
 
     app.state.training_service = TrainingServiceWrapper.__new__(TrainingServiceWrapper)

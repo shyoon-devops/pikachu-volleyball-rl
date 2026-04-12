@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -10,7 +11,11 @@ from pathlib import Path
 import pytest
 
 from backend.rl.callbacks import CheckpointCallback, MetricsCallback
-from backend.rl.trainer import TrainingManager
+from backend.rl.trainer import (
+    STOP_PROTECTION_THRESHOLD,
+    TrainingManager,
+    _INTERRUPTED_META_FILENAME,
+)
 
 
 @pytest.fixture
@@ -71,7 +76,52 @@ class TestTrainingManagerStop:
         )
         assert manager.status == "running"
         await asyncio.sleep(1)
-        await manager.stop()
+        result = await manager.stop()
+        assert manager.status == "stopped"
+        assert result["stopped"] is True
+        assert result["reason"] == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_stop_not_running_returns_not_running(
+        self, manager: TrainingManager
+    ) -> None:
+        result = await manager.stop()
+        assert result["stopped"] is True
+        assert result["reason"] == "not_running"
+
+    @pytest.mark.asyncio
+    async def test_stop_rejected_when_protected(
+        self, manager: TrainingManager
+    ) -> None:
+        """Stop without force is rejected once current_step >= threshold."""
+        await manager.start(
+            bot_level=1, total_timesteps=100_000, n_envs=2,
+            hyperparams={"n_steps": 128},
+        )
+        await asyncio.sleep(1)
+        # Simulate many steps completed
+        manager.current_step = STOP_PROTECTION_THRESHOLD + 1
+        result = await manager.stop(force=False)
+        assert result["stopped"] is False
+        assert result["reason"] == "protected"
+        assert manager.status == "running"
+        # Clean up — force stop
+        await manager.stop(force=True)
+
+    @pytest.mark.asyncio
+    async def test_stop_forced_when_protected(
+        self, manager: TrainingManager
+    ) -> None:
+        """Stop with force=True succeeds even past threshold."""
+        await manager.start(
+            bot_level=1, total_timesteps=100_000, n_envs=2,
+            hyperparams={"n_steps": 128},
+        )
+        await asyncio.sleep(1)
+        manager.current_step = STOP_PROTECTION_THRESHOLD + 1
+        result = await manager.stop(force=True)
+        assert result["stopped"] is True
+        assert result["reason"] == "stopped"
         assert manager.status == "stopped"
 
 
@@ -140,3 +190,113 @@ class TestCheckpointCallback:
         assert checkpoint_dir.exists()
         zips = list(checkpoint_dir.glob("*.zip"))
         assert len(zips) >= 1
+
+
+async def _wait_for_model_ready(
+    manager: TrainingManager, timeout: float = 30,
+) -> None:
+    """Wait until the training thread has created the model and started stepping."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        if manager._model is not None and manager.current_step > 0:
+            return
+        await asyncio.sleep(0.3)
+    raise TimeoutError("Model did not become ready within timeout")
+
+
+class TestEmergencySave:
+    """SIGTERM emergency checkpoint save and resume."""
+
+    @pytest.mark.asyncio
+    async def test_emergency_save_creates_checkpoint_and_meta(
+        self, manager: TrainingManager
+    ) -> None:
+        """_emergency_save writes interrupted.zip + interrupted.json."""
+        await manager.start(
+            bot_level=2, total_timesteps=100_000, n_envs=2,
+            hyperparams={"n_steps": 128},
+        )
+        await _wait_for_model_ready(manager)
+        assert manager.status == "running"
+
+        manager._emergency_save()
+
+        checkpoint_dir = Path(manager.model_dir) / manager._experiment_id
+        assert (checkpoint_dir / "interrupted.zip").exists()
+
+        meta_path = Path(manager.model_dir) / _INTERRUPTED_META_FILENAME
+        assert meta_path.exists()
+        meta = json.loads(meta_path.read_text())
+        assert meta["experiment_id"] == manager._experiment_id
+        assert meta["bot_level"] == 2
+        assert meta["current_step"] >= 0
+
+        await manager.stop(force=True)
+
+    @pytest.mark.asyncio
+    async def test_get_interrupted_session_returns_none_when_clean(
+        self, manager: TrainingManager
+    ) -> None:
+        assert manager.get_interrupted_session() is None
+
+    @pytest.mark.asyncio
+    async def test_get_interrupted_session_returns_meta(
+        self, manager: TrainingManager
+    ) -> None:
+        """After emergency save, get_interrupted_session returns metadata."""
+        await manager.start(
+            bot_level=1, total_timesteps=100_000, n_envs=2,
+            hyperparams={"n_steps": 128},
+        )
+        await _wait_for_model_ready(manager)
+        manager._emergency_save()
+        await manager.stop(force=True)
+
+        meta = manager.get_interrupted_session()
+        assert meta is not None
+        assert meta["experiment_id"] == manager._experiment_id
+
+    @pytest.mark.asyncio
+    async def test_resume_interrupted_restores_session(
+        self, manager: TrainingManager
+    ) -> None:
+        """resume_interrupted picks up from the emergency checkpoint."""
+        await manager.start(
+            bot_level=3, total_timesteps=100_000, n_envs=2,
+            hyperparams={"n_steps": 128},
+        )
+        await _wait_for_model_ready(manager)
+        original_exp_id = manager._experiment_id
+        manager._emergency_save()
+        await manager.stop(force=True)
+
+        manager2 = TrainingManager(
+            model_dir=manager.model_dir,
+            replay_dir=manager.replay_dir,
+        )
+        resumed_id = await manager2.resume_interrupted(
+            total_timesteps=256, n_envs=2,
+        )
+        assert resumed_id == original_exp_id
+        assert manager2.status == "running"
+        assert manager2._bot_level == 3
+
+        while manager2.status == "running":
+            await asyncio.sleep(0.2)
+
+    @pytest.mark.asyncio
+    async def test_clear_interrupted_session(
+        self, manager: TrainingManager
+    ) -> None:
+        """clear_interrupted_session removes the marker file."""
+        await manager.start(
+            bot_level=1, total_timesteps=100_000, n_envs=2,
+            hyperparams={"n_steps": 128},
+        )
+        await _wait_for_model_ready(manager)
+        manager._emergency_save()
+        await manager.stop(force=True)
+
+        assert manager.get_interrupted_session() is not None
+        manager.clear_interrupted_session()
+        assert manager.get_interrupted_session() is None
