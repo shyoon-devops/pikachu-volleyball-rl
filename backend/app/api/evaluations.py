@@ -18,6 +18,10 @@ from backend.app.services.evaluation_repository import (
     MAX_QUERY_LIMIT,
     EvaluationRepository,
 )
+from backend.app.services.evaluation_timeseries import (
+    SUPPORTED_METRICS,
+    build_timeseries,
+)
 
 
 def get_repository() -> EvaluationRepository:
@@ -68,6 +72,41 @@ async def list_checkpoints(
 ) -> list[str]:
     """Distinct model_paths present in storage."""
     return await repo.list_checkpoints(limit=limit)
+
+
+@router.get("/timeseries")
+async def timeseries(
+    repo: Annotated[EvaluationRepository, Depends(get_repository)],
+    metric: str = Query(
+        default="win_rate",
+        description=f"One of {list(SUPPORTED_METRICS)}",
+    ),
+    model_path: str | None = Query(default=None),
+    bot_level: int | None = Query(default=None, ge=1, le=5),
+    since: str | None = Query(default=None),
+    limit: int = Query(default=MAX_QUERY_LIMIT, ge=1, le=MAX_QUERY_LIMIT),
+    group_by_level: bool = Query(default=True),
+) -> list[dict[str, object]]:
+    """Time-series chart data grouped by (model_path, bot_level).
+
+    Returned payload is a list of series; each series has a list of
+    points sorted oldest → newest. The frontend renders one line per
+    series.
+    """
+    if metric not in SUPPORTED_METRICS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"metric must be one of {list(SUPPORTED_METRICS)}",
+        )
+
+    records = await repo.list(
+        model_path=model_path,
+        bot_level=bot_level,
+        since=since,
+        limit=limit,
+    )
+    series = build_timeseries(records, metric=metric, group_by_level=group_by_level)
+    return [s.to_dict() for s in series]
 
 
 @router.get("/{record_id}", response_model=EvaluationRecord)
