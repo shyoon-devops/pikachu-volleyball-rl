@@ -19,6 +19,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from backend.rl.callbacks import (
     CheckpointCallback,
+    CurriculumCallback,
     LiveFrameCallback,
     MetricsCallback,
 )
@@ -315,7 +316,7 @@ class TrainingManager:
                     policy_kwargs={"net_arch": DEFAULT_NET_ARCH},
                 )
 
-            callbacks = CallbackList([
+            callback_list: list[BaseCallback] = [
                 MetricsCallback(
                     queue=self.metrics_queue,
                     loop=loop,
@@ -335,7 +336,22 @@ class TrainingManager:
                     replay_dir=self.replay_dir,
                 ),
                 _StopEventCallback(self._stop_event, self),
-            ])
+            ]
+
+            curriculum_cfg = hp.get("curriculum") or {}
+            if curriculum_cfg.get("enabled"):
+                callback_list.append(
+                    CurriculumCallback(
+                        initial_level=bot_level,
+                        max_level=curriculum_cfg.get("max_level", 5),
+                        win_rate_threshold=curriculum_cfg.get("win_rate_threshold", 0.7),
+                        min_episodes=curriculum_cfg.get("min_episodes", 20),
+                        loop=loop,
+                        queue=self.metrics_queue,
+                    )
+                )
+
+            callbacks = CallbackList(callback_list)
 
             self._model.learn(
                 total_timesteps=total_timesteps,

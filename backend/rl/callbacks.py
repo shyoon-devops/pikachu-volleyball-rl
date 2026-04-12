@@ -283,6 +283,91 @@ class LiveFrameCallback(BaseCallback):
             replay_files.pop(0).unlink()
 
 
+class CurriculumCallback(BaseCallback):
+    """Auto-promote bot_level when recent win_rate exceeds threshold.
+
+    Tracks episode outcomes (win/loss) in a sliding window. Once at least
+    ``min_episodes`` have completed, if the rolling win rate is above
+    ``win_rate_threshold``, the bot level is incremented (capped at
+    ``max_level``). The window is reset after each promotion so the next
+    level is evaluated fairly.
+
+    Promotion is applied via ``training_env.env_method("set_bot_level", ...)``,
+    which queues the change to take effect on the next episode reset.
+    """
+
+    def __init__(
+        self,
+        initial_level: int = 1,
+        max_level: int = 5,
+        win_rate_threshold: float = 0.7,
+        min_episodes: int = 20,
+        loop: asyncio.AbstractEventLoop | None = None,
+        queue: asyncio.Queue[dict[str, Any]] | None = None,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.current_level = initial_level
+        self.max_level = max_level
+        self.win_rate_threshold = win_rate_threshold
+        self.min_episodes = min_episodes
+        self.loop = loop
+        self.queue = queue
+        self._recent_results: deque[bool] = deque(maxlen=max(min_episodes * 4, 100))
+
+    def _record_episode(self, won: bool) -> None:
+        self._recent_results.append(won)
+
+    def _should_promote(self) -> bool:
+        if self.current_level >= self.max_level:
+            return False
+        if len(self._recent_results) < self.min_episodes:
+            return False
+        win_rate = sum(self._recent_results) / len(self._recent_results)
+        return win_rate > self.win_rate_threshold
+
+    def _apply_promotion(self) -> None:
+        if self.current_level >= self.max_level:
+            return
+        self.current_level += 1
+        self._recent_results.clear()
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        for info in infos:
+            score1 = info.get("score1", 0)
+            score2 = info.get("score2", 0)
+            if score1 >= MAX_SCORE:
+                self._record_episode(won=True)
+            elif score2 >= MAX_SCORE:
+                self._record_episode(won=False)
+
+        if self._should_promote():
+            new_level = self.current_level + 1
+            try:
+                self.training_env.env_method("set_bot_level", new_level)
+            except Exception:
+                logger.exception("Failed to propagate bot_level to envs")
+                return True
+            logger.info(
+                "Curriculum: promoting bot_level %d -> %d (win_rate=%.2f over %d episodes)",
+                self.current_level, new_level,
+                sum(self._recent_results) / len(self._recent_results),
+                len(self._recent_results),
+            )
+            self._apply_promotion()
+            if self.loop is not None and self.queue is not None:
+                _safe_enqueue(
+                    self.loop, self.queue,
+                    {
+                        "type": "training:curriculum",
+                        "new_level": new_level,
+                        "step": self.num_timesteps,
+                    },
+                )
+        return True
+
+
 def _serialize_state(state: Any) -> dict[str, Any]:
     """Serialize a GameState to a plain dict for WS frames / replay storage."""
     return {

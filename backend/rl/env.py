@@ -52,6 +52,7 @@ class PikachuVolleyballEnv(gymnasium.Env):
         super().__init__()
         self.bot_level = bot_level
         self.max_steps = max_steps
+        self._pending_bot_level: int | None = None
 
         self.observation_space = spaces.Box(
             low=-1.0, high=1.0, shape=(18,), dtype=np.float32
@@ -70,6 +71,16 @@ class PikachuVolleyballEnv(gymnasium.Env):
         self._consecutive_touches = 0
         self._frames_since_crossing = 0
 
+    def set_bot_level(self, level: int) -> None:
+        """Queue a bot level change to take effect on the next reset.
+
+        Changing mid-episode would disrupt the current game; instead we apply
+        it at the next reset boundary so the current rollout completes cleanly.
+        """
+        if level < 1 or level > 5:
+            raise ValueError(f"bot_level must be in [1, 5], got {level}")
+        self._pending_bot_level = level
+
     def reset(
         self,
         *,
@@ -77,6 +88,9 @@ class PikachuVolleyballEnv(gymnasium.Env):
         options: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         super().reset(seed=seed, options=options)
+        if self._pending_bot_level is not None:
+            self.bot_level = self._pending_bot_level
+            self._pending_bot_level = None
         self._game = PikachuVolleyball()
         self._bot = RuleBasedBot(level=self.bot_level)
         state = self._game.reset()
