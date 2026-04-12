@@ -116,18 +116,27 @@ export function TrainingControls({
 
       <div className="training-controls-level">
         <label className="training-controls-level-label" id="bot-level-label">Bot Level</label>
-        <div className="training-controls-level-buttons" role="group" aria-labelledby="bot-level-label">
-          {BOT_LEVELS.map(level => (
-            <button
-              key={level}
-              className="training-controls-level-btn btn btn-ghost"
-              onClick={() => handleSetLevel(level)}
-              disabled={!isConnected}
-              aria-label={`Set bot level to ${level}`}
-            >
-              L{level}
-            </button>
-          ))}
+        <div
+          className="training-controls-level-buttons"
+          role="group"
+          aria-labelledby="bot-level-label"
+        >
+          {BOT_LEVELS.map(level => {
+            const isActive = status.botLevel === level
+            return (
+              <button
+                key={level}
+                className={`training-controls-level-btn btn btn-ghost${isActive ? ' active' : ''}`}
+                onClick={() => handleSetLevel(level)}
+                disabled={!isConnected}
+                aria-label={`Set bot level to ${level}`}
+                aria-pressed={isActive}
+                data-active={isActive}
+              >
+                L{level}
+              </button>
+            )
+          })}
         </div>
       </div>
 

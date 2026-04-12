@@ -265,8 +265,9 @@ class TestStopEventCallback:
         from backend.rl.trainer import _StopEventCallback, TrainingManager
 
         event = threading.Event()
+        pause_event = threading.Event()
         manager = TrainingManager()
-        cb = _StopEventCallback(event, manager)
+        cb = _StopEventCallback(event, pause_event, manager)
         assert cb._on_step() is True
 
     def test_stop_event_stops_when_set(self) -> None:
@@ -274,8 +275,9 @@ class TestStopEventCallback:
 
         event = threading.Event()
         event.set()
+        pause_event = threading.Event()
         manager = TrainingManager()
-        cb = _StopEventCallback(event, manager)
+        cb = _StopEventCallback(event, pause_event, manager)
         assert cb._on_step() is False
 
 

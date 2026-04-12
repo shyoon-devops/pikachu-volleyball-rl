@@ -107,6 +107,24 @@ describe('Dashboard loading state', () => {
     expect(screen.getByRole('button', { name: /stop training/i })).toBeInTheDocument()
   })
 
+  it('page loads with active training → shows Stop, not Start (refresh-while-running regression)', () => {
+    // Reproduces the CRITICAL bug: on refresh with training already running,
+    // the UI used to show the default 'stopped' state → Start button → no
+    // way to issue Stop. After the REST status-sync fix, the hook hydrates
+    // from /api/training/status before first paint, so the mocked state
+    // already carries state=running and the primary CTA is Stop.
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'running', currentStep: 12345, currentEpisode: 7 },
+    })
+    renderDashboard()
+    expect(screen.getByRole('button', { name: /stop training/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start training/i })).not.toBeInTheDocument()
+    // Primary CTA must be enabled — the bug manifested as a dead Stop.
+    const stop = screen.getByRole('button', { name: /stop training/i })
+    expect(stop).not.toBeDisabled()
+  })
+
   it('does not show the skeleton on a mid-session disconnect if we already have data', () => {
     resetMockState({
       connectionState: 'disconnected',

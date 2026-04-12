@@ -1,6 +1,16 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useWebSocket } from './useWebSocket'
-import { snakeToCamel } from '../lib/api'
+import {
+  snakeToCamel,
+  getTrainingStatus,
+  getRecentGames,
+  getMetricsHistory,
+  getCurrentFrame,
+  stopTraining,
+  pauseTraining,
+  resumeTraining,
+  patchTrainingLevel,
+} from '../lib/api'
 import type {
   GameState,
   TrainingMetrics,
@@ -13,6 +23,13 @@ import type {
 
 const MAX_METRICS_POINTS = 1000
 const MAX_RECENT_GAMES = 100
+/**
+ * How many completed games to pull on mount/reconnect. The hook
+ * ring-buffer still caps at MAX_RECENT_GAMES; this is just how much
+ * history we try to seed so the "Recent Games" panel isn't empty after
+ * a refresh. Matches what the dashboard actually renders.
+ */
+const SEED_RECENT_GAMES = 20
 
 export interface TrainingState {
   connectionState: ConnectionState
@@ -36,7 +53,7 @@ function getWsUrl(): string {
  * `useTrainingState()` which consumes the shared context instead.
  */
 export function useTrainingStateImpl(): TrainingState {
-  const { connectionState, reconnectAttempt, send, subscribe } = useWebSocket(getWsUrl())
+  const { connectionState, reconnectAttempt, send: wsSend, subscribe } = useWebSocket(getWsUrl())
 
   const [status, setStatus] = useState<TrainingStatus>({
     state: 'stopped',
@@ -85,6 +102,125 @@ export function useTrainingStateImpl(): TrainingState {
     ]
     return () => { unsubs.forEach(u => u()) }
   }, [subscribe, handleMetrics, handleFrame, handleStatus, handleGameResult])
+
+  // Sync authoritative training state from REST on mount and again whenever
+  // the WebSocket reconnects. WS broadcasts `training:status` only when the
+  // state *changes*, so a page refresh or mid-session reconnect could leave
+  // the UI showing the default 'stopped' state while training is actually
+  // running — reported as the refresh-shows-Start / Stop-not-wired bug.
+  useEffect(() => {
+    if (connectionState !== 'connected') return
+    let cancelled = false
+    getTrainingStatus()
+      .then(fresh => {
+        if (cancelled) return
+        setStatus(prev => ({ ...prev, ...fresh }))
+      })
+      .catch(() => {
+        // REST probe is best-effort; WS remains the live channel.
+      })
+    return () => { cancelled = true }
+  }, [connectionState])
+
+  // First-mount REST probe, even before the WebSocket opens, so the header
+  // and primary CTA are correct on refresh regardless of WS timing.
+  useEffect(() => {
+    let cancelled = false
+    getTrainingStatus()
+      .then(fresh => {
+        if (cancelled) return
+        setStatus(prev => ({ ...prev, ...fresh }))
+      })
+      .catch(() => { /* best-effort */ })
+    return () => { cancelled = true }
+  }, [])
+
+  // Seed charts + recent-games table + game canvas from REST on mount.
+  // WS streams the live data going forward, but a refresh used to wipe
+  // all three panels since we started from empty state. REST gives us
+  // the current snapshot; the running WS then appends new points on top.
+  //
+  // `/api/training/current_frame` (API spec v0.2.4) lets the game canvas
+  // repaint immediately after refresh instead of waiting ~30ms for the
+  // first WS `training:frame`. Returns null when training isn't running —
+  // in that case we leave latestFrame null and the canvas renders its
+  // idle placeholder.
+  useEffect(() => {
+    let cancelled = false
+    getMetricsHistory('1m')
+      .then(history => {
+        if (cancelled || history.length === 0) return
+        // Only seed if we don't already have live data from the WS
+        // (avoids clobbering mid-session arrivals on slow responses).
+        setMetrics(prev => (prev.length > 0 ? prev : history))
+      })
+      .catch(() => { /* best-effort */ })
+    getRecentGames(SEED_RECENT_GAMES)
+      .then(games => {
+        if (cancelled || games.length === 0) return
+        setRecentGames(prev => (prev.length > 0 ? prev : games))
+      })
+      .catch(() => { /* best-effort */ })
+    getCurrentFrame()
+      .then(frame => {
+        if (cancelled || frame === null) return
+        // Only seed if we don't already have a live frame from the WS.
+        setLatestFrame(prev => prev ?? frame)
+      })
+      .catch(() => { /* best-effort */ })
+    return () => { cancelled = true }
+  }, [])
+
+  // Wrap the raw WS send so the UI reflects the user's intent the instant
+  // they click. Backend's echoed `training:status` broadcast will override
+  // this optimistic value when it disagrees. This fixes the reported
+  // "Stop/Pause/level buttons don't do anything" symptom — previously we
+  // fire-and-forgot the WS message and relied entirely on the return echo
+  // that occasionally raced the UI or (for `training:pause`, which the
+  // backend does not yet handle over WS) never arrived at all.
+  //
+  // Dual-channel dispatch (API spec v0.2.4): we fire both the REST
+  // command and the WS message. Backend is rolling out REST handlers
+  // (POST /api/training/stop|pause|resume, PATCH /api/training/level)
+  // alongside the existing WS handlers. Either path landing is
+  // sufficient to execute the command; each is idempotent on the
+  // backend state. REST failures (404 before deploy, 5xx) are silent —
+  // the WS path plus the optimistic UI keep the user in sync.
+  //
+  // Note for reviewers: once BE confirms REST coverage everywhere, we
+  // can drop the WS fallback. Keeping both until then per PM
+  // instruction — see docs/NOTICE-FRONTEND-BUTTON-SYNC.md.
+  const send = useCallback((type: WSClientMessageType, payload?: unknown) => {
+    wsSend(type, payload)
+    switch (type) {
+      case 'training:start':
+        setStatus(prev => ({ ...prev, state: 'running' }))
+        break
+      case 'training:stop':
+        setStatus(prev => ({ ...prev, state: 'stopped' }))
+        stopTraining().catch(() => { /* REST not deployed → WS fallback */ })
+        break
+      case 'training:pause':
+        setStatus(prev => ({ ...prev, state: 'paused' }))
+        pauseTraining().catch(() => { /* REST not deployed → WS fallback */ })
+        break
+      case 'training:resume':
+        setStatus(prev => ({ ...prev, state: 'running' }))
+        resumeTraining().catch(() => { /* REST not deployed → WS fallback */ })
+        break
+      case 'training:set_level': {
+        const level = (payload as { level?: unknown } | undefined)?.level
+        if (typeof level === 'number') {
+          setStatus(prev => ({ ...prev, botLevel: level }))
+          patchTrainingLevel(level).catch(() => { /* REST not deployed → WS fallback */ })
+        }
+        break
+      }
+      default:
+        // replay:request et al carry no optimistic state.
+        break
+    }
+  }, [wsSend])
 
   return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send }
 }

@@ -1,9 +1,11 @@
 """Tests for the Rule-based Bot."""
 
+import random as rng
+
 import pytest
 
 from backend.game.engine import PikachuVolleyball, PlayerInput
-from backend.game.bot import RuleBasedBot
+from backend.game.bot import BOT_PARAMS, RuleBasedBot
 
 
 class TestBotValidInput:
@@ -69,3 +71,131 @@ class TestL5BeatsL1:
                 l5_wins += 1
 
         assert l5_wins >= 12, f"L5 won only {l5_wins}/{n_games} games"
+
+
+def _simulate_game_actions(
+    *,
+    level_p1: int,
+    level_p2: int,
+    seed: int,
+    max_steps: int = 1500,
+) -> list[tuple[int, int, int, int, int, int]]:
+    """Simulate a game and return a compact per-frame action record.
+
+    Record tuple: (p1.x_dir, p1.y_dir, p1.power, p2.x_dir, p2.y_dir, p2.power).
+    Used by the diversity tests below to compare whether different seeds
+    produce distinguishable play patterns.
+    """
+    rng.seed(seed)
+    game = PikachuVolleyball()
+    state = game.reset()
+    bot_p1 = RuleBasedBot(level=level_p1)
+    bot_p2 = RuleBasedBot(level=level_p2)
+
+    trace: list[tuple[int, int, int, int, int, int]] = []
+    for _ in range(max_steps):
+        a1 = bot_p1.get_action(state, is_player2=False)
+        a2 = bot_p2.get_action(state, is_player2=True)
+        trace.append(
+            (a1.x_dir, a1.y_dir, int(a1.power_hit), a2.x_dir, a2.y_dir, int(a2.power_hit))
+        )
+        state = game.step(a1, a2)
+        if state.score1 >= 15 or state.score2 >= 15:
+            break
+    return trace
+
+
+class TestBotActionDiversity:
+    """Hotfix regression guard: bot play must vary across seeds/games.
+
+    Before the stochastic-variance hotfix, fixed-seed runs produced nearly
+    identical frame-by-frame trajectories. These tests pin the new behavior:
+    changing seeds must change the action trace.
+    """
+
+    def test_l1_traces_differ_across_seeds(self) -> None:
+        t1 = _simulate_game_actions(level_p1=1, level_p2=1, seed=1)
+        t2 = _simulate_game_actions(level_p1=1, level_p2=1, seed=2)
+        # Identical length AND identical frame-by-frame actions would mean
+        # the bot is fully deterministic at L1 — regression.
+        same = min(len(t1), len(t2))
+        diffs = sum(1 for i in range(same) if t1[i] != t2[i])
+        assert diffs > same * 0.1, (
+            f"L1 traces too similar across seeds: only {diffs}/{same} frames "
+            "differ (expected >10%)"
+        )
+
+    def test_l5_traces_differ_across_seeds(self) -> None:
+        """Even L5 must show variance — was perfectly deterministic pre-fix."""
+        t1 = _simulate_game_actions(level_p1=5, level_p2=5, seed=7)
+        t2 = _simulate_game_actions(level_p1=5, level_p2=5, seed=8)
+        same = min(len(t1), len(t2))
+        diffs = sum(1 for i in range(same) if t1[i] != t2[i])
+        assert diffs > 0, (
+            "L5 produced byte-identical traces across seeds — no stochasticity"
+        )
+
+    def test_l1_action_distribution_has_spread(self) -> None:
+        """Over a long game, L1 must emit a mix of x_dir values, not one only."""
+        trace = _simulate_game_actions(level_p1=1, level_p2=3, seed=42, max_steps=800)
+        x_dirs = [t[0] for t in trace]  # p1.x_dir
+        unique_dirs = set(x_dirs)
+        # -1, 0, 1 are all possible; we require at least 2 distinct values
+        # and neither -1 nor +1 dominating (>85%).
+        assert len(unique_dirs) >= 2, f"L1 only emitted x_dir ∈ {unique_dirs}"
+        counts = {d: x_dirs.count(d) for d in unique_dirs}
+        top_share = max(counts.values()) / len(x_dirs)
+        assert top_share < 0.85, (
+            f"One x_dir value dominated: {counts} / {len(x_dirs)} frames"
+        )
+
+    def test_power_hit_angle_varies(self) -> None:
+        """When L1 executes power hits, the attack angle should vary."""
+        rng.seed(123)
+        game = PikachuVolleyball()
+        state = game.reset()
+        bot_l1 = RuleBasedBot(level=1)
+        bot_l3 = RuleBasedBot(level=3)
+
+        power_hit_x_dirs: list[int] = []
+        for _ in range(4000):
+            a1 = bot_l1.get_action(state, is_player2=False)
+            a2 = bot_l3.get_action(state, is_player2=True)
+            if a2.power_hit:
+                power_hit_x_dirs.append(a2.x_dir)
+            state = game.step(a1, a2)
+            if state.score1 >= 15 or state.score2 >= 15:
+                break
+
+        # Collect enough samples; if fewer, skip diversity check.
+        if len(power_hit_x_dirs) >= 10:
+            assert len(set(power_hit_x_dirs)) >= 2, (
+                f"All {len(power_hit_x_dirs)} power hits used the same x_dir — "
+                f"angle variance not firing"
+            )
+
+
+class TestBotLevelNoiseMonotonic:
+    """Per-level noise knobs should decrease (or stay equal) as level rises."""
+
+    def test_prediction_error_non_increasing(self) -> None:
+        errs = [BOT_PARAMS[L].prediction_error for L in (1, 2, 3, 4, 5)]
+        assert errs == sorted(errs, reverse=True), (
+            f"prediction_error not monotone: {errs}"
+        )
+
+    def test_hesitation_rate_non_increasing(self) -> None:
+        rates = [BOT_PARAMS[L].hesitation_rate for L in (1, 2, 3, 4, 5)]
+        assert rates == sorted(rates, reverse=True), (
+            f"hesitation_rate not monotone: {rates}"
+        )
+
+    def test_l5_still_has_nonzero_variance(self) -> None:
+        """L5 must keep at least a whisper of noise on every knob — zero
+        stochasticity was the original pattern-sameness bug."""
+        p = BOT_PARAMS[5]
+        assert p.prediction_error > 0
+        assert p.jump_jitter > 0
+        assert p.angle_variance > 0
+        assert p.hesitation_rate > 0
+        assert p.trajectory_noise_scale > 0
