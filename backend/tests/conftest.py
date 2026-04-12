@@ -17,6 +17,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "load: marks tests that exert heavy concurrency/load "
+        "(deselect with -m 'not load')",
+    )
+
+
 @pytest.fixture
 def game_engine() -> PikachuVolleyball:
     """Return an initialized game engine."""
