@@ -26,6 +26,7 @@ from backend.app.services.db_utils import build_mongo_client
 from backend.app.services.eval_service import EvalServiceWrapper
 from backend.app.services.game_service import GameService
 from backend.app.services.indexes import ensure_indexes
+from backend.app.services.metrics_service import MetricsService
 from backend.app.services.replay_service import ReplayService
 from backend.app.services.training_service import TrainingServiceWrapper
 from backend.app.ws.handlers import (
@@ -63,13 +64,20 @@ async def lifespan(app: FastAPI):
     app.state.mongo_client = client
     app.state.db = db
     app.state.game_service = GameService(db)
+    app.state.metrics_service = MetricsService(db)
     app.state.replay_service = ReplayService(replay_dir=replay_dir, max_count=max_replays)
     app.state.training_service = TrainingServiceWrapper(model_dir=model_dir, replay_dir=replay_dir)
     app.state.eval_service = EvalServiceWrapper(db)
     app.state.ws_manager = ConnectionManager()
 
     push_tasks = [
-        asyncio.create_task(metrics_push_loop(app.state.ws_manager, app.state.training_service)),
+        asyncio.create_task(
+            metrics_push_loop(
+                app.state.ws_manager,
+                app.state.training_service,
+                metrics_service=app.state.metrics_service,
+            )
+        ),
         asyncio.create_task(frames_push_loop(app.state.ws_manager, app.state.training_service)),
         asyncio.create_task(
             results_push_loop(

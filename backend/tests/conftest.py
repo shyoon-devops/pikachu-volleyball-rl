@@ -63,6 +63,60 @@ class FakeReplayService:
         return []
 
 
+class FakeMetricsService:
+    """In-memory stand-in for MetricsService.
+
+    Mirrors the real aggregation contract closely enough for endpoint tests
+    without needing Mongo. Supports ``record`` (for push-loop tests) and
+    ``aggregate`` (for endpoint tests); the aggregate implementation here
+    is simplified — it just returns everything that was recorded, bucket
+    selection happens at the caller's fidelity.
+    """
+
+    def __init__(self) -> None:
+        self.records: list[dict] = []
+
+    async def record(self, experiment_id: str, data: dict) -> None:
+        from datetime import datetime, timezone
+
+        doc = dict(data)
+        doc["experiment_id"] = experiment_id
+        doc["timestamp"] = datetime.now(timezone.utc)
+        self.records.append(doc)
+
+    async def aggregate(
+        self,
+        *,
+        experiment_id: str | None = None,
+        bucket: str = "1m",
+        since=None,
+        until=None,
+    ) -> list[dict]:
+        # Return a single synthetic bucket spanning everything recorded so
+        # endpoint tests can assert shape without simulating $dateTrunc.
+        matching = [
+            r for r in self.records
+            if experiment_id is None or r.get("experiment_id") == experiment_id
+        ]
+        if not matching:
+            return []
+        from datetime import timezone
+
+        def _avg(field: str) -> float:
+            vals = [r[field] for r in matching if field in r]
+            return sum(vals) / len(vals) if vals else 0.0
+
+        return [{
+            "bucket_start": min(r["timestamp"] for r in matching).astimezone(timezone.utc),
+            "count": len(matching),
+            "step_max": max((r.get("step", 0) for r in matching), default=0),
+            "avg_mean_reward": _avg("mean_reward"),
+            "avg_win_rate": _avg("win_rate"),
+            "avg_policy_loss": _avg("policy_loss"),
+            "avg_value_loss": _avg("value_loss"),
+        }]
+
+
 def _make_queue_mock(maxsize: int) -> MagicMock:
     """Build a queue mock that satisfies the health check's qsize/maxsize reads."""
     m = MagicMock()
@@ -79,6 +133,7 @@ async def _test_lifespan(app):
     app.state.mongo_client = mongo_client
     app.state.db = MagicMock()
     app.state.game_service = FakeGameService()
+    app.state.metrics_service = FakeMetricsService()
     app.state.replay_service = FakeReplayService()
     mock_manager = MagicMock()
     mock_manager.status = "stopped"
