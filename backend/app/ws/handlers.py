@@ -311,11 +311,29 @@ async def results_push_loop(
     queue = training_service.manager.results_queue
     while True:
         data = await queue.get()
+        # bot_level and experiment_id MUST be present on the wire — the
+        # producer (LiveFrameCallback._on_step) snapshots both from the
+        # TrainingManager before the demo runs. If either is missing we
+        # fall through to the exception branch → dead-letter, rather
+        # than silently coercing to L1 (the previous default) which
+        # masked the "every game saved as L1" regression FE reported.
+        if "bot_level" not in data:
+            logger.warning(
+                "results_push_loop received payload without bot_level "
+                "(game_id=%s) — routing to dead-letter",
+                data.get("game_id", "?"),
+            )
+        if "experiment_id" not in data:
+            logger.warning(
+                "results_push_loop received payload without experiment_id "
+                "(game_id=%s) — routing to dead-letter",
+                data.get("game_id", "?"),
+            )
         try:
             record = GameRecord(
                 game_id=data.get("game_id", ""),
-                experiment_id=data.get("experiment_id", ""),
-                bot_level=data.get("bot_level", 1),
+                experiment_id=data["experiment_id"],
+                bot_level=data["bot_level"],
                 score1=data["score1"],
                 score2=data["score2"],
                 winner=data["winner"],

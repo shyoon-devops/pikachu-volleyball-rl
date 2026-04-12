@@ -227,8 +227,13 @@ def test_training_timeseries_rejects_unknown_metric(client):
 def test_training_timeseries_respects_limit_bounds(client):
     # limit=0 is below the declared minimum.
     assert client.get("/api/training/timeseries?metric=reward&limit=0").status_code == 422
-    # 1001 is above the ceiling guarding against pathological responses.
-    assert client.get("/api/training/timeseries?metric=reward&limit=1001").status_code == 422
+    # 1001 used to be the ceiling; after the metrics-resolution bump
+    # (MetricsCallback log_interval 100→256 → ~3900 points per 1M-step
+    # run) the cap was raised to 10000 so a full run fits in one call.
+    assert client.get("/api/training/timeseries?metric=reward&limit=1001").status_code == 200
+    assert client.get("/api/training/timeseries?metric=reward&limit=10000").status_code == 200
+    # 10001 is now the pathological-response guard.
+    assert client.get("/api/training/timeseries?metric=reward&limit=10001").status_code == 422
 
 
 # --- GET /api/training/current_frame ---------------------------------------

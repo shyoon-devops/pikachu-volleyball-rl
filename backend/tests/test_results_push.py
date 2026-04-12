@@ -131,6 +131,111 @@ async def test_results_push_loop_writes_dead_letter_on_total_failure(
 
 
 @pytest.mark.asyncio
+async def test_missing_bot_level_goes_to_dead_letter(monkeypatch, tmp_path: Path):
+    """Regression: a payload without bot_level must NOT silently coerce to L1.
+
+    Pre-fix the handler did ``data.get("bot_level", 1)`` which hid the
+    upstream bug where LiveFrameCallback never put bot_level in the
+    results dict. Every game landed in Mongo with bot_level=1 regardless
+    of the actual training level — the exact bug FE reported. This test
+    pins the new loud-failure behavior: missing bot_level → dead-letter,
+    never a silent default.
+    """
+    dead_letter = tmp_path / "failed_results.jsonl"
+    monkeypatch.setattr(wsh, "DEAD_LETTER_PATH", dead_letter)
+
+    bad_payload = {
+        "game_id": "missing-level",
+        "experiment_id": "exp-1",
+        # bot_level intentionally omitted
+        "score1": 15,
+        "score2": 10,
+        "winner": 1,
+        "duration_frames": 300,
+        "rally_count": 5,
+    }
+
+    queue: asyncio.Queue = asyncio.Queue()
+    await queue.put(bad_payload)
+
+    training_service = MagicMock()
+    training_service.manager.results_queue = queue
+
+    broadcasts: list[dict] = []
+
+    class _MgrStub:
+        broadcast = AsyncMock(side_effect=lambda msg: broadcasts.append(msg))
+
+    game_service = MagicMock()
+    game_service.save_game = AsyncMock()
+
+    task = asyncio.create_task(
+        wsh.results_push_loop(_MgrStub(), training_service, game_service)  # type: ignore[arg-type]
+    )
+    for _ in range(20):
+        await asyncio.sleep(0)
+        if dead_letter.exists():
+            break
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert dead_letter.exists(), "missing bot_level must land in dead-letter"
+    entry = json.loads(dead_letter.read_text().strip().splitlines()[0])
+    assert entry["record"]["game_id"] == "missing-level"
+    # save_game must NOT have been called with a coerced L1 record.
+    game_service.save_game.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_missing_experiment_id_goes_to_dead_letter(monkeypatch, tmp_path: Path):
+    """Companion to the bot_level regression: experiment_id is equally required."""
+    dead_letter = tmp_path / "failed_results.jsonl"
+    monkeypatch.setattr(wsh, "DEAD_LETTER_PATH", dead_letter)
+
+    bad_payload = {
+        "game_id": "missing-exp",
+        # experiment_id omitted
+        "bot_level": 3,
+        "score1": 15,
+        "score2": 10,
+        "winner": 1,
+        "duration_frames": 300,
+        "rally_count": 5,
+    }
+
+    queue: asyncio.Queue = asyncio.Queue()
+    await queue.put(bad_payload)
+
+    training_service = MagicMock()
+    training_service.manager.results_queue = queue
+
+    class _MgrStub:
+        broadcast = AsyncMock()
+
+    game_service = MagicMock()
+    game_service.save_game = AsyncMock()
+
+    task = asyncio.create_task(
+        wsh.results_push_loop(_MgrStub(), training_service, game_service)  # type: ignore[arg-type]
+    )
+    for _ in range(20):
+        await asyncio.sleep(0)
+        if dead_letter.exists():
+            break
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert dead_letter.exists()
+    game_service.save_game.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_results_push_loop_invalid_payload_goes_to_dead_letter(
     monkeypatch, tmp_path: Path
 ):
