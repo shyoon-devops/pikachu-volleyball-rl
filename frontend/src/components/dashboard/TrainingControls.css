@@ -82,6 +82,7 @@
 }
 
 .training-controls-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -92,12 +93,50 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  overflow: hidden;
+  /* 마이크로 애니메이션 타이밍 — .btn 과 동일 패턴 */
+  transition: transform var(--duration-normal) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
+              filter var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+}
+
+.training-controls-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.25) 50%,
+    transparent 100%
+  );
+  transform: translateX(-120%);
+  transition: transform var(--duration-slow) var(--ease-out);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0;
 }
 
 .training-controls-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
+  transform: translateY(-1.5px);
   box-shadow: var(--shadow-md);
+  filter: brightness(1.08);
+}
+
+.training-controls-btn:hover:not(:disabled)::before {
+  transform: translateX(220%);
+  opacity: 1;
+}
+
+.training-controls-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+  transition: transform 80ms var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+  box-shadow: var(--shadow-sm);
 }
 
 .training-controls-btn:disabled {
@@ -165,6 +204,12 @@
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
   border-color: var(--color-border-strong);
+  transform: translateY(-1px);
+}
+
+.training-controls-level-btn:active {
+  transform: translateY(0) scale(0.96);
+  transition: transform 80ms var(--ease-out);
 }
 
 .training-controls-level-btn[data-active="true"],

@@ -88,3 +88,93 @@
   font-family: var(--font-mono) !important;
   font-size: var(--text-xs) !important;
 }
+
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  Semantic chart variants
+ * ═══════════════════════════════════════════════════════════
+ *  Dashboard.tsx renders 4 charts in .dashboard-right in fixed order:
+ *    1) Reward       — performance (green)
+ *    2) Win Rate     — agent strength (blue)
+ *    3) Policy Loss  — loss metric (red)
+ *    4) Value Loss   — loss metric (orange)
+ *
+ *  TSX 에서 <Line stroke> 은 prop 으로 전달되어 CSS 로는 오버라이드
+ *  불가하지만, 카드 테두리 · 그리드 틴트 · 툴팁 보더 · 상단 accent bar
+ *  로 시각적 의미를 보강한다. 순서 기반 매핑이므로 Dashboard.tsx 에서
+ *  차트 순서가 바뀌면 이 규칙도 재정렬이 필요하다.
+ * ═══════════════════════════════════════════════════════════
+ */
+.dashboard-right .metrics-chart {
+  position: relative;
+  overflow: hidden;
+  transition: border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-normal) var(--ease-out);
+}
+
+/* Top accent bar — 위에서 2px 네온 라인으로 차트별 색 표시 */
+.dashboard-right .metrics-chart::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--_chart-accent, var(--color-text-muted));
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+/* Reward — 초록 (양의 학습 신호) */
+.dashboard-right .metrics-chart:nth-child(1) {
+  --_chart-accent: var(--color-chart-green);
+}
+.dashboard-right .metrics-chart:nth-child(1):hover {
+  border-color: rgba(34, 197, 94, 0.35);
+  box-shadow: 0 0 18px rgba(34, 197, 94, 0.12);
+}
+.dashboard-right .metrics-chart:nth-child(1) .recharts-tooltip-wrapper .recharts-default-tooltip {
+  border-color: rgba(34, 197, 94, 0.45) !important;
+}
+
+/* Win Rate — 파랑 (에이전트 실력) */
+.dashboard-right .metrics-chart:nth-child(2) {
+  --_chart-accent: var(--color-chart-blue);
+}
+.dashboard-right .metrics-chart:nth-child(2):hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 0 18px rgba(59, 130, 246, 0.12);
+}
+.dashboard-right .metrics-chart:nth-child(2) .recharts-tooltip-wrapper .recharts-default-tooltip {
+  border-color: rgba(59, 130, 246, 0.45) !important;
+}
+
+/* Policy Loss — 빨강 (손실 = 낮을수록 좋음) */
+.dashboard-right .metrics-chart:nth-child(3) {
+  --_chart-accent: var(--color-chart-red);
+}
+.dashboard-right .metrics-chart:nth-child(3):hover {
+  border-color: rgba(239, 68, 68, 0.35);
+  box-shadow: 0 0 18px rgba(239, 68, 68, 0.12);
+}
+.dashboard-right .metrics-chart:nth-child(3) .recharts-tooltip-wrapper .recharts-default-tooltip {
+  border-color: rgba(239, 68, 68, 0.45) !important;
+}
+
+/* Value Loss — 주황 (손실 = 낮을수록 좋음, red 와 의미 구분) */
+.dashboard-right .metrics-chart:nth-child(4) {
+  --_chart-accent: var(--color-chart-orange);
+}
+.dashboard-right .metrics-chart:nth-child(4):hover {
+  border-color: rgba(245, 158, 11, 0.35);
+  box-shadow: 0 0 18px rgba(245, 158, 11, 0.12);
+}
+.dashboard-right .metrics-chart:nth-child(4) .recharts-tooltip-wrapper .recharts-default-tooltip {
+  border-color: rgba(245, 158, 11, 0.45) !important;
+}
+
+/* Loss 그룹(3,4) 은 그리드를 살짝 warm 틴트로 묶어 의미 그룹화 */
+.dashboard-right .metrics-chart:nth-child(3) .recharts-cartesian-grid line,
+.dashboard-right .metrics-chart:nth-child(4) .recharts-cartesian-grid line {
+  stroke: rgba(255, 180, 120, 0.06);
+}
