@@ -69,6 +69,14 @@ class FakeCollection:
                 return dict(d)
         return None
 
+    async def delete_one(self, filter: dict[str, Any]) -> int:
+        """Delete first matching document. Returns count removed (0 or 1)."""
+        for i, d in enumerate(self._docs):
+            if self._matches(d, filter):
+                del self._docs[i]
+                return 1
+        return 0
+
     @staticmethod
     def _matches(doc: dict[str, Any], filter: dict[str, Any]) -> bool:
         for k, v in filter.items():
