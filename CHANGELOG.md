@@ -9,15 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 v0.2.4 이후 scope. Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) + Evaluator PR #44 (E1-E10 baseline comparator / batch eval / history / timeseries / Elo tracker) 후속 릴리스 후보.
 
-## [0.2.4] - 2026-04-12 (post-v0.2.3 live-UI hotfix bundle / dev HEAD ee1b48ae)
+## [0.2.4] - 2026-04-12 (post-v0.2.3 live-UI + engine-stall hotfix bundle / dev HEAD cc72e0f1)
 
-v0.2.3 을 3 환경(dev/qa/prod)에 배포한 직후 PM 의 실사용 테스트에서 확인된 3 CRITICAL 이슈 긴급 수정. WS 상태 동기화, 새로고침 복원, Stop/Pause 실제 중단 동작 — 어느 하나도 해소되지 않으면 사용자가 훈련을 제어할 수 없는 상태.
+v0.2.3 을 3 환경(dev/qa/prod)에 배포한 직후 PM 의 실사용 테스트에서 확인된 4 CRITICAL 이슈 긴급 수정. 3건은 live-UI 제어 불가 (WS 상태 동기화, 새로고침 복원, Stop/Pause 실제 중단) + 1건은 엔진 무한 rally deadlock. 어느 하나도 해소되지 않으면 사용자/RL 모두 정상 훈련 사이클을 돌릴 수 없는 상태.
 
 ### Fixed — Live-UI CRITICAL
 
 - **FE REST hydration on mount + reconnect** (`bd6cea5a`): `fix(ui): sync training status from REST on mount + reconnect (CRITICAL)` — `useTrainingStateImpl` 이 `status={state:'stopped', ...}` 하드코딩으로 시작하고 `training:status` WS 메시지는 *state change* 시에만 브로드캐스트되었기 때문에, 훈련이 돌아가는 중에 페이지를 새로고침하면 Start 버튼만 보이고 Stop 버튼이 없어서 사용자가 개입할 수 없었음. mount 시 `GET /api/training/status` + 재연결 시 re-fetch 로 복원
 - **FE optimistic Stop/Pause/level + REST hydration for graphs/games** (`06519a42`): `fix(ui): optimistic Stop/Pause/level + REST hydration for graphs/games (CRITICAL)` — 4 user-reported 버그 해소 (Stop 무반응, Pause 무반응, 새로고침 시 그래프/최근경기 패널 공백, Bot Level 버튼 선택 표시 없음). `wsSend` 를 optimistic local state 로 감싸고 mount 시 `/api/training/metrics/aggregate` + `/api/games?limit=20` + 게임 캔버스 REST seed 로 즉시 복원
 - **BE stop/pause 실제 중단 + step/episode metrics broadcast** (`ee1b48ae`): `fix(training): stop/pause actually halt training + broadcast step/episode metrics` — QA 의 Stop/Pause no-op + step/episode counter 0/0 고착 원인 근본 해결. `TrainingManager` 에 `threading.Event` pair (stop + pause) 를 SB3 `CallbackList` 를 통해 worker thread 에 연결 → 실제 unwinding. `LiveFrameCallback` 이 `last_frame` 을 갱신해 새로고침 시 캔버스 즉시 repaint. `GET /api/training/status` 에 `bot_level`/`experiment_id`/`started_at` 추가. 상태변이 REST 엔드포인트(`/stop`, `/pause`, `/resume`, `/set_level`) 가 `training:status` 를 broadcast 하도록 통일 — WS control surface 와 REST control surface 가 완전 대칭
+
+### Fixed — Engine/RL CRITICAL
+
+- **Rally-timeout safety valve + RL truncation** (`913fca5f`): `fix(engine): add rally-timeout safety valve + RL truncation (hotfix)` — weak RL policy 가 자기 쪽에서 무한 self-toss 로 rally 를 끌어 다음 게임으로 진행하지 못하던 deadlock. 선행 reward-shaping(`f8ea6126`)만으로는 penalty 는 줬으나 bound 가 없었음. (C) 엔진 net-crossing timeout: `GameState.frames_since_net_crossing` + `round_ended_by_timeout` 도입, 600 frames (10s @ 60fps) net 미통과 시 ball 미보유 side 에 point + fresh serve. (D) env 에피소드 truncation: `truncated=True` + `_RALLY_TIMEOUT_PENALTY` 로 loss-shaped terminal 신호 → PPO 가 reward farm 으로 악용하지 않도록. `backend/tests/test_engine.py::TestRallyTimeout` 5 케이스 신설 (타임아웃 point 할당, crossing 시 counter 리셋, 비-크로싱 증가, reset 시 클리어, 정상 ground 은 timeout 플래그 OFF)
 
 ### Changed — Deploy infra (related)
 
