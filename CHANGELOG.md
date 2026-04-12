@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-v0.2.2 이후 scope. Trainer PR #42 (reward rebalance 검증 + TensorBoard + early stopping + reproducibility + grid search + curriculum learning) 는 v0.2.3 hotfix 후보.
+v0.2.3 이후 scope. Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) + Evaluator PR #44 (E1-E10 baseline comparator / batch eval / history / timeseries / Elo tracker) 후속 릴리스 후보.
+
+## [0.2.3] - 2026-04-12 (v0.2.2 QA blocker 3 hotfix / dev HEAD 77b871dd)
+
+v0.2.2 QA 재검증(`d14c0c68`)에서 확인된 2 CRITICAL + 1 품질 이슈 수정. v0.2.2 전 환경 배포 직전 긴급 번들로 대체. 태그는 dev HEAD (`77b871dd`) 기준.
+
+### Fixed — QA blockers (Sprint 2 post-promote)
+- **BE-6 WS broadcast hotfix** (`91c7233d`): `fix(ws): restore training:status broadcast after parallel fan-out` — `fb1f5e64` 의 `asyncio.gather` parallel fan-out 에서 `training:status` 가 일부 구독자에 도달하지 않던 회귀 복구. PM 의 live UI 관찰(Start 버튼 활성화 유지 + status badge "stopped") 해소. `backend/tests/test_training_status_broadcast.py` 회귀 스위트 신설
+- **Net-collision vx reversal guards** (`bf6397cc`): `test(physics): harden net-collision vx reversal guards` — `b0d0aaee` faithful physics port 이후 공이 네트에 닿아도 vx 가 뒤집히지 않던 회귀 수정 + `test_engine.py::TestBallNetCollision` 가드 강화
+- **Bot variance knobs** (`6af36c0c`): `fix(bot): add stochastic variance knobs to break repetitive play patterns` — L1~L5 전 레벨에 `jump_jitter` + `angle_variance` + `hesitation_rate` + `trajectory_noise_scale` 도입. L5 도 distinct skill edge 유지하면서 deterministic 플레이 제거
+
+### Deployment
+- **v0.2.2 was tagged but never deployed** — v0.2.3 이 v0.2.2 를 그대로 대체. env tag `v0.2.3-{dev,qa,prod}` 로 배포 진행
+- **qa backend** (`:8002`) 복구 필요(#38) — v0.2.3 첫 배포 타이밍에 qa 재기동 동시 수행
+- **prod** 는 v0.1.0 → v0.2.3 jump (BE-3/SEC-1-3/BUG-1-7/BE-1-7/FE-1-9 + v0.2.2 Sprint 2 + v0.2.3 hotfix 모두 최초 반영)
+
+### Not in v0.2.3 (deferred)
+- Trainer PR #42: reward 재훈련 검증 + TensorBoard + early stopping + reproducibility + grid search + curriculum learning
+- Evaluator PR #44: E1-E10 baseline comparator, batch eval, history persistence, timeseries endpoint, Elo tracker
+
+### Rollback
+- target `v0.2.1` (`482df2d1`). prod 는 현재 v0.1.0-era 이므로 사실상 forward-only deploy
 
 ## [0.2.2] - 2026-04-12 (Sprint 2 complete / dev HEAD 121cb478)
 
