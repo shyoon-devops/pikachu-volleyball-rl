@@ -15,6 +15,7 @@ from backend.game.constants import (
     GROUND_HEIGHT,
     GROUND_WIDTH,
     MAX_SCORE,
+    NET_PILLAR_TOP_Y,
     NET_PILLAR_X,
     PLAYER_HALF_LENGTH,
 )
@@ -204,27 +205,55 @@ class PikachuVolleyballEnv(gymnasium.Env):
         )
         return np.clip(obs, -1.0, 1.0)
 
-    # Anti-toss-loop constants
+    # Reward weights — tuned for 500K+ step PPO convergence.
+    # Philosophy: terminal rewards should dominate cumulative shaping over a
+    # full 15-point match, so the agent optimizes for winning rather than for
+    # harvesting small shaping signals.
+    #
+    # Rough per-game budget (illustrative, bot-level 1):
+    #   - Terminal game bonus: ±50 (was ±20 — too small vs 15×10 point reward)
+    #   - Net scoring:         ±10 per point (kept)
+    #   - Touch + crossing:    ~+5 per winning rally, ~-2 per toss-loop
+    #   - Shaping (approach + ready + offensive-pressure): capped ~+0.04/frame
+    #     A full 3000-step episode can accumulate at most ~120 shaping reward,
+    #     which is now less than a single terminal swing (+50 − (−50) = 100).
+    _GAME_WIN_REWARD = 50.0           # was 20.0 — terminal must dominate shaping
+    _GAME_LOSS_REWARD = -50.0         # was -20.0
+    _SCORE_REWARD = 10.0              # kept — per-point scoring signal
+    _CONCEDE_REWARD = -10.0
     _TOUCH_REWARD_FIRST = 3.0
     _TOUCH_REWARD_SECOND = 1.0
     _TOUCH_PENALTY_EXCESS = -2.0
     _NET_CROSSING_REWARD = 2.0
     _STALL_THRESHOLD = 300
-    _STALL_PENALTY_PER_FRAME = -0.03
-    _RALLY_MAX_FRAMES = 600  # Hard termination threshold
-    _RALLY_TIMEOUT_PENALTY = -5.0
+    _STALL_PENALTY_PER_FRAME = -0.05  # was -0.03 — more bite on dead rallies
+    _RALLY_MAX_FRAMES = 600           # hard termination threshold
+    _RALLY_TIMEOUT_PENALTY = -12.0    # was -5.0 — must outweigh a single concede
+    _APPROACH_REWARD = 0.02           # was 0.05 — halved (reduce shaping bias)
+    _READY_REWARD = 0.005             # was 0.01 — halved
+    _OFFENSIVE_PRESSURE_REWARD = 0.02 # NEW: reward attacking ball near net / opp side
 
     def _compute_reward(self, state: Any) -> float:
         """Compute shaped reward for faster PPO convergence.
 
         Reward hierarchy (largest to smallest):
-          1. Game outcome:  win +20 / loss -20
-          2. Scoring:       score +10 / concede -10
-          3. Ball touch:    +3.0 first, +1.0 second, -2.0 for 3rd+ (per round)
-          4. Net crossing:  ball sent to opponent's court +2.0, resets touch count
-          5. Approach ball: move toward ball on own side +0.05/frame
-          6. Ready position: near court center when ball on opp side +0.01
-          7. Stall penalty: -0.03/frame after 300 frames without net crossing
+          1. Game outcome:       win +50 / loss -50  (terminal, dominates shaping)
+          2. Scoring:            score +10 / concede -10
+          3. Rally timeout:      -12 if rally stalls past _RALLY_MAX_FRAMES
+          4. Ball touch:         +3.0 first, +1.0 second, -2.0 for 3rd+ (per rally)
+          5. Net crossing:       +2.0 when ball sent to opp court (resets touch count)
+          6. Approach ball:      +0.02/frame when moving toward ball on own side
+          7. Offensive pressure: +0.02/frame when ball is high+near net on opp side
+          8. Ready position:     +0.005/frame near center when ball on opp side
+          9. Stall penalty:      -0.05/frame after 300 frames without net crossing
+
+        Rationale for tuning (see commit message for full context):
+          - Terminal ±50 ensures winning matters more than cumulative shaping
+          - Shaping weights halved to prevent the agent from farming small
+            positional rewards in infinite stalls
+          - Offensive-pressure reward encourages attacking play (high ball,
+            close to opponent's net) rather than safe self-tosses
+          - Stall/timeout penalties strengthened so rally loops are costly
         """
         reward = 0.0
         ball = state.ball
@@ -235,19 +264,19 @@ class PikachuVolleyballEnv(gymnasium.Env):
         scored = state.score1 - self._prev_score1
         conceded = state.score2 - self._prev_score2
         if scored > 0:
-            reward += 10.0
+            reward += self._SCORE_REWARD
             self._consecutive_touches = 0
             self._frames_since_crossing = 0
             counter_reset_this_frame = True
         if conceded > 0:
-            reward -= 10.0
+            reward += self._CONCEDE_REWARD
             self._consecutive_touches = 0
             self._frames_since_crossing = 0
             counter_reset_this_frame = True
         if state.score1 >= MAX_SCORE:
-            reward += 20.0
+            reward += self._GAME_WIN_REWARD
         elif state.score2 >= MAX_SCORE:
-            reward -= 20.0
+            reward += self._GAME_LOSS_REWARD
 
         # --- AUX 1: ball touch with diminishing returns ---
         # Engine sets ball.vy = min(vy, -15) on player collision.
@@ -284,13 +313,31 @@ class PikachuVolleyballEnv(gymnasium.Env):
             prev_dist = abs(self._prev_ball_x - self._prev_p1_x)
             curr_dist = abs(float(ball.x) - float(p1.x))
             if curr_dist < prev_dist:
-                reward += 0.05
+                reward += self._APPROACH_REWARD
 
-        # --- AUX 5: ready position (defensive positioning) ---
+        # --- AUX 5: offensive pressure (NEW) ---
+        # When the ball is on the opponent's side, high in the air, and
+        # moving away from the agent, the agent just executed a forward shot.
+        # This nudges policy toward attacking shots over safe self-tosses.
+        # Gated by `is_round_over` so scoring frames don't double-count.
+        if (
+            ball.x > NET_PILLAR_X
+            and ball.y < NET_PILLAR_TOP_Y  # above the net height
+            and ball.vx > 0  # moving into opponent's court
+            and not state.is_round_over
+        ):
+            # Pressure strongest near the net on opponent's side (attacking zone).
+            # Distance-weighted so the reward decays as the ball moves away from net.
+            opp_half = float(GROUND_WIDTH - NET_PILLAR_X)
+            ball_depth = float(ball.x - NET_PILLAR_X)
+            depth_factor = max(0.0, 1.0 - ball_depth / opp_half)
+            reward += self._OFFENSIVE_PRESSURE_REWARD * depth_factor
+
+        # --- AUX 6: ready position (defensive positioning) ---
         if ball.x > NET_PILLAR_X and not state.is_round_over:
             ready_x = NET_PILLAR_X * 0.5
             dist_from_ready = abs(float(p1.x) - ready_x)
             max_dist = NET_PILLAR_X * 0.5
-            reward += 0.01 * max(0.0, 1.0 - dist_from_ready / max_dist)
+            reward += self._READY_REWARD * max(0.0, 1.0 - dist_from_ready / max_dist)
 
         return float(reward)

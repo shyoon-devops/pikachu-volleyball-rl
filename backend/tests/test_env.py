@@ -125,9 +125,11 @@ class TestRewardShaping:
         env.reset()
         for _ in range(3000):
             _, reward, terminated, truncated, _ = env.step(env.action_space.sample())
-            # Max: score(10) + win(20) + touch(3) + cross(2) + approach(0.05) + ready(0.01)
-            # Min: concede(-10) + lose(-20) + excess_touch(-2) + stall(-0.03) + timeout(-5)
-            assert -40.0 <= reward <= 36.0, f"Reward out of bounds: {reward}"
+            # Max: score(10) + win(50) + touch(3) + cross(2)
+            #      + approach(0.02) + pressure(0.02) + ready(0.005) ≈ 65
+            # Min: concede(-10) + lose(-50) + excess_touch(-2)
+            #      + stall(-0.05) + timeout(-12) ≈ -75
+            assert -80.0 <= reward <= 70.0, f"Reward out of bounds: {reward}"
             if terminated or truncated:
                 break
 
