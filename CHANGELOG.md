@@ -9,9 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 Sprint 1 코드 완료 — QA v0.2.1 배포 및 검증 대기 중. 추적: [docs/sprint-tracking/sprint1-v0.2.1.md](docs/sprint-tracking/sprint1-v0.2.1.md)
 
-## [0.2.1] - 2026-04-12 (dev 코드 완료, QA 배포 대기)
+## [0.2.1] - 2026-04-12 (QA 배포 완료, prod 대기)
 
-Sprint 1 — HIGH 버그 일괄 처리, 프론트엔드 UX/A11y 개선, CI/CD 보안 자동화. 전체 범위: [docs/proposals/SPRINT-1-ASSIGNMENTS.md](docs/proposals/SPRINT-1-ASSIGNMENTS.md).
+Sprint 1 완료분 + 팀 자발적 품질 보강 (스프린트 종료 직전 1시간 동안 10개 후속 커밋). QA 환경 승격 완료 (`15f4a11`), prod 승격 대기.
+
+### Added (late batch — post-Sprint 1 finalization, 2026-04-12 03:xx)
+- **Prometheus metrics endpoint** (`5da6af3`): `/api/metrics` Prometheus exposition format — Sprint 3 DO-1 선행 작업
+- **Dashboard loading skeleton** (`2a52a3c`): 초기 로드 시 스켈레톤 UI로 인지 지연 개선
+- **Friendly error boundary** (`4697e6c`): retry/reload/home 옵션을 가진 global React error boundary
+- **MongoDB connection pool + transient-error retry** (`79c1e34`): `build_mongo_client()` 풀/타임아웃 설정, `with_mongo_retry()` 지수 백오프; GameService/EvalService 랩. 11개 테스트 추가. env 오버라이드 지원 (MONGO_MAX_POOL_SIZE 등)
+- **Dark/Light theme toggle** (`a3a332a`): OS prefers-color-scheme 동기화 + 수동 토글
+- **WS Pydantic validation layer 통합** (`c90794c`): `WsEnvelope` + `WS_MESSAGE_SCHEMAS` 레지스트리, `parse_ws_message()` 센터. unknown_type 구조화 에러, client-initiated ping→pong, stable error `code` 필드. 13 + 4 테스트 추가
+- **Replay speed controls 재정비** (`5057b56`): 0.5x/1x/2x/4x 버튼 a11y + 키보드 접근 강화
+- **API endpoint error handling + structured logging** (`13e103f`) — **BE-3 충족**: `endpoint_guard` 데코레이터, 글로벌 unhandled-exception handler, 전 엔드포인트 구조화 로깅. list_games 서비스 미초기화 → 503, get_replay linked-game 실패 tolerance. 7 신규 테스트
+- **Dashboard metrics chart 실시간 스무딩** (`26d7c5a`) — **FE-2 smoothing 부분 충족**: Recharts built-in 250ms ease-out tween, `usePrefersReducedMotion` 훅, reduced-motion 미디어 쿼리 지원. MetricsChart.test.tsx 4 케이스
+
+### Closed Issues (late batch)
+- **#32 BE-3 Structured Logging + Health Check Depth** — 13e103f + BUG-2 fix로 해소
+
+### Deployment
+- **dev → qa 승격 완료** (2026-04-12): qa 브랜치 `15f4a11` (`chore: promote dev to qa`) — DevOps `scripts/promote.sh dev-to-qa` 실행 결과
+
+### Still Pending for v0.2.1
+- Docker QA 환경 (:8002/:3001/:27019) 배포 검증
+- QA Engineer 전체 검증 리포트
+- prod 승인 → 승격 → main 머지 + `v0.2.1` 태그
 
 ### Added
 - **QA-2 CI/CD Test Pipeline** (#25): GitHub Actions 테스트 파이프라인 + 커버리지 게이트 (9d257c9, PR #29)
