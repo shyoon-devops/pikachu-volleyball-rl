@@ -448,7 +448,16 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
         width: COURT_WIDTH,
         height: COURT_HEIGHT,
         background: 0x1a1a2e,
-        antialias: true,
+        // Pixel-art sprites (16×16 sky tiles, 64×64 pikachu, 40×40 ball):
+        //   antialias:false  — canvas edge antialias adds no value to
+        //     integer-grid pixel art and can introduce 1px fringing at
+        //     the stage border.
+        //   roundPixels:true — RL physics sends fractional player/ball
+        //     positions (e.g. x=123.7); without rounding the GPU samples
+        //     at sub-pixel offsets and bleeds adjacent texels. Belt-and-
+        //     suspenders with `scaleMode: 'nearest'` below.
+        antialias: false,
+        roundPixels: true,
         resolution: window.devicePixelRatio || 1,
         autoDensity: true,
       })
@@ -474,6 +483,21 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
 
         const textures = sheet.textures
         if (textures && Object.keys(textures).length > 0) {
+          // Force nearest-neighbor sampling for all frames. Pixi v8
+          // defaults to 'linear' (bilinear), which is the right call
+          // for photographic textures but WRONG for pixel art — at
+          // devicePixelRatio != 1 the GPU samples fractional texels and
+          // the 2px transparent padding around each atlas frame bleeds
+          // into the sprite edge. The 27-tile sky row made this read
+          // as 27 vertical seams every 16px (designer report,
+          // 2026-04-12).
+          //
+          // The spritesheet shares a single TextureSource across all
+          // frames so one assignment covers the entire atlas.
+          const sharedSource = Object.values(textures)[0]?.source
+          if (sharedSource) {
+            sharedSource.scaleMode = 'nearest'
+          }
           spritesRef.current = buildSpriteScene(textures, app.stage)
           // Initialize clouds
           const clouds: CloudModel[] = []
