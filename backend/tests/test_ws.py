@@ -13,9 +13,12 @@ def test_ws_connect_disconnect(client):
 
 
 def test_ws_unknown_message(client):
-    """Unknown message type does not crash the connection."""
+    """Unknown message type returns a structured error and keeps the connection."""
     with client.websocket_connect("/ws") as ws:
         ws.send_json({"type": "unknown:type", "payload": {}})
+        err = ws.receive_json()
+        assert err["type"] == "error"
+        assert err["payload"]["code"] == "unknown_type"
         # Connection stays alive — send a valid message after
         ws.send_json({"type": "training:stop", "payload": {}})
         resp = ws.receive_json()

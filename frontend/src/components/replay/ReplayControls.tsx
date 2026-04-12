@@ -32,13 +32,16 @@ export function ReplayControls({
           {isPlaying ? 'Pause' : 'Play'}
         </button>
 
-        <div className="replay-controls-speeds">
+        <div className="replay-controls-speeds" role="group" aria-label="Playback speed">
           {SPEEDS.map(s => (
             <button
               key={s}
               onClick={() => onSpeedChange(s)}
               className="replay-controls-speed-btn btn btn-ghost"
               data-active={speed === s}
+              aria-pressed={speed === s}
+              aria-label={`Playback speed ${s}x`}
+              title={`Playback speed ${s}x`}
             >
               {s}x
             </button>
@@ -67,7 +70,7 @@ export function ReplayControls({
         <kbd>Space</kbd> Play/Pause
         <kbd>&larr;</kbd><kbd>&rarr;</kbd> Step
         <kbd>Shift</kbd>+Arrow &plusmn;10
-        <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Speed
+        <kbd>0</kbd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Speed (0.5 / 1 / 2 / 4&times;)
       </div>
     </div>
   )

@@ -1,16 +1,20 @@
 """FastAPI application entry-point."""
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
+from fastapi.responses import JSONResponse
+
+logger = logging.getLogger(__name__)
 
 from backend.app.api.routes import router
 from backend.app.metrics import setup_instrumentator
 from backend.app.middleware.rate_limit import RateLimitMiddleware
+from backend.app.services.db_utils import build_mongo_client
 from backend.app.services.eval_service import EvalServiceWrapper
 from backend.app.services.game_service import GameService
 from backend.app.services.replay_service import ReplayService
@@ -31,7 +35,7 @@ async def lifespan(app: FastAPI):
     replay_dir = os.getenv("REPLAY_DIR", "./replays")
     max_replays = int(os.getenv("MAX_REPLAYS", "1000"))
 
-    client = AsyncIOMotorClient(mongodb_url)
+    client = build_mongo_client(mongodb_url)
     db = client.get_default_database()
 
     app.state.mongo_client = client
@@ -88,6 +92,23 @@ app.add_middleware(
 app.include_router(router, prefix="/api")
 
 setup_instrumentator(app)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Last-resort handler so 500s never leak internals or crash the worker.
+
+    Per-endpoint try/except + HTTPException is still the primary mechanism;
+    this backstop catches unexpected errors in middleware or dependencies.
+    """
+    logger.exception(
+        "Unhandled exception at %s %s: %s",
+        request.method, request.url.path, exc,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": {"code": "internal_error", "path": request.url.path}},
+    )
 
 
 @app.websocket("/ws")

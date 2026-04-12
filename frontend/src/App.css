@@ -11,6 +11,54 @@
   min-height: 100vh;
 }
 
+/* ── Skip link (Accessibility) ─────────────────────────── */
+.app-skip-link {
+  position: absolute;
+  top: -100px;
+  left: var(--space-3);
+  z-index: 1000;
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-accent, #22d3ee);
+  color: var(--color-bg, #0f1117);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  transition: top var(--duration-fast) var(--ease-out);
+}
+
+.app-skip-link:focus {
+  top: var(--space-3);
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* ── Main region (Accessibility) ───────────────────────── */
+main:focus {
+  outline: none;
+}
+
+/* ── Focus visible for interactive elements ───────────── */
+.app-nav-link:focus-visible {
+  outline: 2px solid var(--color-accent, #22d3ee);
+  outline-offset: 2px;
+}
+
+/* ── Screen reader only utility ────────────────────────── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── Navbar ────────────────────────────────────────────── */
 .app-header {
   position: sticky;
@@ -38,6 +86,17 @@
 .app-nav {
   display: flex;
   gap: var(--space-1);
+}
+
+/*
+ * .app-header-actions — right-aligned slot for header controls (e.g. ThemeToggle).
+ * FE scaffolding; Designer: feel free to refine spacing + separator.
+ */
+.app-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .app-nav-link {

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import {
   LineChart,
   Line,
@@ -11,6 +11,11 @@ import {
 } from 'recharts'
 import type { TrainingMetrics } from '../../lib/types'
 import './MetricsChart.css'
+
+// Short, compositor-friendly tween so continuously streamed metrics never
+// feel like a series of jumps. Too long → the line lags behind real data;
+// too short → no perceivable smoothing.
+const ANIMATION_DURATION_MS = 250
 
 interface MetricsChartProps {
   data: TrainingMetrics[]
@@ -29,6 +34,23 @@ function ema(data: number[], alpha: number): number[] {
   return result
 }
 
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState<boolean>(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return false
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  })
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const onChange = (e: MediaQueryListEvent) => setReduced(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  return reduced
+}
+
 export function MetricsChart({ data, dataKey, xKey = 'step', color, label }: MetricsChartProps) {
   const [smoothing, setSmoothing] = useState(0)
   const [zoomLeft, setZoomLeft] = useState<number | null>(null)
@@ -36,6 +58,9 @@ export function MetricsChart({ data, dataKey, xKey = 'step', color, label }: Met
   const [dragStart, setDragStart] = useState<number | null>(null)
   const [dragEnd, setDragEnd] = useState<number | null>(null)
   const isDragging = useRef(false)
+  const prefersReducedMotion = usePrefersReducedMotion()
+  const animationDuration = prefersReducedMotion ? 0 : ANIMATION_DURATION_MS
+  const animationActive = !prefersReducedMotion
 
   const smoothedData = useMemo(() => {
     if (smoothing <= 0 || data.length === 0) return data
@@ -145,7 +170,9 @@ export function MetricsChart({ data, dataKey, xKey = 'step', color, label }: Met
             strokeWidth={smoothing > 0 ? 1 : 2}
             strokeOpacity={smoothing > 0 ? 0.25 : 1}
             dot={false}
-            isAnimationActive={false}
+            isAnimationActive={animationActive}
+            animationDuration={animationDuration}
+            animationEasing="ease-out"
           />
 
           {/* Smoothed overlay */}
@@ -156,7 +183,9 @@ export function MetricsChart({ data, dataKey, xKey = 'step', color, label }: Met
               stroke={color}
               strokeWidth={2}
               dot={false}
-              isAnimationActive={false}
+              isAnimationActive={animationActive}
+              animationDuration={animationDuration}
+              animationEasing="ease-out"
             />
           )}
 

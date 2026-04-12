@@ -11,6 +11,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from backend.app.models.schemas import EvaluationRecord
+from backend.app.services.db_utils import with_mongo_retry
 from backend.rl.evaluator import ModelEvaluator
 
 
@@ -49,12 +50,17 @@ class EvalServiceWrapper:
             avg_rally_length=result.avg_rally_length,
         )
         doc = record.model_dump(by_alias=True, exclude_none=True)
-        await self._col.insert_one(doc)
+        await with_mongo_retry(
+            lambda: self._col.insert_one(doc), op_name="save_evaluation"
+        )
         return asdict(result)
 
     async def get_results(self) -> dict[str, Any]:
-        cursor = self._col.find().sort("timestamp", -1).limit(100)
-        docs = await cursor.to_list(length=100)
-        for d in docs:
-            d["_id"] = str(d["_id"])
-        return {"data": docs}
+        async def _fetch() -> dict[str, Any]:
+            cursor = self._col.find().sort("timestamp", -1).limit(100)
+            docs = await cursor.to_list(length=100)
+            for d in docs:
+                d["_id"] = str(d["_id"])
+            return {"data": docs}
+
+        return await with_mongo_retry(_fetch, op_name="get_evaluation_results")
