@@ -62,10 +62,16 @@ class BallState:
     vx: int = 0
     vy: int = 0
     rotation: int = 0
-    # punch_effect_x/y are graphic markers only (per original).
+    # punch_effect_x/y/radius are graphic markers only (per original).
     # They are NOT added to position — ball movement uses (vx, vy) only.
+    # Radius is SET to BALL_RADIUS on each trigger (ground touch or
+    # power-hit collision) and decays by 2 per frame thereafter, matching
+    # the original's render-loop shrink (view.js:502-507). Shrinking is
+    # centralised in the engine so FE renderers just draw whatever
+    # radius the server reports and don't need their own animation state.
     punch_effect_x: int = 0
     punch_effect_y: int = 0
+    punch_effect_radius: int = 0
     # True on frames where the most recent ball–player collision was a
     # power hit (player was jumping + power_hit pressed). Drives the
     # hyper-ball / trail sprite effect in the original view.js:513 and
@@ -187,6 +193,17 @@ class PikachuVolleyball:
         """
         state = self._state
 
+        # Decay the graphic punch-effect radius every frame (mirrors
+        # view.js:502-507 in the original where the client decremented by
+        # 2 per render tick). Centralising the shrink in the engine keeps
+        # FE renderers stateless for this effect. Match-over guard below
+        # returns early — the decay still runs so any lingering punch
+        # effect from the final ground touch fades cleanly.
+        if state.ball.punch_effect_radius > 0:
+            state.ball.punch_effect_radius = max(
+                0, state.ball.punch_effect_radius - 2
+            )
+
         # Match-over guard. Once either player has reached MAX_SCORE the
         # engine refuses to advance physics — this preserves the final
         # grounded-ball scene for the replay viewer and makes repeated
@@ -301,10 +318,13 @@ class PikachuVolleyball:
         future_y = ball.y + ball.vy
         if future_y > BALL_GROUND_Y:
             # Ball touches ground — bounce + record punch-effect markers.
+            # Matches original physics.js:472-478: radius starts at
+            # BALL_RADIUS; FE / engine shrink decays it back to 0.
             ball.vy = -ball.vy
             ball.punch_effect_x = ball.x
             ball.y = BALL_GROUND_Y
             ball.punch_effect_y = BALL_GROUND_Y + BALL_RADIUS
+            ball.punch_effect_radius = BALL_RADIUS
             return True
 
         # Move + gravity applied LAST (matches original ordering).
@@ -440,8 +460,11 @@ class PikachuVolleyball:
             # Original: vy = |vy| * yDirection * 2. If yDir == 0 this zeros vy.
             ball.vy = abs(ball.vy) * inp.y_dir * 2
             # Record graphic markers only — do NOT add to position.
+            # Matches physics.js:715-719 — the white radial "smash" ring
+            # is triggered at BALL_RADIUS and decays each frame.
             ball.punch_effect_x = ball.x
             ball.punch_effect_y = ball.y
+            ball.punch_effect_radius = BALL_RADIUS
             # Flag this collision as a power hit so FE can render the
             # hyper-ball / trail sprite (original view.js:513).
             ball.is_power_hit = True

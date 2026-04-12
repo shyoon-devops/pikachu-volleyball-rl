@@ -58,7 +58,13 @@ class ReplayService:
 
 
 _PLAYER_DEFAULTS = {"is_jumping": False, "is_diving": False, "is_power_hitting": False}
-_BALL_DEFAULTS = {"rotation": 0, "is_power_hit": False}
+_BALL_DEFAULTS = {
+    "rotation": 0,
+    "is_power_hit": False,
+    "punch_effect_x": 0,
+    "punch_effect_y": 0,
+    "punch_effect_radius": 0,
+}
 _FRAME_DEFAULTS = {"is_round_over": False, "post_score_freeze_frames": 0}
 
 

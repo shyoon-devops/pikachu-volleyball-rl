@@ -322,6 +322,16 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             # Defensive getattr so replays pickled before this field was
             # added still decode; missing → treat as not a power hit.
             "is_power_hit": bool(getattr(state.ball, "is_power_hit", False)),
+            # Punch-effect markers for the white radial ring drawn when
+            # the ball slams the ground or a power hit connects
+            # (original view.js:502-507). Radius starts at BALL_RADIUS and
+            # decays by 2 per frame in the engine. punch_effect_x/y locate
+            # the centre; FE draws a 2*radius-sized sprite.
+            "punch_effect_x": int(getattr(state.ball, "punch_effect_x", 0)),
+            "punch_effect_y": int(getattr(state.ball, "punch_effect_y", 0)),
+            "punch_effect_radius": int(
+                getattr(state.ball, "punch_effect_radius", 0)
+            ),
         },
         "score1": state.score1,
         "score2": state.score2,
