@@ -38,6 +38,10 @@ export interface TrainingStatus {
   state: 'running' | 'stopped' | 'paused'
   currentStep: number
   currentEpisode: number
+  /** Current curriculum bot level (1-5). Optional because not every
+   *  status broadcast carries it; server emits `bot_level` after
+   *  `training:set_level` and on explicit status queries. */
+  botLevel?: number
 }
 
 export interface GameRecord {

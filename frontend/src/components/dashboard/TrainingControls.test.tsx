@@ -206,4 +206,30 @@ describe('TrainingControls', () => {
       expect(screen.getByLabelText(`Set bot level to ${i}`)).toBeInTheDocument()
     }
   })
+
+  // ── Bot level active-state indicator (CRITICAL: "현재 선택 표시") ──
+  it('marks the active bot level via data-active + .active class', () => {
+    renderControls({ status: { botLevel: 3 } })
+
+    const active = screen.getByLabelText('Set bot level to 3')
+    expect(active).toHaveAttribute('data-active', 'true')
+    expect(active).toHaveAttribute('aria-pressed', 'true')
+    expect(active.className).toContain('active')
+
+    // Siblings should be inactive.
+    for (const level of [1, 2, 4, 5]) {
+      const btn = screen.getByLabelText(`Set bot level to ${level}`)
+      expect(btn).toHaveAttribute('data-active', 'false')
+      expect(btn).toHaveAttribute('aria-pressed', 'false')
+    }
+  })
+
+  it('shows no active bot level when status.botLevel is undefined', () => {
+    renderControls()
+    for (let i = 1; i <= 5; i++) {
+      const btn = screen.getByLabelText(`Set bot level to ${i}`)
+      expect(btn).toHaveAttribute('data-active', 'false')
+      expect(btn).toHaveAttribute('aria-pressed', 'false')
+    }
+  })
 })

@@ -6,7 +6,6 @@ import io
 import json
 import logging
 
-import pytest
 
 from backend.app.logging_config import (
     CorrelationIdFilter,

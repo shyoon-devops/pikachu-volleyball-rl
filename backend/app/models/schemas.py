@@ -110,6 +110,7 @@ WS_MESSAGE_SCHEMAS: dict[str, type[BaseModel] | None] = {
     "pong": WsEmptyPayload,
     "training:start": WsTrainingStartPayload,
     "training:stop": WsEmptyPayload,
+    "training:pause": WsEmptyPayload,
     "training:resume": WsEmptyPayload,
     "training:set_level": WsSetLevelPayload,
     "replay:request": WsReplayRequestPayload,
