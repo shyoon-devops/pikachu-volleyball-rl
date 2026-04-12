@@ -63,6 +63,93 @@ class FakeReplayService:
         return []
 
 
+class FakeMetricsService:
+    """In-memory stand-in for MetricsService.
+
+    Mirrors the real aggregation contract closely enough for endpoint tests
+    without needing Mongo. Supports ``record`` (for push-loop tests) and
+    ``aggregate`` (for endpoint tests); the aggregate implementation here
+    is simplified — it just returns everything that was recorded, bucket
+    selection happens at the caller's fidelity.
+    """
+
+    def __init__(self) -> None:
+        self.records: list[dict] = []
+
+    async def record(self, experiment_id: str, data: dict) -> None:
+        from datetime import datetime, timezone
+
+        doc = dict(data)
+        doc["experiment_id"] = experiment_id
+        doc["timestamp"] = datetime.now(timezone.utc)
+        self.records.append(doc)
+
+    async def aggregate(
+        self,
+        *,
+        experiment_id: str | None = None,
+        bucket: str = "1m",
+        since=None,
+        until=None,
+    ) -> list[dict]:
+        # Return a single synthetic bucket spanning everything recorded so
+        # endpoint tests can assert shape without simulating $dateTrunc.
+        matching = [
+            r for r in self.records
+            if experiment_id is None or r.get("experiment_id") == experiment_id
+        ]
+        if not matching:
+            return []
+        from datetime import timezone
+
+        def _avg(field: str) -> float:
+            vals = [r[field] for r in matching if field in r]
+            return sum(vals) / len(vals) if vals else 0.0
+
+        return [{
+            "bucket_start": min(r["timestamp"] for r in matching).astimezone(timezone.utc),
+            "count": len(matching),
+            "step_max": max((r.get("step", 0) for r in matching), default=0),
+            "avg_mean_reward": _avg("mean_reward"),
+            "avg_win_rate": _avg("win_rate"),
+            "avg_policy_loss": _avg("policy_loss"),
+            "avg_value_loss": _avg("value_loss"),
+        }]
+
+    async def recent_points(
+        self,
+        *,
+        field: str,
+        limit: int = 100,
+        experiment_id: str | None = None,
+    ) -> list[dict]:
+        """Mirror MetricsService.recent_points over in-memory records.
+
+        Kept simple — the endpoint test only needs the projection + ordering
+        contract, not an index-backed scan. Sorted newest-last to match the
+        production shape so the test assertion is identical in both cases.
+        """
+        matching = [
+            r for r in self.records
+            if (experiment_id is None or r.get("experiment_id") == experiment_id)
+            and field in r
+        ]
+        # Sort by step (the only monotonic-ish field records carry here).
+        matching.sort(key=lambda r: r.get("step", 0))
+        if len(matching) > limit:
+            matching = matching[-limit:]
+        out: list[dict] = []
+        for r in matching:
+            ts = r.get("timestamp")
+            ts_iso = ts.isoformat() if ts is not None else None
+            out.append({
+                "step": r.get("step", 0),
+                "value": r.get(field, 0.0),
+                "timestamp": ts_iso,
+            })
+        return out
+
+
 def _make_queue_mock(maxsize: int) -> MagicMock:
     """Build a queue mock that satisfies the health check's qsize/maxsize reads."""
     m = MagicMock()
@@ -79,12 +166,17 @@ async def _test_lifespan(app):
     app.state.mongo_client = mongo_client
     app.state.db = MagicMock()
     app.state.game_service = FakeGameService()
+    app.state.metrics_service = FakeMetricsService()
     app.state.replay_service = FakeReplayService()
     mock_manager = MagicMock()
     mock_manager.status = "stopped"
     mock_manager.start = AsyncMock(return_value="test-experiment-id")
-    mock_manager.stop = AsyncMock()
-    mock_manager.resume = AsyncMock()
+    # stop/pause/resume now return the real manager's result dict; handlers
+    # read .get("stopped") / .get("paused") off it so AsyncMock's default
+    # MagicMock return isn't enough — give each a realistic payload.
+    mock_manager.stop = AsyncMock(return_value={"stopped": True, "reason": "stopped"})
+    mock_manager.pause = AsyncMock(return_value={"paused": True, "reason": "paused"})
+    mock_manager.resume = AsyncMock(return_value={"resumed": True, "reason": "unpaused"})
     mock_manager.metrics_queue = _make_queue_mock(500)
     mock_manager.frames_queue = _make_queue_mock(100)
     mock_manager.results_queue = _make_queue_mock(200)
@@ -97,11 +189,34 @@ async def _test_lifespan(app):
         "state": "stopped",
         "current_step": 0,
         "current_episode": 0,
+        "experiment_id": None,
+        "bot_level": 1,
+        "started_at": None,
     }
+    # Expose the last-frame accessor the /api/training/current_frame endpoint
+    # calls. Default None — individual tests overwrite when a frame should
+    # be surfaced.
+    app.state.training_service.last_frame = lambda: None
     app.state.eval_service = FakeEvalService()
     app.state.ws_manager = ConnectionManager()
     yield
     pass
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--base-url",
+        default="http://localhost:8001",
+        help="Base URL for regression tests (default: dev)",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "load: marks tests that exert heavy concurrency/load "
+        "(deselect with -m 'not load')",
+    )
 
 
 @pytest.fixture

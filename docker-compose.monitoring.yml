@@ -7,6 +7,7 @@
 # Ports:
 #   Grafana:    http://localhost:3100  (admin/pikachu)
 #   Prometheus: http://localhost:9090
+#   Loki:       http://localhost:3101
 #   Dozzle:     http://localhost:9999
 
 name: pikachu-monitoring
@@ -114,6 +115,39 @@ services:
     environment:
       DOZZLE_NO_ANALYTICS: "true"
 
+  # Centralized log store (30-day retention).
+  loki:
+    image: grafana/loki:3.3.2
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "3101:3100"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Ships docker container logs into loki. Auto-labels by compose env + service.
+  promtail:
+    image: grafana/promtail:3.3.2
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - promtail_positions:/tmp
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   prometheus_data:
   grafana_data:
+  loki_data:
+  promtail_positions:

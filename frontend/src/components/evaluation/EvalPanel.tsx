@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getModels, getEvalResults, runEvaluation } from '../../lib/api'
 import { EvalChart } from './EvalChart'
+import { CheckpointList } from './CheckpointList'
 import type { ModelInfo, EvalResult } from '../../lib/types'
 import './EvalPanel.css'
 
@@ -59,23 +60,16 @@ export function EvalPanel() {
 
       <div className="eval-form card">
         <h3 className="eval-form-title">Run Evaluation</h3>
+        <div className="eval-form-field">
+          <label className="eval-form-label" id="eval-checkpoint-label">Model Checkpoint</label>
+          <CheckpointList
+            models={models}
+            selectedPath={selectedModel}
+            onSelect={setSelectedModel}
+            disabled={running}
+          />
+        </div>
         <div className="eval-form-row">
-          <div>
-            <label className="eval-form-label">Model</label>
-            <select
-              value={selectedModel}
-              onChange={e => setSelectedModel(e.target.value)}
-              className="eval-form-select eval-form-select--model"
-              disabled={running}
-            >
-              {models.length === 0 && <option value="">No models available</option>}
-              {models.map(m => (
-                <option key={m.path} value={m.path}>
-                  {m.path.split('/').pop()}
-                </option>
-              ))}
-            </select>
-          </div>
           <div>
             <label className="eval-form-label">Bot Level</label>
             <select

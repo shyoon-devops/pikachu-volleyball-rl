@@ -162,12 +162,13 @@
 - 3-환경 Docker Compose (dev/qa/prod) 구성 완료
 - CI/CD 파이프라인 및 운영 스크립트 구비
 
-### Pending Items
-- [ ] yoon/designer 브랜치 CSS 분리 리팩토링 → dev 머지 대기
-- [ ] yoon/frontend-engineer 브랜치 인라인 스타일 제거 → dev 머지 대기
-- [ ] yoon/devops-engineer 브랜치 CI/CD 강화 → dev 머지 대기
-- [ ] dev → qa 승격 후 QA 통합 테스트 실행
-- [ ] qa → prod 승격 및 v0.1.0 태그 생성
+### Pending Items (updated 2026-04-12)
+- [x] yoon/designer 브랜치 CSS 분리 리팩토링 → dev 머지 완료
+- [x] yoon/frontend-engineer 브랜치 인라인 스타일 제거 → dev 머지 완료
+- [x] yoon/devops-engineer 브랜치 CI/CD 강화 → dev 머지 완료 (PR #29)
+- [x] dev → qa 승격 (v0.2.1, commit `15f4a11`, 2026-04-12)
+- [x] v0.1.0 prod 배포 완료 (2026-04-11, commit `41f4fdb`) + main 머지 + `v0.1.0` 태그 (`fdc41de`)
+- [ ] v0.2.1 QA 검증 → prod 승격 → main 머지 + `v0.2.1` 태그 (진행 중)
 
 ### Risk Items
 - Frontend 테스트 커버리지가 상대적으로 낮음 (4개 테스트 파일)

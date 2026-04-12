@@ -6,7 +6,7 @@
  *    .training-controls, .training-controls-header,
  *    .training-controls-title, .training-controls-status,
  *    .training-controls-actions, .training-controls-btn,
- *    .training-controls-btn--start/--stop/--resume,
+ *    .training-controls-btn--start/--stop/--pause/--resume,
  *    .training-controls-level, .training-controls-level-label,
  *    .training-controls-level-buttons, .training-controls-level-btn,
  *    .training-controls-counters, .training-controls-counter-value
@@ -117,6 +117,7 @@
 }
 
 .training-controls-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -127,12 +128,50 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
+  overflow: hidden;
+  /* 마이크로 애니메이션 타이밍 — .btn 과 동일 패턴 */
+  transition: transform var(--duration-normal) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
+              filter var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+}
+
+.training-controls-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.25) 50%,
+    transparent 100%
+  );
+  transform: translateX(-120%);
+  transition: transform var(--duration-slow) var(--ease-out);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0;
 }
 
 .training-controls-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
+  transform: translateY(-1.5px);
   box-shadow: var(--shadow-md);
+  filter: brightness(1.08);
+}
+
+.training-controls-btn:hover:not(:disabled)::before {
+  transform: translateX(220%);
+  opacity: 1;
+}
+
+.training-controls-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+  transition: transform 80ms var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+  box-shadow: var(--shadow-sm);
 }
 
 .training-controls-btn:disabled {
@@ -162,6 +201,17 @@
 }
 .training-controls-btn--resume:hover:not(:disabled) {
   box-shadow: var(--shadow-glow-blue);
+}
+
+/* Pause is a secondary toggle shown alongside Stop while training is
+   running. Use the warning (amber) palette so it's visually distinct
+   from both Stop (danger/red) and Start (success/green). */
+.training-controls-btn--pause {
+  background: var(--color-warning);
+  color: var(--color-text-inverse);
+}
+.training-controls-btn--pause:hover:not(:disabled) {
+  filter: brightness(1.1);
 }
 
 .training-controls-level {
@@ -200,6 +250,12 @@
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
   border-color: var(--color-border-strong);
+  transform: translateY(-1px);
+}
+
+.training-controls-level-btn:active {
+  transform: translateY(0) scale(0.96);
+  transition: transform 80ms var(--ease-out);
 }
 
 .training-controls-level-btn[data-active="true"],
@@ -222,4 +278,58 @@
 .training-controls-counter-value {
   color: var(--color-text-primary);
   font-weight: var(--weight-semibold);
+  /*
+   * 카운터 값은 자릿수 변동 시 숫자가 좌우로 흔들리지 않도록
+   * tabular-nums. 러닝 중엔 펄스 글로우.
+   */
+  font-variant-numeric: tabular-nums;
+  transition: color var(--duration-fast) var(--ease-out),
+              text-shadow var(--duration-fast) var(--ease-out);
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  훈련 상태별 시각 피드백
+ * ═══════════════════════════════════════════════════════════
+ *  FE 의 status[data-state] 값에 따라 카운터 색과 글로우를 다르게.
+ *  - running: Pikachu yellow 로 점멸하는 LIVE 느낌
+ *  - paused:  warning amber
+ *  - stopped: muted
+ *  TSX 에는 이미 .training-controls-status[data-state=…] 가 있고
+ *  같은 값이 .training-controls 루트로 올라오면 자동 반응.
+ *  루트에 [data-state] 가 없으면 :has() 폴백으로 badge 기반 매칭.
+ * ═══════════════════════════════════════════════════════════
+ */
+@keyframes training-pulse-glow {
+  0%, 100% { text-shadow: 0 0 6px rgba(255, 215, 0, 0.55); }
+  50%      { text-shadow: 0 0 12px rgba(255, 215, 0, 0.85); }
+}
+
+.training-controls:has(.training-controls-status[data-state="running"]) .training-controls-counter-value {
+  color: var(--color-accent);
+  animation: training-pulse-glow 1.6s var(--ease-in-out) infinite;
+}
+
+.training-controls:has(.training-controls-status[data-state="paused"]) .training-controls-counter-value {
+  color: var(--color-warning);
+}
+
+/* "LIVE" 도트 — running 배지 앞에 심박 애니메이션.
+ * training-controls-status::before 는 이미 점(dot) 로 사용 중이라
+ * 링 효과(halo)는 그 dot 위에 얹는 ::after 가 아닌 box-shadow pulse. */
+@keyframes training-status-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6); }
+  70%  { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+
+.training-controls-status[data-state="running"]::before {
+  animation: training-status-pulse 1.8s var(--ease-out) infinite,
+             none;
+}
+
+/* 카운터 영역 자체도 running 일 때 하단 accent underline */
+.training-controls:has(.training-controls-status[data-state="running"]) .training-controls-counters {
+  border-top-color: rgba(255, 215, 0, 0.3);
+  box-shadow: inset 0 2px 0 -1px rgba(255, 215, 0, 0.15);
 }

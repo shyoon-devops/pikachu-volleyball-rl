@@ -68,8 +68,9 @@ export function ReplayControls({
 
       <div className="replay-controls-shortcuts">
         <kbd>Space</kbd> Play/Pause
-        <kbd>&larr;</kbd><kbd>&rarr;</kbd> Step
-        <kbd>Shift</kbd>+Arrow &plusmn;10
+        <kbd>&larr;</kbd><kbd>&rarr;</kbd> &plusmn;1 frame
+        <kbd>&darr;</kbd><kbd>&uarr;</kbd> &plusmn;10 frames
+        <kbd>Home</kbd><kbd>End</kbd> Jump to start/end
         <kbd>0</kbd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Speed (0.5 / 1 / 2 / 4&times;)
       </div>
     </div>

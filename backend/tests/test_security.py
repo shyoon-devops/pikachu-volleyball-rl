@@ -78,3 +78,58 @@ class TestRateLimit:
                 assert resp.json()["detail"] == "Too many requests"
                 return
         pytest.skip("Rate limit not triggered within 25 requests")
+
+
+class TestRateLimitExemptions:
+    """Infrastructure paths (probes, metrics) must never be throttled.
+
+    These endpoints are hit by k8s probes, Prometheus scrapes, and Promtail —
+    429-ing them causes cascading unhealthy states across the cluster. The
+    tests first exhaust the per-IP token bucket with regular requests, then
+    verify the exempt paths still respond 200.
+    """
+
+    @staticmethod
+    def _exhaust_bucket(client) -> None:
+        """Consume all tokens on the shared bucket until 429 is observed."""
+        seen_429 = False
+        for _ in range(50):
+            if client.get("/api/games").status_code == 429:
+                seen_429 = True
+                break
+        assert seen_429, "precondition failed: bucket never drained — test is inert"
+
+    def test_health_live_exempt_under_throttle(self, client):
+        self._exhaust_bucket(client)
+        for _ in range(10):
+            resp = client.get("/api/health/live")
+            assert resp.status_code == 200, f"/api/health/live got {resp.status_code}"
+
+    def test_health_ready_exempt_under_throttle(self, client):
+        self._exhaust_bucket(client)
+        for _ in range(10):
+            resp = client.get("/api/health/ready")
+            # 200 (all ok) or 503 (subsystem degraded) both mean "not throttled".
+            assert resp.status_code in (200, 503)
+
+    def test_health_root_exempt_under_throttle(self, client):
+        self._exhaust_bucket(client)
+        for _ in range(10):
+            resp = client.get("/api/health")
+            assert resp.status_code in (200, 503)
+
+    def test_api_metrics_exempt_under_throttle(self, client):
+        """Custom /api/metrics (Prometheus text format) must bypass the limiter."""
+        self._exhaust_bucket(client)
+        for _ in range(10):
+            resp = client.get("/api/metrics")
+            assert resp.status_code == 200
+            assert "text/plain" in resp.headers.get("content-type", "")
+
+    def test_instrumentator_metrics_exempt_under_throttle(self, client):
+        """HTTP-level /metrics from prometheus-fastapi-instrumentator must bypass too."""
+        self._exhaust_bucket(client)
+        resp = client.get("/metrics")
+        # The instrumentator serves Prometheus text; any non-429 proves exemption
+        # is in effect (status 200 expected when instrumentator is mounted).
+        assert resp.status_code != 429

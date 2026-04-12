@@ -6,6 +6,7 @@ import os
 import shutil
 from functools import wraps
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -19,6 +20,7 @@ from backend.app.metrics import (
     sample_runtime_metrics,
 )
 from backend.app.models.schemas import PaginatedResponse
+from backend.app.services.metrics_service import allowed_buckets
 from backend.app.util.ttl_cache import cache_ttl
 
 router = APIRouter()
@@ -231,8 +233,304 @@ async def training_status(request: Request):
     training_service = getattr(request.app.state, "training_service", None)
     if training_service is None:
         logger.info("training_status called before training_service init")
-        return {"state": "stopped", "current_step": 0, "current_episode": 0}
+        return {
+            "state": "stopped",
+            "current_step": 0,
+            "current_episode": 0,
+            "bot_level": 1,
+            "experiment_id": None,
+            "started_at": None,
+        }
     return training_service.status()
+
+
+# --- Training control (REST) -------------------------------------------------
+#
+# These are REST mirrors of the existing WS control messages. FE-8's refresh-
+# resilience story needs plain HTTP — not every dashboard mount opens a WS
+# immediately, and a button click should not silently fail because the socket
+# is reconnecting. Each handler does the mutation via TrainingServiceWrapper
+# and then broadcasts the resulting ``training:status`` to every live WS
+# client so open dashboards stay in sync with the button-clicker.
+
+
+async def _broadcast_status(request: Request, payload: dict[str, Any]) -> None:
+    """Fan a training:status message out to every connected WS client.
+
+    Lives here (not in handlers.py) because REST endpoints don't see a WS
+    ``ws`` argument — they only have ``request.app.state.ws_manager``. When
+    the manager is missing (early startup / some test fixtures) we no-op
+    rather than 500ing the REST call, since the mutation itself succeeded.
+    """
+    ws_manager = getattr(request.app.state, "ws_manager", None)
+    if ws_manager is None:
+        return
+    try:
+        await ws_manager.broadcast({"type": "training:status", "payload": payload})
+    except Exception:
+        # Broadcast is best-effort — we never want a WS fan-out failure to
+        # mask a successful REST mutation.
+        logger.exception("Failed to broadcast training:status over WS")
+
+
+@router.post("/training/stop")
+@endpoint_guard("training_stop")
+async def training_stop_rest(request: Request):
+    """Stop training (REST mirror of WS ``training:stop``).
+
+    Always sends ``force=True`` — see TrainingServiceWrapper.stop for the
+    rationale (UI click is explicit intent; protection threshold only guards
+    against accidental background callers).
+    """
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is None:
+        raise HTTPException(status_code=503, detail="Training service not available")
+    result = await training_service.stop(force=True)
+    state = training_service.status()
+    logger.info(
+        "REST training/stop: stopped=%s reason=%s actual_state=%s",
+        result.get("stopped"), result.get("reason"), state["state"],
+    )
+    await _broadcast_status(request, {"state": state["state"]})
+    return {"ok": True, "result": result, "status": state}
+
+
+@router.post("/training/pause")
+@endpoint_guard("training_pause")
+async def training_pause_rest(request: Request):
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is None:
+        raise HTTPException(status_code=503, detail="Training service not available")
+    result = await training_service.pause()
+    state = training_service.status()
+    logger.info(
+        "REST training/pause: paused=%s reason=%s actual_state=%s",
+        result.get("paused"), result.get("reason"), state["state"],
+    )
+    await _broadcast_status(request, {"state": state["state"]})
+    return {"ok": True, "result": result, "status": state}
+
+
+@router.post("/training/resume")
+@endpoint_guard("training_resume")
+async def training_resume_rest(request: Request):
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is None:
+        raise HTTPException(status_code=503, detail="Training service not available")
+    try:
+        result = await training_service.resume()
+    except FileNotFoundError as e:
+        # resume-from-stopped needs a checkpoint; surface 409 so FE shows an
+        # actionable error instead of a generic 500.
+        logger.info("REST training/resume rejected: no checkpoint (%s)", e)
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    state = training_service.status()
+    logger.info(
+        "REST training/resume: reason=%s actual_state=%s",
+        result.get("reason"), state["state"],
+    )
+    await _broadcast_status(request, {"state": state["state"]})
+    return {"ok": True, "result": result, "status": state}
+
+
+class TrainingLevelPatch(BaseModel):
+    """Request body for PATCH /api/training/level."""
+
+    level: int = Field(ge=1, le=5, description="Bot difficulty 1-5")
+
+
+@router.get("/training/level")
+@endpoint_guard("training_level_get")
+async def training_level_get(request: Request):
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is None:
+        raise HTTPException(status_code=503, detail="Training service not available")
+    return {"level": training_service.status()["bot_level"]}
+
+
+@router.patch("/training/level")
+@endpoint_guard("training_level_patch")
+async def training_level_patch(request: Request, body: TrainingLevelPatch):
+    """Change bot difficulty.
+
+    Mirrors the WS ``training:set_level`` handler: the mutation is applied
+    synchronously via ``set_bot_level``, then the new ``bot_level`` is
+    broadcast in a ``training:status`` frame so other dashboards re-render.
+    """
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is None:
+        raise HTTPException(status_code=503, detail="Training service not available")
+    try:
+        training_service.set_bot_level(body.level)
+    except ValueError as e:
+        # The manager validates too — duplicate the bound here so the 400
+        # carries the underlying message instead of a generic pydantic error.
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    state = training_service.status()
+    await _broadcast_status(
+        request,
+        {"state": state["state"], "bot_level": body.level},
+    )
+    return {"level": body.level}
+
+
+# Metric aliases the FE actually asks for vs the field names MetricsCallback
+# emits. Keeping an explicit table — rather than echoing whatever the client
+# sends — guarantees we never pass an arbitrary field name into Mongo.
+_TIMESERIES_METRICS: dict[str, str] = {
+    "reward": "mean_reward",
+    "win_rate": "win_rate",
+    "loss": "policy_loss",
+    "policy_loss": "policy_loss",
+    "value_loss": "value_loss",
+}
+
+
+@router.get("/training/timeseries")
+@endpoint_guard("training_timeseries")
+async def training_timeseries(
+    request: Request,
+    metric: str = Query(
+        "reward",
+        description=f"Metric name. One of: {', '.join(sorted(_TIMESERIES_METRICS))}.",
+    ),
+    limit: int = Query(
+        1000, ge=1, le=10000,
+        description=(
+            "Maximum number of points, newest last. Cap raised from 1000 "
+            "to 10000 so long training runs (MetricsCallback now emits "
+            "every 256 steps → ~3900 points at 1M steps) can be fetched "
+            "in a single call without client-side pagination."
+        ),
+    ),
+    experiment_id: str | None = Query(
+        None, description="Restrict to a single experiment_id.",
+    ),
+):
+    """Raw recent metric points for chart recovery on page refresh.
+
+    This is deliberately a thin wrapper over ``MetricsService.recent_points``.
+    The pre-existing ``/api/training/metrics/aggregate`` endpoint is the
+    bucketed / downsampled view; this one streams the raw (step, value)
+    pairs so the frontend can re-plot exactly what the live WS stream will
+    continue from. Returning them newest-last means the chart can extend to
+    the right as WS frames arrive without needing to sort.
+    """
+    if metric not in _TIMESERIES_METRICS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown metric {metric!r}; "
+                f"allowed: {sorted(_TIMESERIES_METRICS)}"
+            ),
+        )
+    metrics_service = getattr(request.app.state, "metrics_service", None)
+    if metrics_service is None:
+        # Degrade gracefully — FE still gets a valid envelope, just empty.
+        logger.info("training_timeseries called before metrics_service init")
+        return {"metric": metric, "experiment_id": experiment_id, "points": []}
+
+    field = _TIMESERIES_METRICS[metric]
+    points = await metrics_service.recent_points(
+        field=field, limit=limit, experiment_id=experiment_id,
+    )
+    return {
+        "metric": metric,
+        "experiment_id": experiment_id,
+        "points": points,
+    }
+
+
+@router.get("/training/current_frame")
+@endpoint_guard("training_current_frame")
+async def training_current_frame(request: Request):
+    """Return the most recent live-demo frame, or 404 when none is cached.
+
+    Served from ``TrainingManager.last_frame`` (updated by LiveFrameCallback).
+    FE uses this on page mount to repaint the canvas instantly instead of
+    waiting for the next WS ``training:frame`` push. Returns 404 rather
+    than ``null`` so a missing frame is distinguishable from a real frame
+    whose keys happen to be zero.
+    """
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is None:
+        raise HTTPException(status_code=503, detail="Training service not available")
+    frame = training_service.last_frame()
+    if frame is None:
+        raise HTTPException(status_code=404, detail="No live frame available")
+    return frame
+
+
+@router.get("/training/metrics/aggregate")
+@endpoint_guard("training_metrics_aggregate")
+@cache_ttl(seconds=10, max_entries=128, include=("experiment_id", "bucket", "since", "until"))
+async def training_metrics_aggregate(
+    request: Request,
+    experiment_id: str | None = Query(
+        None, description="Restrict aggregation to a single experiment_id."
+    ),
+    bucket: str = Query(
+        "1m",
+        description=f"Bucket grain. One of: {', '.join(allowed_buckets())}.",
+    ),
+    since: str | None = Query(
+        None, description="Inclusive lower bound, ISO-8601 timestamp."
+    ),
+    until: str | None = Query(
+        None, description="Exclusive upper bound, ISO-8601 timestamp."
+    ),
+):
+    """Time-bucketed training-metric aggregates (BE-7).
+
+    Returns an ordered list of buckets with averages for reward, win-rate,
+    and policy/value loss. ``since`` / ``until`` accept ISO-8601 strings and
+    default to the last 6 hours when both are omitted so the query is
+    always index-bounded. Cached for 10s — at a 100ms metric cadence the
+    freshness penalty is negligible and dashboards that poll at 1Hz would
+    otherwise hammer the aggregation pipeline.
+    """
+    from datetime import datetime
+
+    metrics_service = getattr(request.app.state, "metrics_service", None)
+    if metrics_service is None:
+        logger.warning(
+            "training_metrics_aggregate called before metrics_service init"
+        )
+        raise HTTPException(status_code=503, detail="Metrics service not available")
+
+    if bucket not in allowed_buckets():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid bucket {bucket!r}; allowed: {list(allowed_buckets())}",
+        )
+
+    def _parse(value: str | None, field: str) -> datetime | None:
+        if value is None:
+            return None
+        try:
+            # fromisoformat handles both naive and tz-aware strings, and the
+            # trailing-Z shorthand emitted by JS Date.toISOString().
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid {field} timestamp: {e}"
+            ) from e
+
+    since_dt = _parse(since, "since")
+    until_dt = _parse(until, "until")
+
+    buckets = await metrics_service.aggregate(
+        experiment_id=experiment_id,
+        bucket=bucket,
+        since=since_dt,
+        until=until_dt,
+    )
+    return {
+        "experiment_id": experiment_id,
+        "bucket": bucket,
+        "count": len(buckets),
+        "data": buckets,
+    }
 
 
 @router.get("/games")

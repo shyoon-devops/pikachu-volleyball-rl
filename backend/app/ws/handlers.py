@@ -73,6 +73,36 @@ async def _send_error(ws: WebSocket, code: str, message: str) -> None:
     )
 
 
+async def _emit_status(
+    ws: WebSocket,
+    manager: ConnectionManager | None,
+    message: dict[str, Any],
+) -> None:
+    """Fan out a training:status transition to every connected client.
+
+    Hotfix for BE-6 regression: we previously acked state changes to the
+    requesting socket only (``ws.send_json``). After BE-6's parallel-broadcast
+    refactor that left other tabs — e.g. a second dashboard open on the same
+    session, or FE-8's ``TrainingStateProvider`` mounted in a neighboring
+    window — stuck on a stale "stopped" view while training was actually
+    running, because they never saw the status frame.
+
+    training:status is a *session-wide* transition; every live client needs
+    it. Error rejections like training:error remain per-requester because
+    they answer one caller's specific action, not a global state change.
+
+    ``manager`` is typed ``Optional`` only so the function is safe to call
+    from tests that exercise ``_dispatch`` without a full lifespan; in
+    production ``ws_endpoint`` always supplies it.
+    """
+    if manager is not None:
+        await manager.broadcast(message)
+    else:
+        # Defensive fallback — keeps the dispatcher usable in isolation
+        # without forcing callers to build a ConnectionManager.
+        await ws.send_json(message)
+
+
 async def _dispatch(
     ws: WebSocket,
     msg: ParsedMessage,
@@ -88,43 +118,91 @@ async def _dispatch(
     if msg.type == "training:start":
         current = training_service.status()
         if current["state"] == "running":
+            # Rejection is caller-specific — don't broadcast it.
             await ws.send_json({
                 "type": "training:error",
                 "payload": {"message": "Training is already running"},
             })
             return
         params: WsTrainingStartPayload = msg.payload  # type: ignore[assignment]
+        # If the caller omitted bot_level, carry over the current difficulty
+        # from status instead of silently dropping to L1 — the dashboard is
+        # the single source of truth for difficulty via training:set_level.
+        effective_bot_level = (
+            params.bot_level
+            if params.bot_level is not None
+            else current["bot_level"]
+        )
         experiment_id = await training_service.start(
             hyperparams=params.hyperparams,
-            bot_level=params.bot_level,
+            bot_level=effective_bot_level,
             total_timesteps=params.total_timesteps,
         )
-        logger.info("Training started: experiment=%s bot_level=%d", experiment_id, params.bot_level)
-        await ws.send_json({
+        logger.info(
+            "Training started: experiment=%s bot_level=%d",
+            experiment_id, effective_bot_level,
+        )
+        await _emit_status(ws, manager, {
             "type": "training:status",
             "payload": {"state": "running", "experiment_id": experiment_id},
         })
 
     elif msg.type == "training:stop":
-        await training_service.stop()
-        logger.info("Training stopped")
-        await ws.send_json({
+        # User-initiated Stop: pass force=True (see
+        # TrainingServiceWrapper.stop docstring). Inspect the result so we
+        # don't broadcast a false "stopped" when the manager declined — the
+        # previous wrapper dropped this value, which is exactly how QA's
+        # "Stop 버튼 클릭해도 학습 안 멈춤" regression leaked to dev.
+        result = await training_service.stop(force=True)
+        actual_state = training_service.status()["state"]
+        logger.info(
+            "Training stop requested: stopped=%s reason=%s actual_state=%s",
+            result.get("stopped"), result.get("reason"), actual_state,
+        )
+        await _emit_status(ws, manager, {
             "type": "training:status",
-            "payload": {"state": "stopped"},
+            "payload": {"state": actual_state},
+        })
+
+    elif msg.type == "training:pause":
+        result = await training_service.pause()
+        actual_state = training_service.status()["state"]
+        logger.info(
+            "Training pause requested: paused=%s reason=%s actual_state=%s",
+            result.get("paused"), result.get("reason"), actual_state,
+        )
+        await _emit_status(ws, manager, {
+            "type": "training:status",
+            "payload": {"state": actual_state},
         })
 
     elif msg.type == "training:resume":
-        await training_service.resume()
-        logger.info("Training resumed")
-        await ws.send_json({
+        # resume() is overloaded: unpause from paused, or reload checkpoint
+        # from stopped. Report the resulting state so every client lands in
+        # sync rather than assuming "running" on success.
+        try:
+            result = await training_service.resume()
+        except FileNotFoundError as e:
+            logger.info("Resume rejected: no checkpoint available")
+            await ws.send_json({
+                "type": "training:error",
+                "payload": {"message": str(e)},
+            })
+            return
+        actual_state = training_service.status()["state"]
+        logger.info(
+            "Training resume requested: reason=%s actual_state=%s",
+            result.get("reason"), actual_state,
+        )
+        await _emit_status(ws, manager, {
             "type": "training:status",
-            "payload": {"state": "running"},
+            "payload": {"state": actual_state},
         })
 
     elif msg.type == "training:set_level":
         params_lvl: WsSetLevelPayload = msg.payload  # type: ignore[assignment]
         training_service.set_bot_level(params_lvl.level)
-        await ws.send_json({
+        await _emit_status(ws, manager, {
             "type": "training:status",
             "payload": {
                 "state": training_service.status()["state"],
@@ -150,12 +228,23 @@ async def _dispatch(
 async def metrics_push_loop(
     manager: ConnectionManager,
     training_service: TrainingServiceWrapper,
+    metrics_service: Any | None = None,
 ) -> None:
-    """Drain metrics queue and broadcast to all WS clients."""
+    """Drain metrics queue, persist (if configured), and broadcast.
+
+    Persistence is best-effort and happens *before* the broadcast so a live
+    dashboard frame isn't visible ahead of its persisted counterpart — we'd
+    rather eat a few milliseconds of latency on a metric frame than create
+    a user-visible gap in the aggregation endpoint. MetricsService.record
+    swallows its own errors so a Mongo hiccup cannot stall this loop.
+    """
     queue = training_service.manager.metrics_queue
     while True:
         data = await queue.get()
         update_training_metrics(data)
+        if metrics_service is not None:
+            experiment_id = getattr(training_service.manager, "_experiment_id", "") or ""
+            await metrics_service.record(experiment_id=experiment_id, data=data)
         await manager.broadcast({"type": "training:metrics", "payload": data})
 
 
@@ -222,11 +311,29 @@ async def results_push_loop(
     queue = training_service.manager.results_queue
     while True:
         data = await queue.get()
+        # bot_level and experiment_id MUST be present on the wire — the
+        # producer (LiveFrameCallback._on_step) snapshots both from the
+        # TrainingManager before the demo runs. If either is missing we
+        # fall through to the exception branch → dead-letter, rather
+        # than silently coercing to L1 (the previous default) which
+        # masked the "every game saved as L1" regression FE reported.
+        if "bot_level" not in data:
+            logger.warning(
+                "results_push_loop received payload without bot_level "
+                "(game_id=%s) — routing to dead-letter",
+                data.get("game_id", "?"),
+            )
+        if "experiment_id" not in data:
+            logger.warning(
+                "results_push_loop received payload without experiment_id "
+                "(game_id=%s) — routing to dead-letter",
+                data.get("game_id", "?"),
+            )
         try:
             record = GameRecord(
                 game_id=data.get("game_id", ""),
-                experiment_id=data.get("experiment_id", ""),
-                bot_level=data.get("bot_level", 1),
+                experiment_id=data["experiment_id"],
+                bot_level=data["bot_level"],
                 score1=data["score1"],
                 score2=data["score2"],
                 winner=data["winner"],

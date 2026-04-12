@@ -75,11 +75,17 @@ def _safe_enqueue(
 class MetricsCallback(BaseCallback):
     """Collects training metrics every N steps and pushes to an asyncio.Queue."""
 
+    # 256 strikes the resolution/throughput balance PM requested:
+    #   * 100 (prev default) → with n_steps=2048 FE sees ~20 points per
+    #     rollout — too sparse to track convergence curves.
+    #   * 256 → ~8 points per 2048-step rollout = 8x the prior resolution.
+    #   * 128 or below → Mongo insert rate doubles (16x at 128) for
+    #     marginal visual gain. 256 held as the sweet spot.
     def __init__(
         self,
         queue: asyncio.Queue[dict[str, Any]],
         loop: asyncio.AbstractEventLoop,
-        log_interval: int = 100,
+        log_interval: int = 256,
         verbose: int = 0,
     ) -> None:
         super().__init__(verbose)
@@ -156,7 +162,14 @@ class CheckpointCallback(BaseCallback):
 
 
 class LiveFrameCallback(BaseCallback):
-    """Runs a demo game every M steps and pushes frames + result to queues."""
+    """Runs a demo game every M steps and pushes frames + result to queues.
+
+    A reference back to ``TrainingManager`` is optional: when supplied, each
+    serialized frame is also cached on ``manager.last_frame`` so the
+    ``GET /api/training/current_frame`` endpoint can repaint the game canvas
+    instantly on a page refresh, before any WebSocket frame arrives. The
+    callback still works in isolation (tests construct it without a manager).
+    """
 
     def __init__(
         self,
@@ -168,6 +181,7 @@ class LiveFrameCallback(BaseCallback):
         replay_dir: str = "replays",
         max_replays: int = 1000,
         verbose: int = 0,
+        manager: Any | None = None,
     ) -> None:
         super().__init__(verbose)
         self.frames_queue = frames_queue
@@ -178,23 +192,67 @@ class LiveFrameCallback(BaseCallback):
         self.replay_dir = Path(replay_dir)
         self.max_replays = max_replays
         self.replay_dir.mkdir(parents=True, exist_ok=True)
+        # ``Any`` rather than TrainingManager to avoid a circular import —
+        # trainer.py already imports this module at construction time.
+        self._manager = manager
+
+    def _on_training_start(self) -> None:
+        """Seed ``manager.last_frame`` so ``/current_frame`` returns 200 immediately.
+
+        Without this, the endpoint returns 404 for the full warm-up window
+        (``play_interval`` steps, default 5000). Designers hitting refresh
+        during that window saw a blank canvas even though training was
+        running. Seeding a canonical reset snapshot lets the FE paint
+        something the instant training begins; later demo ticks overwrite
+        it with live play frames.
+        """
+        if self._manager is None:
+            return
+        initial_state = PikachuVolleyball().reset()
+        self._manager.last_frame = _serialize_state(initial_state)
 
     def _on_step(self) -> bool:
         if self.num_timesteps % self.play_interval != 0:
             return True
 
+        # Snapshot the level + experiment id at demo-start so that (a) a
+        # mid-run set_bot_level picks up *here* for the in-process demo
+        # opponent without needing a vec-env restart, and (b) the saved
+        # GameRecord reflects what was actually played this demo — not
+        # a stale __init__ cache (the silent-L1 bug prior to this fix).
+        if self._manager is not None:
+            current_bot_level = int(getattr(self._manager, "_bot_level", self.bot_level))
+            current_experiment_id = str(getattr(self._manager, "_experiment_id", "") or "")
+        else:
+            current_bot_level = self.bot_level
+            current_experiment_id = ""
+
         game = PikachuVolleyball()
-        bot = RuleBasedBot(level=self.bot_level)
+        bot = RuleBasedBot(level=current_bot_level)
         state = game.reset()
         frames: list[dict[str, Any]] = []
         prev_ball_x = float(state.ball.x)
         prev_ball_y = float(state.ball.y)
 
-        while state.score1 < MAX_SCORE and state.score2 < MAX_SCORE:
+        # Keep emitting frames while the match is live OR while the engine
+        # is still holding a post-score freeze frame. Without the freeze
+        # clause, the final 14→15 scoring frame would be visible only for
+        # one frame (and any earlier scoring frame would be skipped entirely
+        # because the engine now holds the grounded state before resetting
+        # to the next serve).
+        while (
+            state.score1 < MAX_SCORE and state.score2 < MAX_SCORE
+        ) or state.post_score_freeze_frames > 0:
             frame_data = _serialize_state(state)
             frames.append(frame_data)
             # No "type" key — handlers.frames_push_loop wraps the payload.
             _safe_enqueue(self.loop, self.frames_queue, frame_data)
+            if self._manager is not None:
+                # Overwrite (not append) — the REST endpoint only wants the
+                # newest frame. Assignment of a reference is atomic in
+                # CPython so cross-thread reads observe either the old or
+                # the new frame, never a partially-written dict.
+                self._manager.last_frame = frame_data
 
             obs = self._get_obs(state, prev_ball_x, prev_ball_y)
             action, _ = self.model.predict(obs, deterministic=True)
@@ -206,13 +264,24 @@ class LiveFrameCallback(BaseCallback):
             p2_input = bot.get_action(state, is_player2=True)
             state = game.step(p1_input, p2_input)
 
-        # Final frame
-        frames.append(_serialize_state(state))
+        # Final frame — also cache so /current_frame reports the terminal
+        # state (winner's score, not a stale in-play frame) until the next
+        # demo game starts.
+        final_frame = _serialize_state(state)
+        frames.append(final_frame)
+        if self._manager is not None:
+            self._manager.last_frame = final_frame
 
         game_id = str(uuid.uuid4())
         # No "type" key — handlers.results_push_loop wraps the payload.
+        # bot_level and experiment_id MUST be present: the ws handler no
+        # longer coerces missing values to a silent L1 default (that was
+        # the root cause of every saved game appearing as L1 in
+        # /api/games regardless of the user's actual training level).
         result = {
             "game_id": game_id,
+            "experiment_id": current_experiment_id,
+            "bot_level": current_bot_level,
             "score1": state.score1,
             "score2": state.score2,
             "winner": 1 if state.score1 >= MAX_SCORE else 2,
@@ -456,8 +525,31 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             "vx": state.ball.vx,
             "vy": state.ball.vy,
             "rotation": state.ball.rotation,
+            # Gate for FE hyper-ball / trail rendering on power-hit frames.
+            # Defensive getattr so replays pickled before this field was
+            # added still decode; missing → treat as not a power hit.
+            "is_power_hit": bool(getattr(state.ball, "is_power_hit", False)),
+            # Punch-effect markers for the white radial ring drawn when
+            # the ball slams the ground or a power hit connects
+            # (original view.js:502-507). Radius starts at BALL_RADIUS and
+            # decays by 2 per frame in the engine. punch_effect_x/y locate
+            # the centre; FE draws a 2*radius-sized sprite.
+            "punch_effect_x": int(getattr(state.ball, "punch_effect_x", 0)),
+            "punch_effect_y": int(getattr(state.ball, "punch_effect_y", 0)),
+            "punch_effect_radius": int(
+                getattr(state.ball, "punch_effect_radius", 0)
+            ),
         },
         "score1": state.score1,
         "score2": state.score2,
         "frame": state.frame,
+        # Signals for the FE to render a scoring overlay / freeze treatment.
+        # Defensive getattr so older replays (pickled before these fields
+        # existed) still decode without KeyError. `is_round_over` stays True
+        # for the entire post-score freeze window; `post_score_freeze_frames`
+        # lets the FE drive progress-based effects (fade, slow-motion).
+        "is_round_over": bool(getattr(state, "is_round_over", False)),
+        "post_score_freeze_frames": int(
+            getattr(state, "post_score_freeze_frames", 0)
+        ),
     }

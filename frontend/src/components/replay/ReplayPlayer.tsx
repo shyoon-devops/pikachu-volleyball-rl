@@ -93,6 +93,8 @@ export function ReplayPlayer() {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
 
+      // Scrubbing UX: horizontal arrows step one frame, vertical arrows
+      // jump ten frames — matches common video-editor muscle memory.
       switch (e.code) {
         case 'Space':
           e.preventDefault()
@@ -100,11 +102,29 @@ export function ReplayPlayer() {
           break
         case 'ArrowLeft':
           e.preventDefault()
-          stepFrame(e.shiftKey ? -10 : -1)
+          stepFrame(-1)
           break
         case 'ArrowRight':
           e.preventDefault()
-          stepFrame(e.shiftKey ? 10 : 1)
+          stepFrame(1)
+          break
+        case 'ArrowDown':
+          e.preventDefault()
+          stepFrame(-10)
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          stepFrame(10)
+          break
+        case 'Home':
+          e.preventDefault()
+          setCurrentIndex(0)
+          setIsPlaying(false)
+          break
+        case 'End':
+          e.preventDefault()
+          setCurrentIndex(Math.max(0, frames.length - 1))
+          setIsPlaying(false)
           break
         case 'Digit0':
           setSpeed(0.5)

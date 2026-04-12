@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
+import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { Hyperparams } from '../../lib/types'
@@ -10,6 +12,18 @@ import './Dashboard.css'
 
 export function Dashboard() {
   const { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send } = useTrainingState()
+
+  // Hyperparams live at the Dashboard so the single Start button in
+  // <TrainingControls /> can submit them. Do NOT re-introduce a second
+  // Start button inside <HyperparamForm /> — we intentionally collapsed
+  // the two into one CTA.
+  //
+  // bot_level is intentionally NOT held here (Option A, 2026-04-12): it
+  // lives exclusively on ``status.botLevel`` — the L1–L5 buttons in
+  // <TrainingControls /> mutate it via training:set_level, and the BE
+  // dispatcher carries it over into training:start when the payload
+  // omits ``bot_level`` (schemas.py:92, handlers.py:131-135).
+  const [params, setParams] = useState<Hyperparams>(DEFAULT_HYPERPARAMS)
 
   const score1 = latestFrame?.score1 ?? 0
   const score2 = latestFrame?.score2 ?? 0
@@ -27,8 +41,11 @@ export function Dashboard() {
     return <DashboardSkeleton />
   }
 
-  const handleStart = (params: Hyperparams, botLevel: number) => {
-    send('training:start', { hyperparams: params, bot_level: botLevel })
+  const handleStart = () => {
+    // Option A: bot_level omitted — BE uses status.bot_level (set via the
+    // L1–L5 buttons in <TrainingControls />). Sending it here would
+    // silently override a level the user just picked.
+    send('training:start', { hyperparams: params })
   }
 
   return (
@@ -40,7 +57,7 @@ export function Dashboard() {
           connectionState={connectionState}
           reconnectAttempt={reconnectAttempt}
           send={send}
-          onStartWithParams={handleStart}
+          onStart={handleStart}
         />
 
         <div className="dashboard-game-wrapper" role="img" aria-label="Live game canvas — Pikachu Volleyball agent play">
@@ -54,7 +71,11 @@ export function Dashboard() {
         </div>
 
         {isStopped && (
-          <HyperparamForm onSubmit={handleStart} disabled={connectionState !== 'connected'} />
+          <HyperparamForm
+            params={params}
+            onParamsChange={setParams}
+            disabled={connectionState !== 'connected'}
+          />
         )}
       </section>
 

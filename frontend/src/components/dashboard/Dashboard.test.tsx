@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { ConnectionState, GameRecord, GameState, TrainingMetrics, TrainingStatus } from '../../lib/types'
 
@@ -81,6 +81,50 @@ describe('Dashboard loading state', () => {
     expect(screen.getByRole('heading', { name: /recent games/i })).toBeInTheDocument()
   })
 
+  it('renders exactly one Start button on the whole dashboard when stopped', () => {
+    // Duplicate-Start-button regression guard. Previously the dashboard
+    // shipped two CTAs: one in TrainingControls ("Start") and one in
+    // HyperparamForm ("Start Training"). There must be exactly one now.
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+    })
+    renderDashboard()
+    const startButtons = screen
+      .getAllByRole('button')
+      .filter(b => /^(start|start training)$/i.test(b.textContent?.trim() ?? ''))
+    expect(startButtons).toHaveLength(1)
+    expect(startButtons[0]).toHaveTextContent(/^Start$/)
+  })
+
+  it('toggles primary CTA label Start → Stop when training is running', () => {
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'running', currentStep: 10, currentEpisode: 1 },
+    })
+    renderDashboard()
+    expect(screen.queryByRole('button', { name: /start training/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /stop training/i })).toBeInTheDocument()
+  })
+
+  it('page loads with active training → shows Stop, not Start (refresh-while-running regression)', () => {
+    // Reproduces the CRITICAL bug: on refresh with training already running,
+    // the UI used to show the default 'stopped' state → Start button → no
+    // way to issue Stop. After the REST status-sync fix, the hook hydrates
+    // from /api/training/status before first paint, so the mocked state
+    // already carries state=running and the primary CTA is Stop.
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'running', currentStep: 12345, currentEpisode: 7 },
+    })
+    renderDashboard()
+    expect(screen.getByRole('button', { name: /stop training/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start training/i })).not.toBeInTheDocument()
+    // Primary CTA must be enabled — the bug manifested as a dead Stop.
+    const stop = screen.getByRole('button', { name: /stop training/i })
+    expect(stop).not.toBeDisabled()
+  })
+
   it('does not show the skeleton on a mid-session disconnect if we already have data', () => {
     resetMockState({
       connectionState: 'disconnected',
@@ -91,6 +135,31 @@ describe('Dashboard loading state', () => {
     })
     renderDashboard()
     expect(screen.queryByRole('status', { name: /loading dashboard/i })).not.toBeInTheDocument()
+  })
+
+  // ── Option A: bot_level is status-only (2026-04-12) ──
+  it('training:start payload omits bot_level (BE substitutes status.bot_level)', () => {
+    // Dashboard used to send `{ hyperparams, bot_level }` from local
+    // state. Under Option A the form has no bot_level input and the
+    // dashboard holds none, so Start must ship hyperparams only and
+    // let BE carry over status.bot_level
+    // (backend/app/models/schemas.py:92). Sending bot_level here would
+    // silently reset a freshly-picked L-level.
+    const send = vi.fn()
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0, botLevel: 4 },
+      send,
+    })
+    renderDashboard()
+
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const call = send.mock.calls[0] as [string, Record<string, unknown>]
+    expect(call[0]).toBe('training:start')
+    expect(call[1]).toHaveProperty('hyperparams')
+    expect(call[1]).not.toHaveProperty('bot_level')
   })
 
   it('does not show the skeleton when reconnecting mid-session with data present', () => {

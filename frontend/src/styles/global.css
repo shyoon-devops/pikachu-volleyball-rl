@@ -243,6 +243,7 @@ select option {
 /* ── Buttons ───────────────────────────────────────────── */
 /* Designer: FE에게 버튼에 className='btn btn-{variant}' 추가 요청 */
 .btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -254,17 +255,67 @@ select option {
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-out);
   white-space: nowrap;
+  /*
+   * 마이크로 애니메이션 타이밍 분리:
+   *  - transform 은 normal(200ms) + out-expo 로 부드러운 lift
+   *  - box-shadow 는 fast(120ms) 로 즉각 반응
+   *  - filter / bg 는 fast 로 즉각 밝기 변화
+   */
+  transition: transform var(--duration-normal) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
+              filter var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out);
+  overflow: hidden;
+}
+
+/*
+ * Shimmer sweep — ::before 가 버튼을 가로지르며 하이라이트 스윕.
+ *  - 기본: 좌측 바깥(-120%) 에 대기.
+ *  - hover 시 opacity 를 들어올리고 translateX 로 우측까지 스윕.
+ *  - mix-blend-mode: screen 으로 색상 변형 없이 밝기만 더함.
+ */
+.btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 100%
+  );
+  transform: translateX(-120%);
+  transition: transform var(--duration-slow) var(--ease-out);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0;
 }
 
 .btn:hover:not(:disabled) {
-  transform: translateY(-1px);
+  transform: translateY(-1.5px);
   box-shadow: var(--shadow-md);
 }
 
+.btn:hover:not(:disabled)::before {
+  transform: translateX(220%);
+  opacity: 1;
+}
+
 .btn:active:not(:disabled) {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.97);
+  transition: transform 80ms var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .btn:disabled {
@@ -410,12 +461,68 @@ select option {
   font-size: var(--text-xl);
 }
 
-/* ── Toast / notification ──────────────────────────────── */
-/* Designer: FE에게 알림에 className='toast toast-{variant}' 추가 요청 */
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  TOAST / NOTIFICATION  (D9)
+ * ═══════════════════════════════════════════════════════════
+ *  Designer → FE: 권장 마크업 구조
+ *    <div class="toast-container" aria-live="polite" aria-atomic="false">
+ *      <div class="toast toast-{variant}" role="alert">
+ *        <span class="toast-icon" aria-hidden />
+ *        <div class="toast-body">
+ *          <strong class="toast-title">Training Failed</strong>
+ *          <p class="toast-message">WebSocket disconnected at step 12,480</p>
+ *        </div>
+ *        <button class="toast-close" aria-label="Dismiss">×</button>
+ *      </div>
+ *    </div>
+ *  variant: success / danger / warning / info
+ *
+ *  기존 .toast / .toast-success / .toast-danger / .toast-info 는 하위 호환 유지.
+ *  컨테이너가 있으면 스택, 없어도 단일 토스트는 동작.
+ * ═══════════════════════════════════════════════════════════
+ */
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+
+@keyframes toast-progress {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+.toast-container {
+  position: fixed;
+  bottom: var(--space-6);
+  right: var(--space-6);
+  display: flex;
+  flex-direction: column-reverse; /* 새 토스트는 상단에 추가, 오래된 것은 아래 */
+  gap: var(--space-2);
+  z-index: 1000;
+  max-width: min(420px, calc(100vw - var(--space-8)));
+  pointer-events: none; /* 컨테이너 자체는 통과 */
+}
+
+.toast-container .toast {
+  pointer-events: auto;
+}
+
 .toast {
   position: fixed;
   bottom: var(--space-6);
   right: var(--space-6);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: flex-start;
+  gap: var(--space-2);
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
@@ -424,24 +531,196 @@ select option {
   z-index: 1000;
   animation: toast-in var(--duration-slow) var(--ease-out);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  min-width: 280px;
+  max-width: 420px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
 }
 
+/* 컨테이너 안에서는 position static 으로 스택됨 */
+.toast-container .toast {
+  position: relative;
+  bottom: auto;
+  right: auto;
+}
+
+.toast--out {
+  animation: toast-out var(--duration-normal) var(--ease-out) forwards;
+}
+
+.toast-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-family: var(--font-sans);
+  font-weight: var(--weight-bold);
+  font-size: 12px;
+  line-height: 1;
+  margin-top: 1px;
+}
+
+.toast-body {
+  min-width: 0; /* grid 자식 말줄임 허용 */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toast-title {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+}
+
+.toast-message {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+
+.toast-close {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+}
+
+.toast-close:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* 자동 dismiss 진행률 바 — ::after 로 우→좌 줄어듦 */
+.toast-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: currentColor;
+  opacity: 0.6;
+  transform-origin: left center;
+  animation: toast-progress var(--toast-duration, 5s) linear forwards;
+}
+
+/* ── Variants ────────────────────────────────────────── */
 .toast-success {
   background: var(--color-success-dim);
-  border: 1px solid var(--color-success-border);
+  border-color: var(--color-success-border);
   color: var(--color-success);
+}
+
+.toast-success .toast-icon {
+  background: var(--color-success);
+  color: var(--color-text-inverse);
+}
+
+.toast-success .toast-icon::before {
+  content: '✓';
 }
 
 .toast-danger {
   background: var(--color-danger-dim);
-  border: 1px solid var(--color-danger-border);
+  border-color: var(--color-danger-border);
   color: var(--color-danger);
+}
+
+.toast-danger .toast-icon {
+  background: var(--color-danger);
+  color: var(--color-text-primary);
+}
+
+.toast-danger .toast-icon::before {
+  content: '!';
+}
+
+/* WS 연결 끊김 · 훈련 실패 같은 크리티컬 상황은 약간의 좌우 shake */
+.toast-danger {
+  animation: toast-in var(--duration-slow) var(--ease-out),
+             toast-shake 0.42s var(--ease-out) var(--duration-slow);
+}
+
+@keyframes toast-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-3px); }
+  40%, 80% { transform: translateX(3px); }
+}
+
+.toast-warning {
+  background: var(--color-warning-dim);
+  border-color: rgba(251, 191, 36, 0.3);
+  color: var(--color-warning);
+}
+
+.toast-warning .toast-icon {
+  background: var(--color-warning);
+  color: var(--color-text-inverse);
+}
+
+.toast-warning .toast-icon::before {
+  content: '⚠';
+  font-size: 10px;
 }
 
 .toast-info {
   background: var(--color-info-dim);
-  border: 1px solid var(--color-info-border);
+  border-color: var(--color-info-border);
   color: var(--color-info);
+}
+
+.toast-info .toast-icon {
+  background: var(--color-info);
+  color: var(--color-text-inverse);
+}
+
+.toast-info .toast-icon::before {
+  content: 'i';
+  font-style: italic;
+}
+
+/* 위치 변형 — FE 가 .toast-container--top-right 등으로 override 가능 */
+.toast-container--top-right {
+  top: calc(var(--navbar-height) + var(--space-3));
+  bottom: auto;
+  flex-direction: column;
+}
+
+.toast-container--top-center {
+  top: calc(var(--navbar-height) + var(--space-3));
+  bottom: auto;
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+  flex-direction: column;
+}
+
+/* 모바일 — 토스트는 bottom fixed 탭 바와 겹치지 않도록 위로 올림 */
+@media (max-width: 480px) {
+  .toast-container,
+  .toast {
+    left: var(--space-3);
+    right: var(--space-3);
+    bottom: calc(var(--navbar-height) + var(--space-3) + env(safe-area-inset-bottom, 0px));
+    max-width: none;
+  }
 }
 
 /*
@@ -499,6 +778,344 @@ select option {
 
 /*
  * ═══════════════════════════════════════════════════════════
+ *  PROGRESS BAR  (D6)
+ * ═══════════════════════════════════════════════════════════
+ *  Designer → FE: 훈련 진행률 표시 시 아래 마크업 사용.
+ *    <div class="progress-bar" role="progressbar"
+ *         aria-valuenow={pct} aria-valuemin="0" aria-valuemax="100">
+ *      <div class="progress-bar-fill" style={{ width: `${pct}%` }} />
+ *      <span class="progress-bar-label">{current}/{total}</span>
+ *    </div>
+ *  total 이 없으면 .progress-bar--indeterminate 변형 사용.
+ *  색상 변형: .progress-bar--accent (기본 gold),
+ *            .progress-bar--blue, .progress-bar--success.
+ * ═══════════════════════════════════════════════════════════
+ */
+.progress-bar {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.progress-bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0%;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-hover));
+  border-radius: inherit;
+  transition: width var(--duration-slow) var(--ease-out);
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.45);
+}
+
+/* 진행 바 내부 스트라이프 애니메이션 — 러닝임을 암시 */
+.progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.18) 0 10px,
+    transparent 10px 20px
+  );
+  animation: progress-stripes 1.2s linear infinite;
+  mix-blend-mode: overlay;
+}
+
+@keyframes progress-stripes {
+  from { background-position: 0 0; }
+  to   { background-position: 28px 0; }
+}
+
+.progress-bar--blue .progress-bar-fill {
+  background: linear-gradient(90deg, var(--color-blue), #67d4ff);
+  box-shadow: 0 0 8px rgba(79, 195, 247, 0.45);
+}
+
+.progress-bar--success .progress-bar-fill {
+  background: linear-gradient(90deg, var(--color-success), #7eeba3);
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.45);
+}
+
+.progress-bar-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.625rem; /* 10px — bar 높이 8px 보다 약간 큰 오버레이 */
+  color: var(--color-text-primary);
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* 총 스텝 수 미상일 때 indeterminate — 인피니트 좌→우 스윕 */
+.progress-bar--indeterminate .progress-bar-fill {
+  width: 40%;
+  animation: progress-indeterminate 1.4s var(--ease-in-out) infinite;
+}
+
+.progress-bar--indeterminate .progress-bar-fill::after {
+  animation: none;
+}
+
+@keyframes progress-indeterminate {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  ELAPSED TIMER  (D6)
+ * ═══════════════════════════════════════════════════════════
+ *  Designer → FE: 경과 시간 표시 시 사용.
+ *    <span class="elapsed-timer">
+ *      <span class="elapsed-timer-icon" aria-hidden />
+ *      <time>{formattedHHMMSS}</time>
+ *    </span>
+ *  훈련 상태가 running 인 컨텍스트에서 아이콘이 맥동한다.
+ * ═══════════════════════════════════════════════════════════
+ */
+.elapsed-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.elapsed-timer-icon {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  position: relative;
+  flex: none;
+}
+
+.elapsed-timer-icon::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 1.5px;
+  background: currentColor;
+  transform-origin: 0 50%;
+  border-radius: 1px;
+  transform: rotate(-45deg);
+}
+
+.training-controls:has(.training-controls-status[data-state="running"]) .elapsed-timer {
+  color: var(--color-accent);
+}
+.training-controls:has(.training-controls-status[data-state="running"]) .elapsed-timer-icon {
+  animation: pulse-glow 1.6s var(--ease-in-out) infinite;
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  ERROR BOUNDARY  (D10)
+ * ═══════════════════════════════════════════════════════════
+ *  ErrorBoundary.tsx 는 CSS import 를 하지 않으므로 이 파일에 정의.
+ *  실제 마크업은 ErrorBoundary.tsx 참고:
+ *    <div class="error-boundary card">
+ *      <h3 class="error-boundary-title">Something went wrong</h3>
+ *      <p class="error-boundary-message">{err.message}</p>
+ *      <button class="error-boundary-retry btn btn-ghost">Try again</button>
+ *    </div>
+ *
+ *  브랜드 일관성:
+ *    - card 기본 + danger accent 좌측 2px bar
+ *    - Pretendard/JetBrains Mono 혼용 (타이틀 sans, 에러 메시지 mono)
+ *    - 500-700px 최대 너비로 페이지 중앙
+ *    - 아이콘 (::before) 으로 시각적 강조
+ * ═══════════════════════════════════════════════════════════
+ */
+.error-boundary {
+  position: relative;
+  max-width: 560px;
+  margin: var(--space-12) auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border: 1px solid var(--color-danger-border);
+  background: linear-gradient(
+    180deg,
+    var(--color-danger-dim) 0%,
+    var(--color-bg-card) 40%
+  );
+  overflow: hidden;
+}
+
+/* 좌측 3px danger accent bar */
+.error-boundary::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--color-danger);
+  box-shadow: 0 0 12px rgba(248, 113, 113, 0.4);
+}
+
+/* 우상단에 반투명 ! 아이콘 워터마크 */
+.error-boundary::after {
+  content: '!';
+  position: absolute;
+  top: -10px;
+  right: 12px;
+  font-family: var(--font-sans);
+  font-weight: var(--weight-bold);
+  font-size: 120px;
+  line-height: 1;
+  color: var(--color-danger);
+  opacity: 0.06;
+  pointer-events: none;
+}
+
+.error-boundary-title {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.error-boundary-title::before {
+  content: '';
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-danger);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: var(--weight-bold);
+  text-align: center;
+  line-height: 20px;
+  flex: none;
+  /* Unicode 'ℹ' 대신 단순 ! — 복붙 안전 */
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='10' fill='black'/%3E%3Crect x='9' y='5' width='2' height='7' fill='white'/%3E%3Ccircle cx='10' cy='14.5' r='1.2' fill='white'/%3E%3C/svg%3E") center / 100% 100%;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Ccircle cx='10' cy='10' r='10' fill='black'/%3E%3Crect x='9' y='5' width='2' height='7' fill='white'/%3E%3Ccircle cx='10' cy='14.5' r='1.2' fill='white'/%3E%3C/svg%3E") center / 100% 100%;
+}
+
+.error-boundary-message {
+  margin: 0;
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-danger);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  /* 에러 메시지에 개행/긴 스택이 포함될 수 있으므로 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.error-boundary-retry {
+  /* btn btn-ghost 기본 스타일 위에 align-self 정도만 추가 */
+  align-self: flex-start;
+  margin-top: var(--space-1);
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  SKELETON LOADER  (D10)
+ * ═══════════════════════════════════════════════════════════
+ *  Designer → FE: 로딩 중 콘텐츠 자리채움용.
+ *    <div class="skeleton skeleton-text" />
+ *    <div class="skeleton skeleton-heading" />
+ *    <div class="skeleton skeleton-card" />
+ *    <div class="skeleton skeleton-avatar" />
+ *
+ *  레이아웃 shift 방지를 위해 실제 콘텐츠와 동일 크기로 배치 권장.
+ *  shimmer 애니메이션은 좌→우 이동 그라디언트.
+ * ═══════════════════════════════════════════════════════════
+ */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  position: relative;
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-elevated) 0%,
+    var(--color-bg-hover) 50%,
+    var(--color-bg-elevated) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: var(--radius-sm);
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  /* ARIA: FE 가 aria-busy="true" 로 래핑하거나 role="status" 추가 권장 */
+}
+
+.skeleton-text {
+  height: 0.75em;
+  margin-block: 0.35em;
+  border-radius: var(--radius-full);
+}
+
+.skeleton-text:last-child {
+  width: 65%; /* 마지막 줄은 짧게 — 실제 문단 느낌 */
+}
+
+.skeleton-heading {
+  height: 1.5em;
+  width: 60%;
+  margin-block: 0.4em;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-card {
+  height: 120px;
+  border-radius: var(--radius-lg);
+}
+
+.skeleton-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.skeleton-chart {
+  height: 180px;
+  border-radius: var(--radius-lg);
+}
+
+.skeleton-button {
+  display: inline-block;
+  height: 32px;
+  width: 80px;
+  border-radius: var(--radius-md);
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════
  *  REDUCED MOTION
  * ═══════════════════════════════════════════════════════════
  */
@@ -508,5 +1125,11 @@ select option {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /* 스켈레톤은 무애니메이션 상태에서도 시각 차이 유지 */
+  .skeleton {
+    animation: none !important;
+    background: var(--color-bg-elevated);
   }
 }

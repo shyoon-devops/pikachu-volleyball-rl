@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from backend.app.models.schemas import (
     WsReplayRequestPayload,
@@ -58,8 +57,20 @@ def test_parse_accepts_training_start_defaults():
     assert isinstance(result, ParsedMessage)
     assert result.type == "training:start"
     assert isinstance(result.payload, WsTrainingStartPayload)
-    assert result.payload.bot_level == 1  # default
+    # bot_level is optional so the FE can own the dial exclusively via
+    # set_level. ``None`` here tells the dispatcher to carry over the
+    # current status.bot_level instead of defaulting to 1.
+    assert result.payload.bot_level is None
     assert result.payload.total_timesteps == 1_000_000
+
+
+def test_parse_training_start_preserves_explicit_bot_level():
+    """Legacy callers passing bot_level must still round-trip unchanged."""
+    result = parse_ws_message(
+        {"type": "training:start", "payload": {"bot_level": 2}}
+    )
+    assert isinstance(result, ParsedMessage)
+    assert result.payload.bot_level == 2
 
 
 def test_parse_accepts_training_start_with_values():

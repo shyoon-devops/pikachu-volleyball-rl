@@ -59,6 +59,176 @@
   pointer-events: none;
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  득점 프리즈 프레임 — D15
+ * ═══════════════════════════════════════════════════════════
+ *  요청: 15점 득점 순간 잠시 멈춤 시 스코어보드 플래시/애니메이션.
+ *  스코어보드 자체는 PixiJS 캔버스 내부(number_0~9 스프라이트)에
+ *  그려지므로 CSS 로는 직접 편집 불가. 대신 dashboard-game-wrapper
+ *  전체 레이어에 다음 오버레이들을 제공:
+ *
+ *    (A) 짧은 화이트 플래시 (70ms) — 득점 순간 임팩트
+ *    (B) 득점 사이드별 색상 비네트 (P1=노랑/P2=파랑)
+ *    (C) 매치 포인트(15점) 시 전면 슬로우 페이드 + 링 팩 효과
+ *    (D) 캔버스 전체 shake — 강타 shake 와 구분되는 느릿한 진동
+ *
+ *  FE 통합 가이드:
+ *    - 득점 프레임에 .dashboard-game-wrapper 에 .dashboard-game-wrapper
+ *      --score-p1 (또는 --score-p2) 150ms 토글.
+ *    - 매치 포인트: .dashboard-game-wrapper--match-point 600ms 토글.
+ *    - DOM 오버레이: <div class="score-freeze-flash"></div> 스폰,
+ *      animationend 로 제거.
+ *
+ *  D12 와 공유 가능한 컴포넌트:
+ *    - .power-hit-shock 은 본 D15 의 플래시와 시각적으로 유사.
+ *      재사용 시 z-index 충돌 주의.
+ * ═══════════════════════════════════════════════════════════
+ */
+
+/* (A) 득점 순간 캔버스 래퍼 전면 플래시 */
+.score-freeze-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(255, 255, 255, 0.25) 30%,
+    rgba(255, 255, 255, 0) 70%
+  );
+  mix-blend-mode: screen;
+  animation: score-freeze-flash 180ms var(--ease-out) forwards;
+  z-index: 5;
+  border-radius: inherit;
+}
+
+@keyframes score-freeze-flash {
+  0%   { opacity: 0; }
+  18%  { opacity: 1; }
+  45%  { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+/* (B) 득점자 사이드별 비네트 — P1=피카추 노랑 / P2=전기 블루 */
+.dashboard-game-wrapper.dashboard-game-wrapper--score-p1::after,
+.dashboard-game-wrapper.dashboard-game-wrapper--score-p2::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 4;
+  animation: score-side-vignette 420ms var(--ease-out) forwards;
+}
+
+.dashboard-game-wrapper.dashboard-game-wrapper--score-p1::after {
+  background: radial-gradient(
+    ellipse at 20% 40%,
+    rgba(255, 215, 0, 0.35) 0%,
+    rgba(255, 215, 0, 0.15) 30%,
+    rgba(255, 215, 0, 0) 65%
+  );
+  box-shadow: inset 0 0 60px rgba(255, 215, 0, 0.25);
+}
+
+.dashboard-game-wrapper.dashboard-game-wrapper--score-p2::after {
+  background: radial-gradient(
+    ellipse at 80% 40%,
+    rgba(79, 195, 247, 0.35) 0%,
+    rgba(79, 195, 247, 0.15) 30%,
+    rgba(79, 195, 247, 0) 65%
+  );
+  box-shadow: inset 0 0 60px rgba(79, 195, 247, 0.25);
+}
+
+@keyframes score-side-vignette {
+  0%   { opacity: 0; }
+  25%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* (C) 매치 포인트(15점) 슬로우 페이드 — 전면 누적 플래시 */
+.dashboard-game-wrapper.dashboard-game-wrapper--match-point {
+  animation: match-point-slow-shake 600ms var(--ease-in-out);
+}
+
+.dashboard-game-wrapper.dashboard-game-wrapper--match-point::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 215, 0, 0.2) 0%,
+    rgba(255, 255, 255, 0.35) 50%,
+    rgba(79, 195, 247, 0.2) 100%
+  );
+  mix-blend-mode: screen;
+  animation: match-point-sweep 600ms var(--ease-out) forwards;
+  z-index: 5;
+}
+
+@keyframes match-point-sweep {
+  0%   { opacity: 0; transform: translateX(-100%); }
+  30%  { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(100%); }
+}
+
+@keyframes match-point-slow-shake {
+  0%, 100% { transform: translate(0, 0); }
+  20%      { transform: translate(-3px, 1px) scale(1.002); }
+  40%      { transform: translate(2px, -2px) scale(1.002); }
+  60%      { transform: translate(-2px, 2px) scale(1.001); }
+  80%      { transform: translate(1px, -1px); }
+}
+
+/* (D) 득점 순간 단일 팔스 링 — 캔버스 중심에서 팽창 */
+.score-freeze-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.6);
+  mix-blend-mode: screen;
+  animation: score-freeze-ring-expand 520ms var(--ease-out) forwards;
+  z-index: 5;
+}
+
+@keyframes score-freeze-ring-expand {
+  0%   {
+    width: 20px; height: 20px; opacity: 0;
+    border-width: 5px;
+  }
+  15%  {
+    opacity: 1;
+    border-width: 4px;
+  }
+  100% {
+    width: 400px; height: 400px; opacity: 0;
+    border-width: 1px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .score-freeze-flash,
+  .score-freeze-ring,
+  .dashboard-game-wrapper--score-p1::after,
+  .dashboard-game-wrapper--score-p2::after,
+  .dashboard-game-wrapper--match-point::before {
+    animation-duration: 120ms !important;
+  }
+  .dashboard-game-wrapper--match-point {
+    animation: none;
+  }
+}
+
 .dashboard-right {
   display: flex;
   flex-direction: column;
@@ -113,8 +283,155 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.recent-games-table tbody tr:hover {
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  봇 레벨 뱃지 (D14)
+ * ═══════════════════════════════════════════════════════════
+ *  현재 Dashboard.tsx 는 <td>L{g.botLevel}</td> 형태의 평문 출력.
+ *  난이도 그라데이션을 한눈에 보여주기 위해 Bot Level 열(2번째 td)에
+ *  자동으로 칩 스타일을 부여한다. 전체 행을 감싸지 않고 td 내부
+ *  텍스트가 마치 뱃지처럼 보이도록 display: inline-flex + padding.
+ *
+ *  L1-L5 의미별 색상은 CSS 만으로 텍스트 매칭이 불가하므로,
+ *  FE 가 향후 <td><span class="bot-level-badge bot-level-{N}">L{N}</span></td>
+ *  구조로 전환하면 .bot-level-{1..5} 유틸리티 클래스가 즉시 활성된다.
+ *  (TSX 수정 금지 범위라 현 단계는 '기본 칩 + 유틸리티 스펙' 납품.)
+ * ═══════════════════════════════════════════════════════════
+ */
+
+/* (A) 현재 평문 td 에 자동 칩 — 레벨 구분 없는 기본 스타일 */
+.recent-games-table tbody td:nth-child(2) {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-xs);
+  letter-spacing: 0.03em;
+  color: var(--color-text-primary);
+}
+
+.recent-games-table tbody td:nth-child(2)::first-letter {
+  /* "L" 글자만 muted 로 약간 줄여 숫자를 강조 */
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+}
+
+/* (B) FE 가 span 래핑 시 활성되는 유틸리티 — L1..L5 구분 */
+.bot-level-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  border: 1px solid transparent;
+  /* 변동 방지 — 표 안에서 자릿수 바뀌어도 정렬 유지 */
+  min-width: 32px;
+  justify-content: center;
+  /* 세로 정렬 — td padding 과 조화 */
+  vertical-align: middle;
+  transition: transform var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.bot-level-badge:hover {
+  transform: translateY(-1px);
+}
+
+/* 개별 레벨 — 난이도 그라데이션 (초록→빨강) */
+.bot-level-badge.bot-level-1 {
+  background: var(--color-level-1-dim);
+  color: var(--color-level-1);
+  border-color: rgba(74, 222, 128, 0.35);
+}
+.bot-level-badge.bot-level-1:hover {
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.3);
+}
+
+.bot-level-badge.bot-level-2 {
+  background: var(--color-level-2-dim);
+  color: var(--color-level-2);
+  border-color: rgba(163, 230, 53, 0.38);
+}
+.bot-level-badge.bot-level-2:hover {
+  box-shadow: 0 0 8px rgba(163, 230, 53, 0.3);
+}
+
+.bot-level-badge.bot-level-3 {
+  background: var(--color-level-3-dim);
+  color: var(--color-level-3);
+  border-color: rgba(251, 191, 36, 0.38);
+}
+.bot-level-badge.bot-level-3:hover {
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.3);
+}
+
+.bot-level-badge.bot-level-4 {
+  background: var(--color-level-4-dim);
+  color: var(--color-level-4);
+  border-color: rgba(251, 146, 60, 0.4);
+}
+.bot-level-badge.bot-level-4:hover {
+  box-shadow: 0 0 10px rgba(251, 146, 60, 0.35);
+}
+
+/* L5 만 살짝 스파이크 — 최고 난이도 강조 */
+.bot-level-badge.bot-level-5 {
+  background: var(--color-level-5-dim);
+  color: var(--color-level-5);
+  border-color: rgba(248, 113, 113, 0.45);
+  position: relative;
+}
+.bot-level-badge.bot-level-5:hover {
+  box-shadow: 0 0 12px rgba(248, 113, 113, 0.4);
+}
+
+/* L5 는 미세한 좌측 accent bar 로 "MAX" 느낌 */
+.bot-level-badge.bot-level-5::before {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--color-level-5);
+  box-shadow: 0 0 3px var(--color-level-5);
+}
+.bot-level-badge.bot-level-5 {
+  padding-left: 10px;
+}
+
+/*
+ * 행 호버 · 선택 상태.
+ *   - 첫 td 에 ::before 의사요소 없이 좌측 box-shadow inset 로 accent bar 생성.
+ *   - :focus-within 은 tab 이동 시에도 행 전체 하이라이트.
+ *   - [aria-selected="true"] / .selected 는 FE 가 선택 상태 도입 시 사용.
+ */
+.recent-games-table tbody tr {
+  transition: background var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.recent-games-table tbody tr:hover,
+.recent-games-table tbody tr:focus-within {
   background: var(--color-bg-hover);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.recent-games-table tbody tr[aria-selected="true"],
+.recent-games-table tbody tr.selected {
+  background: var(--color-accent-dim);
+  box-shadow: inset 3px 0 0 var(--color-accent),
+              0 0 0 1px var(--color-border-accent);
+}
+
+.recent-games-table tbody tr[aria-selected="true"]:hover,
+.recent-games-table tbody tr.selected:hover {
+  background: var(--color-accent-dim);
+  filter: brightness(1.05);
 }
 
 /* ── Responsive ────────────────────────────────────────── */

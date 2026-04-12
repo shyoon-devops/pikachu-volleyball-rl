@@ -9,7 +9,7 @@ function renderControls(overrides: {
   reconnectAttempt?: number
 } = {}) {
   const send = vi.fn()
-  const onStartWithParams = vi.fn()
+  const onStart = vi.fn()
 
   const status: TrainingStatus = {
     state: 'stopped',
@@ -24,11 +24,11 @@ function renderControls(overrides: {
       connectionState={overrides.connectionState ?? 'connected'}
       reconnectAttempt={overrides.reconnectAttempt}
       send={send}
-      onStartWithParams={onStartWithParams}
+      onStart={onStart}
     />,
   )
 
-  return { send, onStartWithParams }
+  return { send, onStart }
 }
 
 describe('TrainingControls', () => {
@@ -52,10 +52,66 @@ describe('TrainingControls', () => {
     expect(screen.getByText('Resume')).toBeInTheDocument()
   })
 
-  it('calls onStartWithParams when Start is clicked', () => {
-    const { onStartWithParams } = renderControls({ status: { state: 'stopped' } })
+  it('calls onStart when Start is clicked', () => {
+    const { onStart } = renderControls({ status: { state: 'stopped' } })
     fireEvent.click(screen.getByText('Start'))
-    expect(onStartWithParams).toHaveBeenCalledTimes(1)
+    expect(onStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders exactly one Start-training button per state (duplicate-CTA guard)', () => {
+    // Guards against the duplicate-Start-button regression. "Start" is
+    // the distinguishing label; Pause/Resume coexist with Stop as a
+    // secondary toggle and are NOT primary CTAs.
+    const states: Array<TrainingStatus['state']> = ['stopped', 'running', 'paused']
+    for (const state of states) {
+      const { unmount } = render(
+        <TrainingControls
+          status={{ state, currentStep: 0, currentEpisode: 0 }}
+          connectionState="connected"
+          send={vi.fn()}
+          onStart={vi.fn()}
+        />,
+      )
+      const startButtons = screen
+        .getAllByRole('button')
+        .filter(b => b.textContent?.trim() === 'Start')
+      expect(startButtons).toHaveLength(state === 'stopped' ? 1 : 0)
+      unmount()
+    }
+  })
+
+  it('shows Pause button when training is running', () => {
+    renderControls({ status: { state: 'running' } })
+    expect(screen.getByText('Pause')).toBeInTheDocument()
+  })
+
+  it('shows Resume (not Pause) when paused', () => {
+    renderControls({ status: { state: 'paused' } })
+    expect(screen.getByText('Resume')).toBeInTheDocument()
+    expect(screen.queryByText('Pause')).not.toBeInTheDocument()
+  })
+
+  it('does not show Pause or Resume when stopped', () => {
+    renderControls({ status: { state: 'stopped' } })
+    expect(screen.queryByText('Pause')).not.toBeInTheDocument()
+    expect(screen.queryByText('Resume')).not.toBeInTheDocument()
+  })
+
+  it('shows Stop alongside Pause/Resume while training is underway', () => {
+    renderControls({ status: { state: 'running' } })
+    expect(screen.getByText('Stop')).toBeInTheDocument()
+    expect(screen.getByText('Pause')).toBeInTheDocument()
+  })
+
+  it('calls send with training:pause when Pause is clicked', () => {
+    const { send } = renderControls({ status: { state: 'running' } })
+    fireEvent.click(screen.getByText('Pause'))
+    expect(send).toHaveBeenCalledWith('training:pause')
+  })
+
+  it('Pause button exposes accessible label', () => {
+    renderControls({ status: { state: 'running' } })
+    expect(screen.getByLabelText('Pause training')).toBeInTheDocument()
   })
 
   it('calls send with training:stop when Stop is clicked', () => {
@@ -81,6 +137,22 @@ describe('TrainingControls', () => {
     const { send } = renderControls({ status: { state: 'running' } })
     fireEvent.click(screen.getByText('L3'))
     expect(send).toHaveBeenCalledWith('training:set_level', { level: 3 })
+  })
+
+  it('bot level buttons fire training:set_level when state=stopped (Option A carry-over)', () => {
+    // Option A depends on this path: before Start, the user picks a
+    // level here; BE accepts training:set_level regardless of state
+    // (backend/rl/trainer.py:223 — no state guard), updates
+    // status.botLevel, and the next training:start (which omits
+    // bot_level) picks it up via schemas.py:92.
+    //
+    // A regression that disabled these buttons while stopped would
+    // silently trap Option A — the user could "pick" L5 but ship L1.
+    const { send } = renderControls({ status: { state: 'stopped' } })
+    const lvl5 = screen.getByLabelText('Set bot level to 5')
+    expect(lvl5).not.toBeDisabled()
+    fireEvent.click(lvl5)
+    expect(send).toHaveBeenCalledWith('training:set_level', { level: 5 })
   })
 
   it('displays step and episode counters', () => {
@@ -148,6 +220,32 @@ describe('TrainingControls', () => {
     renderControls()
     for (let i = 1; i <= 5; i++) {
       expect(screen.getByLabelText(`Set bot level to ${i}`)).toBeInTheDocument()
+    }
+  })
+
+  // ── Bot level active-state indicator (CRITICAL: "현재 선택 표시") ──
+  it('marks the active bot level via data-active + .active class', () => {
+    renderControls({ status: { botLevel: 3 } })
+
+    const active = screen.getByLabelText('Set bot level to 3')
+    expect(active).toHaveAttribute('data-active', 'true')
+    expect(active).toHaveAttribute('aria-pressed', 'true')
+    expect(active.className).toContain('active')
+
+    // Siblings should be inactive.
+    for (const level of [1, 2, 4, 5]) {
+      const btn = screen.getByLabelText(`Set bot level to ${level}`)
+      expect(btn).toHaveAttribute('data-active', 'false')
+      expect(btn).toHaveAttribute('aria-pressed', 'false')
+    }
+  })
+
+  it('shows no active bot level when status.botLevel is undefined', () => {
+    renderControls()
+    for (let i = 1; i <= 5; i++) {
+      const btn = screen.getByLabelText(`Set bot level to ${i}`)
+      expect(btn).toHaveAttribute('data-active', 'false')
+      expect(btn).toHaveAttribute('aria-pressed', 'false')
     }
   })
 })

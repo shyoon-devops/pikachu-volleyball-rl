@@ -59,7 +59,13 @@ class PikachuVolleyballEnv(gymnasium.Env):
         )
         self.action_space = spaces.Discrete(12)
 
-        self._game = PikachuVolleyball()
+        # RL training disables the post-score freeze: the agent would
+        # otherwise be forced to emit ~20 no-op actions after every scoring
+        # event, wasting steps and feeding stale (grounded-ball) transitions
+        # into the replay buffer. The freeze is purely a display-layer
+        # concern — the render/replay pipeline (callbacks._on_step) uses a
+        # separate PikachuVolleyball() instance that keeps freeze on.
+        self._game = PikachuVolleyball(post_score_freeze=False)
         self._bot = RuleBasedBot(level=bot_level)
         self._steps = 0
         self._prev_score1 = 0
@@ -88,10 +94,7 @@ class PikachuVolleyballEnv(gymnasium.Env):
         options: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         super().reset(seed=seed, options=options)
-        if self._pending_bot_level is not None:
-            self.bot_level = self._pending_bot_level
-            self._pending_bot_level = None
-        self._game = PikachuVolleyball()
+        self._game = PikachuVolleyball(post_score_freeze=False)
         self._bot = RuleBasedBot(level=self.bot_level)
         state = self._game.reset()
         self._steps = 0
@@ -135,8 +138,20 @@ class PikachuVolleyballEnv(gymnasium.Env):
         truncated = self._steps >= self.max_steps
 
         # Force-truncate with large penalty if rally stalls too long
-        # (agent looping self-tosses without sending ball over net)
-        stalled_out = self._frames_since_crossing >= self._RALLY_MAX_FRAMES
+        # (agent looping self-tosses without sending ball over net).
+        # Two signals converge here:
+        #   1. env-local `_frames_since_crossing` — counts shaping frames
+        #      for the reward signal; truncates the episode early to avoid
+        #      reward-farming inside stalled rallies.
+        #   2. engine-level `round_ended_by_timeout` — the game engine
+        #      force-ended the round itself via its RALLY_MAX_FRAMES safety
+        #      valve (added in this hotfix). Guarantees no infinite rally
+        #      can wedge the match, even outside RL.
+        engine_timeout = getattr(new_state, "round_ended_by_timeout", False)
+        stalled_out = (
+            self._frames_since_crossing >= self._RALLY_MAX_FRAMES
+            or engine_timeout
+        )
         if stalled_out and not terminated:
             reward += self._RALLY_TIMEOUT_PENALTY
             truncated = True
@@ -153,6 +168,7 @@ class PikachuVolleyballEnv(gymnasium.Env):
             "score2": new_state.score2,
             "frame": new_state.frame,
             "stalled_out": stalled_out,
+            "engine_rally_timeout": engine_timeout,
             "consecutive_touches": self._consecutive_touches,
         }
 

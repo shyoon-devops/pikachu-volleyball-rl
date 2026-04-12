@@ -84,7 +84,12 @@ class PaginatedResponse(BaseModel):
 
 class WsTrainingStartPayload(BaseModel):
     hyperparams: dict | None = None
-    bot_level: int = Field(default=1, ge=1, le=5)
+    # Bot level is optional so the frontend can own the difficulty dial
+    # exclusively via training:set_level / PATCH /api/training/level. When
+    # the FE drops bot_level from the start form (Option A), the dispatcher
+    # falls back to the current ``status.bot_level`` — no implicit reset
+    # to L1. Range check still applies when the field is supplied.
+    bot_level: int | None = Field(default=None, ge=1, le=5)
     total_timesteps: int = Field(default=1_000_000, ge=1000)
 
 
@@ -110,6 +115,7 @@ WS_MESSAGE_SCHEMAS: dict[str, type[BaseModel] | None] = {
     "pong": WsEmptyPayload,
     "training:start": WsTrainingStartPayload,
     "training:stop": WsEmptyPayload,
+    "training:pause": WsEmptyPayload,
     "training:resume": WsEmptyPayload,
     "training:set_level": WsSetLevelPayload,
     "replay:request": WsReplayRequestPayload,

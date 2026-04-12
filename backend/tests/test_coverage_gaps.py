@@ -163,7 +163,19 @@ class TestSerializeState:
             ball=BallState(x=0, y=0),
         )
         result = _serialize_state(state)
-        assert set(result.keys()) == {"player1", "player2", "ball", "score1", "score2", "frame"}
+        # `is_round_over` + `post_score_freeze_frames` were added so the FE
+        # replay viewer can render a scoring freeze overlay on the grounded
+        # frames emitted by the new post-score hold.
+        assert set(result.keys()) == {
+            "player1",
+            "player2",
+            "ball",
+            "score1",
+            "score2",
+            "frame",
+            "is_round_over",
+            "post_score_freeze_frames",
+        }
 
 
 class TestCheckpointCallback:
@@ -262,7 +274,9 @@ class TestStopEventCallback:
         from backend.rl.trainer import _StopEventCallback
 
         event = threading.Event()
-        cb = _StopEventCallback(event)
+        pause_event = threading.Event()
+        manager = TrainingManager()
+        cb = _StopEventCallback(event, pause_event, manager)
         assert cb._on_step() is True
 
     def test_stop_event_stops_when_set(self) -> None:
@@ -270,7 +284,9 @@ class TestStopEventCallback:
 
         event = threading.Event()
         event.set()
-        cb = _StopEventCallback(event)
+        pause_event = threading.Event()
+        manager = TrainingManager()
+        cb = _StopEventCallback(event, pause_event, manager)
         assert cb._on_step() is False
 
 
