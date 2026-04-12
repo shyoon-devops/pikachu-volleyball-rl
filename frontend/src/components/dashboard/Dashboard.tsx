@@ -82,10 +82,10 @@ export function Dashboard() {
 
       <section className="dashboard-right" aria-labelledby="dashboard-metrics-heading">
         <h2 id="dashboard-metrics-heading" className="sr-only">Training Metrics</h2>
-        <MetricsChart data={metrics} dataKey="meanReward" color="#22c55e" label="Reward" />
-        <MetricsChart data={metrics} dataKey="winRate" color="#3b82f6" label="Win Rate" />
-        <MetricsChart data={metrics} dataKey="policyLoss" color="#ef4444" label="Policy Loss" />
-        <MetricsChart data={metrics} dataKey="valueLoss" color="#f97316" label="Value Loss" />
+        <MetricsChart data={metrics} dataKey="meanReward" color="#22c55e" label="Reward" currentStep={status.currentStep} />
+        <MetricsChart data={metrics} dataKey="winRate" color="#3b82f6" label="Win Rate" currentStep={status.currentStep} />
+        <MetricsChart data={metrics} dataKey="policyLoss" color="#ef4444" label="Policy Loss" currentStep={status.currentStep} />
+        <MetricsChart data={metrics} dataKey="valueLoss" color="#f97316" label="Value Loss" currentStep={status.currentStep} />
       </section>
 
       <section className="dashboard-bottom" aria-labelledby="recent-games-heading">
