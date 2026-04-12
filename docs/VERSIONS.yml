@@ -14,8 +14,37 @@
 #   last_verified_at   : when this YAML entry was last confirmed via curl + docker inspect
 
 schema_version: 1
-last_file_update: 2026-04-12T16:05:00+09:00   # v0.2.2 tag cut — dev branch updated
+last_file_update: 2026-04-12T16:40:00+09:00   # v0.2.3 tag cut — supersedes v0.2.2 (never deployed)
 authoritative_source: docs/VERSIONS.yml       # this file supersedes README + DEPLOYMENT-STATUS on port/version conflicts
+
+release_history:
+  - version: v0.2.3
+    tag_target: 77b871dd
+    cut_at: 2026-04-12T16:40:00+09:00
+    deployed_envs: []                         # pending DevOps
+    supersedes: v0.2.2                        # v0.2.2 tagged but never deployed
+    scope: "v0.2.2 QA blocker hotfix bundle (BE-6 WS broadcast + net-collision + bot variance)"
+  - version: v0.2.2
+    tag_target: 2582886b
+    cut_at: 2026-04-12T16:03:00+09:00
+    deployed_envs: []                         # superseded by v0.2.3 before any deploy
+    superseded_by: v0.2.3
+    scope: "Sprint 2 complete (BE-5/6/7, FE-6/7/8/9, faithful physics port, Designer D6-D10)"
+  - version: v0.2.1
+    tag_target: 482df2d1
+    cut_at: 2026-04-12T00:00:00+09:00
+    deployed_envs: [dev, qa]
+    scope: "Sprint 1 (16 bugs + BE-1/BE-2/BE-3 + BUG-1..7)"
+  - version: v0.2.0
+    tag_target: d8fc62e
+    cut_at: 2026-04-11T00:00:00+09:00
+    deployed_envs: []
+    scope: "Security baseline (SEC-1/SEC-2/SEC-3)"
+  - version: v0.1.0
+    tag_target: 41f4fdb1
+    cut_at: 2026-04-11T00:00:00+09:00
+    deployed_envs: [prod]
+    scope: "Initial release"
 
 environments:
   dev:
@@ -44,14 +73,16 @@ environments:
       port: UNKNOWN            # documented :27018 — unverified
       status: UNKNOWN
     git_branch: dev
-    git_branch_head: 2582886b  # v0.2.2 tag target — product-manager merge w/ VERSION+CHANGELOG+release note
-    tag_at_head: v0.2.2        # tag points here (annotated)
-    deploy_pending: true       # runtime still v0.2.1 until DevOps executes deploy-{backend,frontend}.sh dev
+    git_branch_head: 77b871dd  # v0.2.3 tag target — 3 hotfixes on top of 2582886b (v0.2.2)
+    tag_at_head: v0.2.3        # tag points here (annotated). v0.2.2 tag at 2582886b retained but superseded.
+    deploy_pending: true       # runtime still v0.2.1 until DevOps executes v0.2.3 deploy-{backend,frontend}.sh dev
     notes: >
-      v0.2.2 tag cut at 2582886b on 2026-04-12. Git branch includes Sprint 2 scope
-      (BE-5/6/7, FE-6/7/8/9, AI Engineer faithful physics port, Designer D6-D10,
-      QA reverify, DevOps monitoring). Runtime still on v0.2.1 — waiting on
-      DevOps to deploy-dev.sh + deploy-frontend.sh dev. Trainer PR #42 deferred to v0.2.3.
+      v0.2.3 tag cut at 77b871dd on 2026-04-12 16:40 +09:00. Supersedes v0.2.2
+      (tagged at 2582886b but never deployed). Includes Sprint 2 scope + 3 QA
+      blocker hotfixes (BE-6 WS broadcast 91c7233d, net-collision vx bf6397cc,
+      bot variance knobs 6af36c0c). Runtime still on v0.2.1 — waiting on
+      DevOps to execute v0.2.3 full-stack deploy (dev→qa→prod). Trainer PR #42
+      + Evaluator PR #44 deferred to post-v0.2.3.
 
   qa:
     host_backend: 192.168.0.250
