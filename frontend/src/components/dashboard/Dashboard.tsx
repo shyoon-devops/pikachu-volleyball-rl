@@ -31,6 +31,11 @@ export function Dashboard() {
         <div className="dashboard-game-wrapper">
           <GameCanvas gameState={latestFrame} width={648} height={456} />
           <GameOverlay score1={score1} score2={score2} width={648} />
+          {!latestFrame && status.state === 'running' && (
+            <div className="dashboard-game-waiting">
+              Waiting for game frames...
+            </div>
+          )}
         </div>
 
         {isStopped && (
@@ -39,18 +44,19 @@ export function Dashboard() {
       </div>
 
       <div className="dashboard-right">
-        <MetricsChart data={metrics} dataKey="reward" color="#22c55e" label="Reward" />
+        <MetricsChart data={metrics} dataKey="meanReward" color="#22c55e" label="Reward" />
         <MetricsChart data={metrics} dataKey="winRate" color="#3b82f6" label="Win Rate" />
-        <MetricsChart data={metrics} dataKey="loss" color="#ef4444" label="Loss" />
+        <MetricsChart data={metrics} dataKey="policyLoss" color="#ef4444" label="Policy Loss" />
+        <MetricsChart data={metrics} dataKey="valueLoss" color="#f97316" label="Value Loss" />
       </div>
 
       <div className="dashboard-bottom">
         <div className="card">
           <h3 className="card-title">Recent Games</h3>
           {recentGames.length === 0 ? (
-            <p className="recent-games-empty">No games yet.</p>
+            <p className="recent-games-empty empty-state">No games yet.</p>
           ) : (
-            <div className="recent-games">
+            <div className="recent-games table-scroll">
               <table className="recent-games-table">
                 <thead>
                   <tr>

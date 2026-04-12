@@ -36,3 +36,11 @@ class GameService:
             return None
         doc["_id"] = str(doc["_id"])
         return doc
+
+    async def get_game_by_game_id(self, game_id: str) -> dict | None:
+        """Look up a game by its uuid4 game_id field."""
+        doc = await self._col.find_one({"game_id": game_id})
+        if doc is None:
+            return None
+        doc["_id"] = str(doc["_id"])
+        return doc

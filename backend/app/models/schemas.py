@@ -1,5 +1,6 @@
 """MongoDB document schemas (Pydantic v2)."""
 
+import uuid
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -9,6 +10,7 @@ class GameRecord(BaseModel):
     """Single game result document."""
 
     id: str | None = Field(None, alias="_id")
+    game_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     experiment_id: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     bot_level: int = Field(ge=1, le=5)
@@ -58,3 +60,20 @@ class PaginatedResponse(BaseModel):
     total: int
     page: int
     limit: int
+
+
+# --- WebSocket message schemas ---
+
+
+class WsTrainingStartPayload(BaseModel):
+    hyperparams: dict | None = None
+    bot_level: int = Field(default=1, ge=1, le=5)
+    total_timesteps: int = Field(default=1_000_000, ge=1000)
+
+
+class WsSetLevelPayload(BaseModel):
+    level: int = Field(ge=1, le=5)
+
+
+class WsReplayRequestPayload(BaseModel):
+    game_id: str = Field(min_length=1)

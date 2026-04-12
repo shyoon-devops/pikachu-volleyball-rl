@@ -25,7 +25,7 @@ export function TrainingControls({ status, connectionState, send, onStartWithPar
     <div className="training-controls card">
       <div className="training-controls-header">
         <h3 className="training-controls-title">Training Controls</h3>
-        <span className="training-controls-status" data-state={statusState}>
+        <span className={`training-controls-status badge badge-${statusState === 'running' ? 'success' : statusState === 'stopped' ? 'danger' : 'warning'}`} data-state={statusState}>
           {isConnected ? status.state : connectionState}
         </span>
       </div>
@@ -33,7 +33,7 @@ export function TrainingControls({ status, connectionState, send, onStartWithPar
       <div className="training-controls-actions">
         {isStopped && (
           <button
-            className="training-controls-btn training-controls-btn--start"
+            className="training-controls-btn training-controls-btn--start btn btn-success"
             onClick={() => onStartWithParams({
               learning_rate: 3e-4,
               n_steps: 2048,
@@ -48,7 +48,7 @@ export function TrainingControls({ status, connectionState, send, onStartWithPar
         )}
         {isRunning && (
           <button
-            className="training-controls-btn training-controls-btn--stop"
+            className="training-controls-btn training-controls-btn--stop btn btn-danger"
             onClick={handleStop}
             disabled={!isConnected}
           >
@@ -57,7 +57,7 @@ export function TrainingControls({ status, connectionState, send, onStartWithPar
         )}
         {status.state === 'paused' && (
           <button
-            className="training-controls-btn training-controls-btn--resume"
+            className="training-controls-btn training-controls-btn--resume btn btn-primary"
             onClick={handleResume}
             disabled={!isConnected}
           >
@@ -72,7 +72,7 @@ export function TrainingControls({ status, connectionState, send, onStartWithPar
           {BOT_LEVELS.map(level => (
             <button
               key={level}
-              className="training-controls-level-btn"
+              className="training-controls-level-btn btn btn-ghost"
               onClick={() => handleSetLevel(level)}
               disabled={!isConnected}
             >

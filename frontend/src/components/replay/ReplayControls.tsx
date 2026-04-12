@@ -26,7 +26,7 @@ export function ReplayControls({
       <div className="replay-controls-bar">
         <button
           onClick={onTogglePlay}
-          className="replay-controls-play-btn"
+          className="replay-controls-play-btn btn btn-primary"
           data-playing={isPlaying}
         >
           {isPlaying ? 'Pause' : 'Play'}
@@ -37,7 +37,7 @@ export function ReplayControls({
             <button
               key={s}
               onClick={() => onSpeedChange(s)}
-              className="replay-controls-speed-btn"
+              className="replay-controls-speed-btn btn btn-ghost"
               data-active={speed === s}
             >
               {s}x
@@ -57,7 +57,18 @@ export function ReplayControls({
         value={currentFrame}
         onChange={e => onSeek(Number(e.target.value))}
         className="replay-controls-seek"
+        aria-label="Seek replay frame"
+        aria-valuemin={0}
+        aria-valuemax={Math.max(0, totalFrames - 1)}
+        aria-valuenow={currentFrame}
       />
+
+      <div className="replay-controls-shortcuts">
+        <kbd>Space</kbd> Play/Pause
+        <kbd>&larr;</kbd><kbd>&rarr;</kbd> Step
+        <kbd>Shift</kbd>+Arrow &plusmn;10
+        <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Speed
+      </div>
     </div>
   )
 }

@@ -64,7 +64,7 @@ export function HyperparamForm({ onSubmit, disabled }: HyperparamFormProps) {
         </div>
       </div>
 
-      <button type="submit" disabled={disabled} className="hyperparam-form-submit">
+      <button type="submit" disabled={disabled} className="hyperparam-form-submit btn btn-success">
         Start Training
       </button>
     </form>

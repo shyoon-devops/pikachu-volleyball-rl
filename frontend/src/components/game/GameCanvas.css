@@ -3,28 +3,27 @@
  *  GameCanvas.css — 게임 캔버스 컨테이너 스타일
  * ═══════════════════════════════════════════════════════════
  *
- *  Designer: FE에게 GameCanvas.tsx에 아래 변경 요청:
+ *  ── PixiJS 스프라이트 전환 요청 (FE 작업) ──
  *
- *  1. import './GameCanvas.css' 추가
- *  2. 컨테이너 <div ref={containerRef}>에 className="game-canvas" 추가
- *  3. inline style={{ width, height, position: 'relative' }} 제거
- *     (width/height는 style prop으로 유지해도 됨)
+ *  원본 스프라이트 시트가 frontend/public/assets/에 추가됨:
+ *    - sprite_sheet.png + sprite_sheet.json (TexturePacker/PixiJS 호환)
+ *    - SPRITE_GUIDE.md에 프레임별 상세 문서 포함
  *
- *  ── PixiJS 비주얼 개선 요청 (CSS로 불가, .tsx 변경 필요) ──
+ *  현재: Graphics API로 단색 도형 (원, 사각형)
+ *  목표: 원본 피카츄 배구 스프라이트 기반 렌더링
  *
- *  현재 GameCanvas의 drawFrame() 함수 내 PixiJS Graphics 코드를
- *  아래와 같이 개선 요청. CSS로는 canvas 내부 렌더링을 제어할 수 없음.
+ *  FE에게 요청:
+ *    1. Assets.load('/assets/sprite_sheet.json')으로 스프라이트 시트 로드
+ *    2. drawFrame() → Sprite/AnimatedSprite 기반 렌더링 전환
+ *    3. 배경: sky_blue 타일 + mountain + ground 3단 + net_pillar
+ *    4. 피카츄: state별 28프레임 AnimatedSprite
+ *    5. 공: 포케볼 5프레임 회전 + 파워히트 이펙트
+ *    6. 구름 10개 + 파도 애니메이션
+ *    7. 그림자 (shadow 스프라이트)
+ *    8. 점수: number_0~9 스프라이트 (CSS 오버레이 대체)
+ *    9. 사운드: /assets/sounds/ 효과음 연동
  *
- *  - 배경: 0x1a1a2e → 0x0a1628 (dark navy), sky 0x87ceeb → 0x0f2847
- *  - 코트 바닥: 잔디 스트라이프 패턴 (교대 녹색 밴드)
- *  - 네트: 단색 사각형 → 그리드 메시 패턴 (수평+수직 라인)
- *  - Player 1: 원형 → 둥근 사각형 + 귀 + 눈(동공+빛) + 볼 터치
- *  - Player 2: 빨간색 → 일렉트릭 블루 (0x4fc3f7)
- *  - 공: 외부 글로우 + 하이라이트 + 배구 심 라인
- *  - 그림자: 플레이어/공 아래 바닥 그림자 추가
- *  - 파워히트 시 글로우 이펙트
- *
- *  참고: 이전 커밋 0f824d5의 GameCanvas.tsx에 전체 구현 있음
+ *  자세한 프레임 매핑은 SPRITE_GUIDE.md 참고
  *
  * ═══════════════════════════════════════════════════════════
  */
@@ -36,14 +35,18 @@
   border: 2px solid var(--color-border-strong);
   box-shadow: 0 0 30px rgba(0, 0, 0, 0.5),
               inset 0 0 60px rgba(0, 0, 0, 0.2);
+  aspect-ratio: 432 / 304;
+  background: var(--color-canvas-bg);
 }
 
 /* canvas 요소 자체에 적용 (PixiJS가 생성하는 canvas) */
 .game-canvas canvas {
   display: block;
   border-radius: var(--radius-lg);
-  max-width: 100%;
-  height: auto;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 /* ── Responsive ────────────────────────────────────────── */
