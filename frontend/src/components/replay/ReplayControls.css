@@ -43,13 +43,16 @@
 }
 
 .replay-controls-speed-btn {
+  position: relative;
   padding: var(--space-1) var(--space-2);
+  min-width: 38px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-elevated);
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out);
 }
@@ -57,13 +60,34 @@
 .replay-controls-speed-btn:hover {
   background: var(--color-bg-hover);
   border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
 }
 
+.replay-controls-speed-btn:focus-visible {
+  outline: 2px solid var(--color-accent, var(--color-blue));
+  outline-offset: 2px;
+}
+
+.replay-controls-speed-btn[aria-pressed="true"],
 .replay-controls-speed-btn[data-active="true"],
 .replay-controls-speed-btn.active {
   background: var(--color-blue);
   color: var(--color-text-inverse);
   border-color: transparent;
+  box-shadow: 0 0 12px var(--color-blue-dim);
+}
+
+.replay-controls-speed-btn[aria-pressed="true"]::after,
+.replay-controls-speed-btn[data-active="true"]::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-blue);
 }
 
 .replay-controls-frame-info {

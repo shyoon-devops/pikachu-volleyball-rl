@@ -1,0 +1,55 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  DashboardSkeleton.css — loading state layout
+ * ═══════════════════════════════════════════════════════════
+ *  Mirrors the real Dashboard grid so live data slots in with
+ *  no layout shift. Designer: tune spacing + shimmer accents.
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.dashboard-skeleton .card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.dashboard-skeleton-controls {
+  min-height: 88px;
+}
+
+.dashboard-skeleton-button-row {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.dashboard-skeleton-canvas {
+  aspect-ratio: 432 / 304;
+  width: 100%;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 12px);
+  overflow: hidden;
+}
+
+.dashboard-skeleton-canvas .skeleton {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+
+.dashboard-skeleton-form {
+  min-height: 160px;
+}
+
+.dashboard-skeleton-chart {
+  min-height: 160px;
+}
+
+.dashboard-skeleton-chart .skeleton--rect {
+  border-radius: var(--radius-md, 8px);
+}
+
+.dashboard-skeleton-table {
+  min-height: 200px;
+}
