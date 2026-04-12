@@ -2,11 +2,15 @@
 
 ## Environments
 
-| Environment | Backend | Frontend | MongoDB | Purpose |
-|-------------|---------|----------|---------|---------|
-| **dev** | :8001 | :3000 | :27018 | 개발 & 로컬 테스트 |
-| **qa** | :8002 | :3001 | :27019 | QA 테스트 & 검증 |
-| **prod** | :8000 | :5173 | :27017 | 프로덕션 (훈련 & 평가) |
+> **Authoritative source for ports & deployed versions:** [`docs/VERSIONS.yml`](VERSIONS.yml). The table below is a quick reference; on conflict VERSIONS.yml wins. See [§ Port Change Policy](#port-change-policy) and [§ Post-Deploy Doc Update](#post-deploy-doc-update) below.
+
+| Environment | Backend host | Backend port | Frontend host | Frontend port | MongoDB | Purpose |
+|-------------|--------------|--------------|---------------|---------------|---------|---------|
+| **dev** | GPU (192.168.0.250) | `:8001` | yoonbian-2 (192.168.0.248) | `:3000` | `:27018` | 개발 & 로컬 테스트 |
+| **qa** | GPU (192.168.0.250) | `:8002` | yoonbian-2 (192.168.0.248) | `:3001` | `:27019` | QA 테스트 & 검증 |
+| **prod** | GPU (192.168.0.250) | `:8003` | yoonbian-2 (192.168.0.248) | `:3002` | `:27020` | 프로덕션 (훈련 & 평가) |
+
+포트/아키텍처는 2026-04-12 에 two-server 구조 + 새 포트로 이행했습니다. 이전 문서의 `:8000 / :5173 / :27017` 기재는 더 이상 유효하지 않습니다.
 
 ## Team → Environment Mapping
 
@@ -137,5 +141,68 @@ main (prod)
 모든 변경사항은 다음 문서에 반영:
 - **CHANGELOG.md**: 버전별 변경 이력
 - **VERSION**: 현재 버전
+- **docs/VERSIONS.yml**: **각 환경 실제 배포 상태** (SoT — 아래 § Post-Deploy Doc Update 규칙 적용)
+- **docs/DEPLOYMENT-STATUS.md**: 환경별 현재 상태 + 대기 액션
 - **docs/PLAN.md**: 기능 명세
 - **CLAUDE.md**: 개발 가이드
+
+---
+
+## Post-Deploy Doc Update
+
+**(강제 규칙 — 2026-04-12 제정, 문서 drift 재발 방지)**
+
+배포를 수행한 엔지니어는 **배포 완료 후 30분 이내**에 다음 파일을 실제 배포 값으로 업데이트하고 커밋/푸시해야 합니다.
+
+### 필수 업데이트 대상
+1. **`docs/VERSIONS.yml`** — 해당 env 의 `commit`, `image`, `built_at`, `deployed_at`, `status`, (프런트 배포 포함 시) `bundle` 전부 실제 값으로. `last_file_update` 갱신.
+2. **`docs/DEPLOYMENT-STATUS.md`** — "Verified Runtime State" 표와 Release History 갱신.
+3. **`CHANGELOG.md`** — prod 배포인 경우 해당 버전 섹션 헤더를 `(prod 배포 완료, YYYY-MM-DD)` 로 변경.
+4. prod 배포인 경우 `docs/releases/v{version}-prod.md` 작성.
+
+### 30분 초과 시 제재
+- **다음 배포 승인 자동 취소.** PM 은 VERSIONS.yml 의 `last_file_update` 와 실제 docker 배포 시각을 대조해 위반 여부를 판단합니다.
+- 위반 기록은 `docs/DEPLOYMENT-STATUS.md § What PM got wrong` 섹션에 동등한 DevOps 측 항목으로 기재됩니다.
+- 반복 위반(연속 2회) 시 해당 엔지니어의 단독 배포 권한 정지, PM 직접 승인 요청 후 공동 실행으로 전환.
+
+### 검증
+- PM 은 배포 보고를 받는 즉시 다음 curl 3종을 실행해 VERSIONS.yml 과 대조합니다.
+  - `curl -s http://<backend>/api/health`
+  - `curl -s http://<backend>/api/health/live` (BE-3 이후)
+  - `curl -s http://<frontend>/ | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js'`
+- 불일치 발견 시 배포는 실패 처리, 즉시 롤백 요청.
+
+---
+
+## Port Change Policy
+
+**(강제 규칙 — 2026-04-12 제정)**
+
+다음 중 하나라도 변경되는 배포는 **PM 사전 승인 없이 금지**합니다.
+- 백엔드 listen port
+- 프런트엔드 서빙 port
+- MongoDB port
+- 호스트 (GPU 서버 ↔ yoonbian-2 등)
+
+### 절차
+1. **배포 전 PR**: DevOps 는 다음 파일을 **동일 PR** 에서 새 포트로 갱신합니다.
+   - `docs/VERSIONS.yml`
+   - `docs/DEPLOYMENT-STATUS.md`
+   - `README.md`
+   - `docs/WORKFLOW.md` (본 파일의 Environments 표)
+   - 관련 `scripts/deploy-*.sh`, nginx config, docker-compose
+2. **PM 승인**: PM 이 PR 승인 + GitHub 배포 이슈에 `port-change-approved` 라벨 부착.
+3. **배포 실행**: 승인 후에만 deploy 스크립트 실행.
+4. **위반 시**: 즉시 롤백 지시 + 해당 배포의 모든 artifact (이미지, 태그) 삭제/재생성.
+
+### 예외 없음
+긴급 hotfix 라도 포트 변경은 본 절차를 거쳐야 합니다. 긴급하면 PM 채널로 즉시 호출해 최소 5분 내 승인 가능. 단독 변경은 불허.
+
+### 현재 상태 기록 (2026-04-12)
+다음 포트 변경이 사전 문서 업데이트 없이 실행되었습니다 — 재발 방지를 위해 기록.
+- prod backend: `:8000` → `:8003`
+- prod frontend: `:5173` → `:3002`
+- prod mongodb: `:27017` → `:27020`
+- qa backend: 현재 DOWN (이유 미보고 — #38)
+
+본 규칙은 이 사건의 후속 조치로 제정되었습니다.

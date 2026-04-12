@@ -102,11 +102,15 @@ Frontend 배포: `scripts/deploy-frontend.sh` — 로컬 빌드 후 yoonbian-2 r
 
 **Multi-Environment** — dev/qa/prod split across two hosts. Backend + MongoDB on GPU server via Docker Compose, frontend served via nginx on yoonbian-2.
 
-| Environment | Backend (GPU, 192.168.0.250) | Frontend (yoonbian-2, 192.168.0.248) | MongoDB |
-|-------------|------------------------------|---------------------------------------|---------|
-| dev | :8001 | http://192.168.0.248:3000 | :27018 |
-| qa | :8002 | http://192.168.0.248:3001 | :27019 |
-| prod | :8000 | http://192.168.0.248:5173 | :27017 |
+> **Authoritative port source:** [`docs/VERSIONS.yml`](docs/VERSIONS.yml). The table below reflects curl-verified state as of 2026-04-12. If it drifts from VERSIONS.yml, VERSIONS.yml wins. Any port change requires a PR updating VERSIONS.yml, this README, and `docs/DEPLOYMENT-STATUS.md` **before** the deploy — see [WORKFLOW.md § Port Change Policy](docs/WORKFLOW.md#port-change-policy).
+
+| Environment | Backend (GPU, 192.168.0.250) | Frontend (yoonbian-2, 192.168.0.248) | MongoDB | Status (2026-04-12 curl) |
+|-------------|------------------------------|---------------------------------------|---------|--------------------------|
+| dev | `:8001` | http://192.168.0.248:3000 | `:27018` (docs, unverified) | backend up, /health/live+ready ok |
+| qa | `:8002` | http://192.168.0.248:3001 | `:27019` (docs, unverified) | **backend DOWN** — #38 |
+| prod | `:8003` | http://192.168.0.248:3002 | `:27020` (per ops, unverified) | backend up but **pre-BE-3 code** — #37/#38 |
+
+Frontend ports `:3000/:3001/:3002` currently serve a byte-identical bundle (`index-CAYlGd5L.js`). DevOps is confirming whether this is intended single-dist-multi-port or accidental overwrite (#38).
 
 ## Local Development
 
