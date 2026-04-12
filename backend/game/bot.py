@@ -32,31 +32,35 @@ class BotParams:
     trajectory_noise_scale: float  # extra noise scaled by frames-to-intercept
 
 
-# Tuned so L5 retains a distinct skill edge but is no longer perfectly
-# deterministic: every level now has non-zero variance on every knob, so
-# no two games play out frame-identically even with the same RNG seed if
-# external entropy (e.g., env.reset) varies.
+# Difficulty upgrade (PM 2026-04-12): games were ending too quickly because
+# mid/high-level bots still reacted too slowly and under-predicted intercepts.
+# L3-L5 reaction_delay/prediction_error/jump_timing_error are all tightened;
+# move_range widened so higher levels can actually cover their own court.
+# L1 miss_probability also trimmed (0.15→0.10) — was close to a random walk
+# against the RL agent. Monotonicity on every noise knob is preserved so
+# test_prediction_error_non_increasing / test_hesitation_rate_non_increasing
+# keep holding.
 BOT_PARAMS: dict[int, BotParams] = {
-    1: BotParams(reaction_delay=8, prediction_error=0.4,  miss_probability=0.15,
-                 move_range=0.6,  jump_timing_error=4,
+    1: BotParams(reaction_delay=6, prediction_error=0.4,  miss_probability=0.10,
+                 move_range=0.65, jump_timing_error=4,
                  jump_jitter=3, angle_variance=0.4, hesitation_rate=0.12,
                  trajectory_noise_scale=0.25),
-    2: BotParams(reaction_delay=5, prediction_error=0.25, miss_probability=0.08,
-                 move_range=0.75, jump_timing_error=3,
+    2: BotParams(reaction_delay=4, prediction_error=0.25, miss_probability=0.06,
+                 move_range=0.80, jump_timing_error=2,
                  jump_jitter=2, angle_variance=0.3, hesitation_rate=0.08,
                  trajectory_noise_scale=0.18),
-    3: BotParams(reaction_delay=3, prediction_error=0.15, miss_probability=0.04,
-                 move_range=0.85, jump_timing_error=2,
-                 jump_jitter=2, angle_variance=0.22, hesitation_rate=0.05,
-                 trajectory_noise_scale=0.12),
-    4: BotParams(reaction_delay=1, prediction_error=0.08, miss_probability=0.01,
+    3: BotParams(reaction_delay=1, prediction_error=0.10, miss_probability=0.02,
                  move_range=0.95, jump_timing_error=1,
+                 jump_jitter=2, angle_variance=0.22, hesitation_rate=0.05,
+                 trajectory_noise_scale=0.10),
+    4: BotParams(reaction_delay=0, prediction_error=0.04, miss_probability=0.0,
+                 move_range=1.0,  jump_timing_error=0,
                  jump_jitter=1, angle_variance=0.14, hesitation_rate=0.02,
-                 trajectory_noise_scale=0.07),
-    5: BotParams(reaction_delay=0, prediction_error=0.03, miss_probability=0.0,
+                 trajectory_noise_scale=0.06),
+    5: BotParams(reaction_delay=0, prediction_error=0.01, miss_probability=0.0,
                  move_range=1.0,  jump_timing_error=0,
                  jump_jitter=1, angle_variance=0.08, hesitation_rate=0.01,
-                 trajectory_noise_scale=0.04),
+                 trajectory_noise_scale=0.03),
 }
 
 
@@ -120,6 +124,27 @@ class RuleBasedBot:
         max_move = court_half * params.move_range
         target_x = max(court_center - max_move, min(target_x, court_center + max_move))
 
+        # Net-forward bias (aggression): when the ball is on the opponent's
+        # side (i.e. we're waiting for a return), pull the standing target
+        # toward the net so we meet the ball sooner and can jump into a
+        # power-hit instead of receiving it deep. Original AI has no
+        # explicit net-positioning, but `computerBoldness` in
+        # physics.js:810-822 serves a similar role — aggressive bots stay
+        # closer to the action. Applies only to L3+ so L1/L2 stay in their
+        # "not too punishing" target band (L1 vs random should sit in
+        # 65-75%, not dominate; see docs/REPORT-BOT-DIFFICULTY-UPGRADE.md).
+        if self.level >= 3:
+            ball_on_opp_side = (
+                (is_player2 and ball.x < NET_PILLAR_X)
+                or (not is_player2 and ball.x > NET_PILLAR_X)
+            )
+            if ball_on_opp_side:
+                net_bias = PLAYER_HALF_LENGTH * 0.15 * (self.level - 2)
+                if is_player2:
+                    target_x = max(court_min, target_x - net_bias)
+                else:
+                    target_x = min(court_max, target_x + net_bias)
+
         # Horizontal movement toward target (with occasional hesitation so
         # the bot doesn't track like a railgun).
         dx = target_x - player.x
@@ -155,12 +180,24 @@ class RuleBasedBot:
         # (steep smash / flat drive / cross-court).
         power_hit = False
         if player.is_jumping:
-            collision_dist = PLAYER_HALF_LENGTH + 20
+            # Collision detection box — widened at L3+ so aggressive levels
+            # commit to the power-hit earlier in the jump arc (mirrors the
+            # original AI's 48x48 test at physics.js:877). L1/L2 keep the
+            # old 20px so they don't over-perform vs. the random baseline.
+            collision_dist = PLAYER_HALF_LENGTH + (24 if self.level >= 3 else 20)
             if (
                 ball_dist_x < collision_dist * 2
                 and abs(ball.y - player.y) < collision_dist * 2
             ):
-                power_probability = max(0.2, self.level / 5.0)
+                # L1 keeps the pre-upgrade floor (0.2) so the 65-75% vs-
+                # random target stays reachable; L2+ ramps steeply so the
+                # skill ladder is legible. Baseline measurement was
+                # L5 < L3 (40% — inverted) because the old floor plus
+                # jitter produced spotty hit patterns at L5.
+                power_probability = (
+                    0.2 if self.level == 1
+                    else min(1.0, 0.05 + 0.20 * self.level)
+                )
                 if random.random() < power_probability:
                     power_hit = True
                     # Default attack direction points at opponent.
