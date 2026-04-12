@@ -3,6 +3,7 @@ import { GameOverlay } from '../game/GameOverlay'
 import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
+import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { Hyperparams } from '../../lib/types'
 import './Dashboard.css'
@@ -13,6 +14,18 @@ export function Dashboard() {
   const score1 = latestFrame?.score1 ?? 0
   const score2 = latestFrame?.score2 ?? 0
   const isStopped = status.state === 'stopped'
+
+  // Show skeleton only on the very first connect attempt while we have no
+  // data at all. After anything arrives (frame / metrics / recent games)
+  // we keep the real UI up — even through reconnects — so the layout
+  // doesn't flash back to skeletons mid-session. A persistent
+  // disconnect should surface the reconnect banner, not a skeleton.
+  const hasAnyData =
+    latestFrame !== null || metrics.length > 0 || recentGames.length > 0
+  const isInitialLoading = connectionState === 'connecting' && !hasAnyData
+  if (isInitialLoading) {
+    return <DashboardSkeleton />
+  }
 
   const handleStart = (params: Hyperparams, botLevel: number) => {
     send('training:start', { hyperparams: params, bot_level: botLevel })
