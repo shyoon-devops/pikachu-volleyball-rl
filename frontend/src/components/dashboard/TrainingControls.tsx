@@ -1,4 +1,4 @@
-import type { TrainingStatus, ConnectionState, WSClientMessageType, Hyperparams } from '../../lib/types'
+import type { TrainingStatus, ConnectionState, WSClientMessageType } from '../../lib/types'
 import './TrainingControls.css'
 
 interface TrainingControlsProps {
@@ -6,7 +6,8 @@ interface TrainingControlsProps {
   connectionState: ConnectionState
   reconnectAttempt?: number
   send: (type: WSClientMessageType, payload?: unknown) => void
-  onStartWithParams: (params: Hyperparams, botLevel: number) => void
+  /** Start training with the currently-selected hyperparameters + bot level. */
+  onStart: () => void
 }
 
 const BOT_LEVELS = [1, 2, 3, 4, 5] as const
@@ -16,11 +17,12 @@ export function TrainingControls({
   connectionState,
   reconnectAttempt = 0,
   send,
-  onStartWithParams,
+  onStart,
 }: TrainingControlsProps) {
   const isConnected = connectionState === 'connected'
   const isRunning = status.state === 'running'
   const isStopped = status.state === 'stopped'
+  const isPaused = status.state === 'paused'
   const isDisconnected = connectionState === 'disconnected'
   const isConnecting = connectionState === 'connecting'
 
@@ -39,6 +41,26 @@ export function TrainingControls({
       : reconnectAttempt > 0
         ? `disconnected — retry ${reconnectAttempt}`
         : 'disconnected'
+
+  // Single primary CTA — label toggles with training state.
+  // This is the ONE Start/Stop control for the dashboard; do not add a
+  // duplicate in HyperparamForm or elsewhere.
+  const primaryLabel = isRunning ? 'Stop' : isPaused ? 'Resume' : 'Start'
+  const primaryAriaLabel = isRunning
+    ? 'Stop training'
+    : isPaused
+      ? 'Resume training'
+      : 'Start training'
+  const primaryVariant = isRunning
+    ? 'training-controls-btn--stop btn btn-danger'
+    : isPaused
+      ? 'training-controls-btn--resume btn btn-primary'
+      : 'training-controls-btn--start btn btn-success'
+  const handlePrimary = () => {
+    if (isRunning) return handleStop()
+    if (isPaused) return handleResume()
+    return onStart()
+  }
 
   return (
     <div className="training-controls card">
@@ -66,42 +88,16 @@ export function TrainingControls({
       )}
 
       <div className="training-controls-actions" role="group" aria-labelledby="training-controls-title">
-        {isStopped && (
-          <button
-            className="training-controls-btn training-controls-btn--start btn btn-success"
-            onClick={() => onStartWithParams({
-              learning_rate: 3e-4,
-              n_steps: 2048,
-              batch_size: 64,
-              gamma: 0.99,
-              clip_range: 0.2,
-            }, 1)}
-            disabled={!isConnected}
-            aria-label="Start training"
-          >
-            Start
-          </button>
-        )}
-        {isRunning && (
-          <button
-            className="training-controls-btn training-controls-btn--stop btn btn-danger"
-            onClick={handleStop}
-            disabled={!isConnected}
-            aria-label="Stop training"
-          >
-            Stop
-          </button>
-        )}
-        {status.state === 'paused' && (
-          <button
-            className="training-controls-btn training-controls-btn--resume btn btn-primary"
-            onClick={handleResume}
-            disabled={!isConnected}
-            aria-label="Resume training"
-          >
-            Resume
-          </button>
-        )}
+        <button
+          type="button"
+          className={`training-controls-btn ${primaryVariant}`}
+          onClick={handlePrimary}
+          disabled={!isConnected}
+          aria-label={primaryAriaLabel}
+          data-training-state={isStopped ? 'stopped' : isRunning ? 'running' : 'paused'}
+        >
+          {primaryLabel}
+        </button>
       </div>
 
       <div className="training-controls-level">
