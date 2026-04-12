@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import json
 import logging
 import signal
+import subprocess
 import threading
 import time
 import uuid
@@ -70,6 +72,9 @@ class TrainingManager:
         self._experiment_id: str = ""
         self._bot_level: int = 1
         self._hyperparams: dict[str, Any] = {}
+        self._seed: int | None = None
+        self._total_timesteps: int = 0
+        self._n_envs: int = 0
         self._started_at: float = 0.0
 
         self._install_signal_handler()
@@ -80,6 +85,7 @@ class TrainingManager:
         bot_level: int = 1,
         total_timesteps: int = 1_000_000,
         n_envs: int = 8,
+        seed: int | None = None,
     ) -> str:
         """Start a new training experiment. Returns experiment_id."""
         if self.status == "running":
@@ -88,10 +94,15 @@ class TrainingManager:
         self._experiment_id = str(uuid.uuid4())
         self._bot_level = bot_level
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
+        self._seed = seed
+        self._total_timesteps = total_timesteps
+        self._n_envs = n_envs
         self._stop_event.clear()
         self.current_step = 0
         self.current_episode = 0
         self._started_at = time.monotonic()
+
+        self._write_run_config()
 
         loop = asyncio.get_running_loop()
 
@@ -104,6 +115,26 @@ class TrainingManager:
         self._thread.start()
 
         return self._experiment_id
+
+    def _write_run_config(self) -> None:
+        """Persist a config.json describing this run for reproducibility."""
+        checkpoint_dir = Path(self.model_dir) / self._experiment_id
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        config = {
+            "experiment_id": self._experiment_id,
+            "bot_level": self._bot_level,
+            "seed": self._seed,
+            "total_timesteps": self._total_timesteps,
+            "n_envs": self._n_envs,
+            "hyperparams": self._hyperparams,
+            "obs_space_shape": [18],
+            "action_space_n": 12,
+            "net_arch": DEFAULT_NET_ARCH,
+            "started_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "git_commit": _get_git_commit(),
+        }
+        (checkpoint_dir / "config.json").write_text(json.dumps(config, indent=2))
 
     async def stop(self, *, force: bool = False) -> dict[str, Any]:
         """Gracefully stop training and save a final checkpoint.
@@ -294,6 +325,8 @@ class TrainingManager:
             )
 
             hp = self._hyperparams
+            if self._seed is not None:
+                env.seed(self._seed)
             if checkpoint_path:
                 self._model = PPO.load(
                     checkpoint_path,
@@ -312,6 +345,7 @@ class TrainingManager:
                     gae_lambda=hp.get("gae_lambda", 0.95),
                     clip_range=hp.get("clip_range", 0.2),
                     ent_coef=hp.get("ent_coef", 0.01),
+                    seed=self._seed,
                     verbose=0,
                     policy_kwargs={"net_arch": DEFAULT_NET_ARCH},
                 )
@@ -392,6 +426,24 @@ class TrainingManager:
             return None
         # SB3 load expects path without .zip extension
         return str(zips[-1].with_suffix(""))
+
+
+def _get_git_commit() -> str:
+    """Best-effort git commit hash for the current checkout.
+
+    Returns ``"unknown"`` when not in a git repo or when git is unavailable —
+    config logging shouldn't fail the run.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return "unknown"
 
 
 class _StopEventCallback(BaseCallback):
