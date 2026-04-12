@@ -1,8 +1,8 @@
 # Deployment Status
 
-> Last verified: **2026-04-12 18:25 +09:00** — v0.2.4 post-deploy doc update. Source of truth: `docs/VERSIONS.yml`.
+> Last verified: **2026-04-12 18:40 +09:00** — v0.2.4 SHA map re-alignment after DevOps Option A. Source of truth: `docs/VERSIONS.yml`.
 >
-> **v0.2.4 tag cut at dev HEAD `921b0efb` on 2026-04-12 18:20 +09:00** — v0.2.4 는 v0.2.3 위 누적된 4 CRITICAL hotfix + 6 UX/정합성 개선 번들. DevOps 는 3 환경에 byte-identical bundle `index-DqBsWzf5` 로 단일 배포 완료 (backend force-recreate, uptime 2분 검증). env tag `v0.2.4-{dev,qa,prod}` 부착 완료.
+> **v0.2.4 tag anchored at runtime source `dabd84a1`** (실제 컨테이너 이미지 빌드 SHA). dev HEAD 는 `d4a89231` — CHANGELOG + release note 확장 2 commit 이 dabd84a1 위에 쌓여 있음. env 태그 `v0.2.4-{dev,qa,prod}` 모두 `dabd84a1` 지목. DevOps 가 3 환경에 byte-identical bundle `index-DqBsWzf5` 배포 완료 (backend force-recreate, uptime 2분 검증).
 >
 > Ground rule: **any port change requires a PM-side doc update BEFORE the deploy**. See [WORKFLOW.md § Port Change Policy](WORKFLOW.md#port-change-policy).
 
@@ -38,11 +38,12 @@ PM 문서상 dev `:27018` / qa `:27019` / prod `:27020` — DevOps 미검증. �
 
 ## 2. Environment Overview
 
-| Env | Backend port | Backend commit | Frontend port | Frontend bundle | Version tag | env tag | Notes |
-|-----|--------------|----------------|---------------|-----------------|-------------|---------|-------|
-| dev | `:8001` ✅ | `dabd84a1` | `:3000` ✅ | `index-DqBsWzf5.js` | `v0.2.4` @ `921b0efb` | `v0.2.4-dev` | 정상 |
-| qa  | `:8002` ✅ | `dabd84a1` | `:3001` ✅ | `index-DqBsWzf5.js` | branch @ `5c758d8e` (lags) | `v0.2.4-qa` | Branch HEAD 런타임보다 뒤처짐 (image-based promote) |
-| prod | `:8003` ✅ | `dabd84a1` | `:3002` ✅ | `index-DqBsWzf5.js` | branch @ `41f4fdb1` (v0.1.0-era) | `v0.2.4-prod` | Branch 는 여전히 v0.1.0-era — **advance + main 머지 필요** |
+| Env | Backend port | Backend commit | Frontend port | Frontend bundle | Branch HEAD | env tag → SHA | Notes |
+|-----|--------------|----------------|---------------|-----------------|-------------|---------------|-------|
+| dev | `:8001` ✅ | `dabd84a1` | `:3000` ✅ | `index-DqBsWzf5.js` | `d4a89231` | `v0.2.4-dev` → `dabd84a1` | runtime = dabd84a1, docs 확장 2 commit on top |
+| qa  | `:8002` ✅ | `dabd84a1` | `:3001` ✅ | `index-DqBsWzf5.js` | `d4a89231` (DevOps Option A 완료) | `v0.2.4-qa` → `dabd84a1` | branch runtime 정합 |
+| prod | `:8003` ✅ | `dabd84a1` | `:3002` ✅ | `index-DqBsWzf5.js` | `d4a89231` (41f4fdb1 → advance 완료) | `v0.2.4-prod` → `dabd84a1` | v0.1.0-era 에서 v0.2.4 로 jump |
+| main | n/a | n/a | n/a | n/a | `71b4cb1c` (19 commits 뒤처짐) | (tag 없음) | DevOps 가 d4a89231 advance 진행 중 |
 
 ---
 
@@ -55,20 +56,16 @@ PM 문서상 dev `:27018` / qa `:27019` / prod `:27020` — DevOps 미검증. �
 | v0.2.1 | 2026-04-12 | `482df2d1` on github/dev | ✅ | No — superseded | No | [releases/v0.2.1.md](releases/v0.2.1.md) |
 | v0.2.2 | 2026-04-12 16:03 | `2582886b` on github/dev | ✅ | No — superseded by v0.2.3 before any deploy | No | [releases/v0.2.2.md](releases/v0.2.2.md) (superseded) |
 | v0.2.3 | 2026-04-12 16:40 | `737a088f` on github/dev | ✅ | **Yes** — 3 envs | No — superseded | [releases/v0.2.3.md](releases/v0.2.3.md) |
-| v0.2.4 | **2026-04-12 18:20** | `921b0efb` on github/dev (dabd84a1 runtime + docs expansion) | ✅ | **Yes** — 3 envs byte-identical bundle `index-DqBsWzf5` | pending (#17) | [releases/v0.2.4.md](releases/v0.2.4.md) |
+| v0.2.4 | **2026-04-12 18:20** | `dabd84a1` (runtime source) — 확장 노트는 `d4a89231` 커밋에 | ✅ | **Yes** — 3 envs byte-identical bundle `index-DqBsWzf5` | pending (DevOps main advance 진행 중) | [releases/v0.2.4.md](releases/v0.2.4.md) |
 
-Env tags present: `v0.1.0-prod`, `v0.2.1-dev`, `v0.2.1-qa`, `v0.2.3-{dev,qa,prod}`, `v0.2.4-{dev,qa,prod}` (모두 2026-04-12 18:20 dev HEAD 에 부착).
+Env tags present: `v0.1.0-prod`, `v0.2.1-dev`, `v0.2.1-qa`, `v0.2.3-{dev,qa,prod}`, `v0.2.4-{dev,qa,prod}` (모두 `dabd84a1` = 실제 빌드된 런타임 코드에 부착).
 
 ---
 
 ## 4. Pending Actions (ordered)
 
-1. **PM — prod branch advance + main 머지** (#17)
-   - `github/prod` 브랜치를 dev HEAD `921b0efb` 로 advance (현재 `41f4fdb1` v0.1.0-era 이므로 사실상 강제 동기화 필요)
-   - `prod → main` `--no-ff` 머지 (v0.2.0/0.2.1/0.2.2/0.2.3/0.2.4 scope 모두 최초 반영)
-   - `git tag --contains v0.2.4 | grep main` 으로 reachable 확인
-   - `git push github main --tags`
-2. **DevOps** — `github/qa` 브랜치를 런타임 코드(`dabd84a1`) 로 fast-forward 하는 housekeeping PR (런타임은 이미 dev HEAD image)
+1. **DevOps — main advance** (진행 중) — `github/main` 을 `d4a89231` 로 fast-forward. 완료되면 `git tag --contains v0.2.4` 가 `main` 을 포함해야 함 (v0.2.4 tag 는 `dabd84a1` 에 부착, d4a89231 가 dabd84a1 의 descendant).
+2. **PM (DevOps main advance 완료 직후)** — `git fetch --tags` + `git tag --contains v0.2.4 | grep main` 검증. 필요 시 `v0.2.4-main` 주석 태그 별도 부착 (다만 v0.2.4 가 이미 main reachable 이면 추가 태그 불필요).
 3. **DevOps** — `docs/incidents/20260412-dev-backend-stale.md` 인시던트 기록 발행 (`promote.sh` backend restart 누락 → 수정 `63e29b58`)
 4. **DevOps** — image SHA / build digest 를 VERSIONS.yml 각 env 의 `backend.image` 에 채움 (30분 SLA)
 
@@ -90,16 +87,16 @@ Env tags present: `v0.1.0-prod`, `v0.2.1-dev`, `v0.2.1-qa`, `v0.2.3-{dev,qa,prod
 
 ---
 
-## 6. Branch State (git facts)
+## 6. Branch State (git facts — post DevOps Option A)
 
 ```
-dev    921b0efb  docs: expand v0.2.4 scope                                          ← v0.2.4 tag here
-qa     5c758d8e  chore: promote dev to qa (pre-power-hit)                           ← lags runtime
-prod   41f4fdb1  fix: resolve conflict markers in dev branch frontend files         ← v0.1.0-era, MUST advance
-main   71b4cb1c  prod mirror (stale)                                                ← v0.1.0 tag here, pending v0.2.4 merge
+dev    d4a89231  docs: v0.2.4 post-deploy VERSIONS.yml + DEPLOYMENT-STATUS.md       ← runtime dabd84a1 + 2 docs
+qa     d4a89231  (same — Option A fast-forward 완료)
+prod   d4a89231  (v0.1.0-era 41f4fdb1 → d4a89231 advance 완료)
+main   71b4cb1c  prod mirror (stale)                                                ← DevOps advance 진행 중
 ```
 
-**Branch ≠ runtime**: qa 와 prod 의 실제 컨테이너는 모두 dev HEAD `dabd84a1` 로 빌드된 이미지를 돌리고 있음. 3 환경 bundle 도 byte-identical. 다만 git 브랜치 기록이 뒤처져 있어 `git tag --contains v0.2.4` 가 main 에서 아직 빈 결과를 반환함.
+v0.2.4 annotated tag → `dabd84a1` (실제 컨테이너 빌드 SHA). 4개 환경별 태그 (`v0.2.4-{dev,qa,prod}`) 도 모두 `dabd84a1` 지목. 3 환경 bundle `index-DqBsWzf5` byte-identical.
 
 ---
 
