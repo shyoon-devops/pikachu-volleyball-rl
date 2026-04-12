@@ -19,6 +19,7 @@ from backend.app.metrics import (
     sample_runtime_metrics,
 )
 from backend.app.models.schemas import PaginatedResponse
+from backend.app.services.metrics_service import allowed_buckets
 from backend.app.util.ttl_cache import cache_ttl
 
 router = APIRouter()
@@ -233,6 +234,78 @@ async def training_status(request: Request):
         logger.info("training_status called before training_service init")
         return {"state": "stopped", "current_step": 0, "current_episode": 0}
     return training_service.status()
+
+
+@router.get("/training/metrics/aggregate")
+@endpoint_guard("training_metrics_aggregate")
+@cache_ttl(seconds=10, max_entries=128, include=("experiment_id", "bucket", "since", "until"))
+async def training_metrics_aggregate(
+    request: Request,
+    experiment_id: str | None = Query(
+        None, description="Restrict aggregation to a single experiment_id."
+    ),
+    bucket: str = Query(
+        "1m",
+        description=f"Bucket grain. One of: {', '.join(allowed_buckets())}.",
+    ),
+    since: str | None = Query(
+        None, description="Inclusive lower bound, ISO-8601 timestamp."
+    ),
+    until: str | None = Query(
+        None, description="Exclusive upper bound, ISO-8601 timestamp."
+    ),
+):
+    """Time-bucketed training-metric aggregates (BE-7).
+
+    Returns an ordered list of buckets with averages for reward, win-rate,
+    and policy/value loss. ``since`` / ``until`` accept ISO-8601 strings and
+    default to the last 6 hours when both are omitted so the query is
+    always index-bounded. Cached for 10s — at a 100ms metric cadence the
+    freshness penalty is negligible and dashboards that poll at 1Hz would
+    otherwise hammer the aggregation pipeline.
+    """
+    from datetime import datetime
+
+    metrics_service = getattr(request.app.state, "metrics_service", None)
+    if metrics_service is None:
+        logger.warning(
+            "training_metrics_aggregate called before metrics_service init"
+        )
+        raise HTTPException(status_code=503, detail="Metrics service not available")
+
+    if bucket not in allowed_buckets():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid bucket {bucket!r}; allowed: {list(allowed_buckets())}",
+        )
+
+    def _parse(value: str | None, field: str) -> datetime | None:
+        if value is None:
+            return None
+        try:
+            # fromisoformat handles both naive and tz-aware strings, and the
+            # trailing-Z shorthand emitted by JS Date.toISOString().
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid {field} timestamp: {e}"
+            ) from e
+
+    since_dt = _parse(since, "since")
+    until_dt = _parse(until, "until")
+
+    buckets = await metrics_service.aggregate(
+        experiment_id=experiment_id,
+        bucket=bucket,
+        since=since_dt,
+        until=until_dt,
+    )
+    return {
+        "experiment_id": experiment_id,
+        "bucket": bucket,
+        "count": len(buckets),
+        "data": buckets,
+    }
 
 
 @router.get("/games")

@@ -27,6 +27,7 @@ export function TrainingControls({
   const isConnecting = connectionState === 'connecting'
 
   const handleStop = () => send('training:stop')
+  const handlePause = () => send('training:pause')
   const handleResume = () => send('training:resume')
   const handleSetLevel = (level: number) => send('training:set_level', { level })
 
@@ -42,25 +43,24 @@ export function TrainingControls({
         ? `disconnected — retry ${reconnectAttempt}`
         : 'disconnected'
 
-  // Single primary CTA — label toggles with training state.
-  // This is the ONE Start/Stop control for the dashboard; do not add a
-  // duplicate in HyperparamForm or elsewhere.
-  const primaryLabel = isRunning ? 'Stop' : isPaused ? 'Resume' : 'Start'
-  const primaryAriaLabel = isRunning
-    ? 'Stop training'
-    : isPaused
-      ? 'Resume training'
-      : 'Start training'
-  const primaryVariant = isRunning
-    ? 'training-controls-btn--stop btn btn-danger'
-    : isPaused
-      ? 'training-controls-btn--resume btn btn-primary'
-      : 'training-controls-btn--start btn btn-success'
-  const handlePrimary = () => {
-    if (isRunning) return handleStop()
-    if (isPaused) return handleResume()
-    return onStart()
-  }
+  // Primary CTA = Start (stopped) or Stop (running/paused). Pause/Resume
+  // is a SECONDARY toggle that only appears while training is underway.
+  // Do not re-introduce a second Start button inside HyperparamForm or
+  // anywhere else — see the duplicate-Start-button regression guard.
+  const primaryLabel = isStopped ? 'Start' : 'Stop'
+  const primaryAriaLabel = isStopped ? 'Start training' : 'Stop training'
+  const primaryVariant = isStopped
+    ? 'training-controls-btn--start btn btn-success'
+    : 'training-controls-btn--stop btn btn-danger'
+  const handlePrimary = () => (isStopped ? onStart() : handleStop())
+
+  const showPauseToggle = isRunning || isPaused
+  const pauseLabel = isPaused ? 'Resume' : 'Pause'
+  const pauseAriaLabel = isPaused ? 'Resume training' : 'Pause training'
+  const pauseVariant = isPaused
+    ? 'training-controls-btn--resume btn btn-primary'
+    : 'training-controls-btn--pause btn btn-warning'
+  const handlePauseToggle = () => (isPaused ? handleResume() : handlePause())
 
   return (
     <div className="training-controls card">
@@ -98,6 +98,20 @@ export function TrainingControls({
         >
           {primaryLabel}
         </button>
+
+        {showPauseToggle && (
+          <button
+            type="button"
+            className={`training-controls-btn ${pauseVariant}`}
+            onClick={handlePauseToggle}
+            disabled={!isConnected}
+            aria-label={pauseAriaLabel}
+            aria-pressed={isPaused}
+            data-pause-state={isPaused ? 'paused' : 'running'}
+          >
+            {pauseLabel}
+          </button>
+        )}
       </div>
 
       <div className="training-controls-level">

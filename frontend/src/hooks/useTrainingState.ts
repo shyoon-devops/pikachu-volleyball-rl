@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useWebSocket } from './useWebSocket'
 import { snakeToCamel } from '../lib/api'
 import type {
@@ -14,7 +14,7 @@ import type {
 const MAX_METRICS_POINTS = 1000
 const MAX_RECENT_GAMES = 100
 
-interface TrainingState {
+export interface TrainingState {
   connectionState: ConnectionState
   reconnectAttempt: number
   status: TrainingStatus
@@ -29,7 +29,13 @@ function getWsUrl(): string {
   return `${protocol}//${window.location.host}/ws`
 }
 
-export function useTrainingState(): TrainingState {
+/**
+ * Internal: subscribes to the WebSocket and derives training state.
+ * Exported for use by TrainingStateProvider only — every call opens a
+ * new socket, so app code should never call this directly. Read via
+ * `useTrainingState()` which consumes the shared context instead.
+ */
+export function useTrainingStateImpl(): TrainingState {
   const { connectionState, reconnectAttempt, send, subscribe } = useWebSocket(getWsUrl())
 
   const [status, setStatus] = useState<TrainingStatus>({
@@ -81,4 +87,24 @@ export function useTrainingState(): TrainingState {
   }, [subscribe, handleMetrics, handleFrame, handleStatus, handleGameResult])
 
   return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send }
+}
+
+export const TrainingStateContext = createContext<TrainingState | null>(null)
+
+/**
+ * Access the shared training state.
+ *
+ * Must be rendered under <TrainingStateProvider /> (normal runtime) so
+ * every consumer reads from the one WebSocket. Component tests that
+ * exercise a consumer in isolation should use `vi.mock` on this module,
+ * matching the pattern in Dashboard.test.tsx.
+ */
+export function useTrainingState(): TrainingState {
+  const ctx = useContext(TrainingStateContext)
+  if (!ctx) {
+    throw new Error(
+      'useTrainingState must be used within <TrainingStateProvider />',
+    )
+  }
+  return ctx
 }

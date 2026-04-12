@@ -1,0 +1,58 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    # Back-off retry so log spikes don't DoS loki
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+
+scrape_configs:
+  # Pickup docker container logs via docker socket.
+  # Relabel container name into service_name + env so Grafana can split streams.
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 10s
+        filters:
+          - name: label
+            values: ["com.docker.compose.project"]
+
+    relabel_configs:
+      # Promote compose project (e.g. pikachu-rl-dev) → env
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        regex: "pikachu-rl-(dev|qa|prod)"
+        target_label: env
+        replacement: "$1"
+
+      # Promote compose service (backend, frontend, mongodb) → service
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label: service
+
+      # Container name (raw, useful for ad-hoc queries)
+      - source_labels: [__meta_docker_container_name]
+        regex: "/(.*)"
+        target_label: container
+        replacement: "$1"
+
+      # Skip logs from the monitoring stack itself to avoid recursive feedback
+      - source_labels: [__meta_docker_container_label_com_docker_compose_project]
+        regex: "pikachu-monitoring"
+        action: drop
+
+    pipeline_stages:
+      # Extract uvicorn/fastapi INFO/WARNING/ERROR level into a label for filtering
+      - match:
+          selector: '{service="backend"}'
+          stages:
+            - regex:
+                expression: '^(?:INFO|WARNING|ERROR|CRITICAL|DEBUG):\s+(?P<msg>.*)$'
+            - labels:
+                msg:

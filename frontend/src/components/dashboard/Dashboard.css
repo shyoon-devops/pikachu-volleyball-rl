@@ -113,8 +113,34 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.recent-games-table tbody tr:hover {
+/*
+ * 행 호버 · 선택 상태.
+ *   - 첫 td 에 ::before 의사요소 없이 좌측 box-shadow inset 로 accent bar 생성.
+ *   - :focus-within 은 tab 이동 시에도 행 전체 하이라이트.
+ *   - [aria-selected="true"] / .selected 는 FE 가 선택 상태 도입 시 사용.
+ */
+.recent-games-table tbody tr {
+  transition: background var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.recent-games-table tbody tr:hover,
+.recent-games-table tbody tr:focus-within {
   background: var(--color-bg-hover);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.recent-games-table tbody tr[aria-selected="true"],
+.recent-games-table tbody tr.selected {
+  background: var(--color-accent-dim);
+  box-shadow: inset 3px 0 0 var(--color-accent),
+              0 0 0 1px var(--color-border-accent);
+}
+
+.recent-games-table tbody tr[aria-selected="true"]:hover,
+.recent-games-table tbody tr.selected:hover {
+  background: var(--color-accent-dim);
+  filter: brightness(1.05);
 }
 
 /* ── Responsive ────────────────────────────────────────── */
