@@ -67,6 +67,8 @@ class PikachuVolleyballEnv(gymnasium.Env):
         self._prev_ball_y = 0.0
         self._prev_ball_vy = 0.0
         self._prev_p1_x = 0.0
+        self._consecutive_touches = 0
+        self._frames_since_crossing = 0
 
     def reset(
         self,
@@ -85,6 +87,8 @@ class PikachuVolleyballEnv(gymnasium.Env):
         self._prev_ball_y = float(state.ball.y)
         self._prev_ball_vy = float(state.ball.vy)
         self._prev_p1_x = float(state.player1.x)
+        self._consecutive_touches = 0
+        self._frames_since_crossing = 0
         return self._get_obs(state), {}
 
     def step(
@@ -116,6 +120,13 @@ class PikachuVolleyballEnv(gymnasium.Env):
         terminated = new_state.score1 >= MAX_SCORE or new_state.score2 >= MAX_SCORE
         truncated = self._steps >= self.max_steps
 
+        # Force-truncate with large penalty if rally stalls too long
+        # (agent looping self-tosses without sending ball over net)
+        stalled_out = self._frames_since_crossing >= self._RALLY_MAX_FRAMES
+        if stalled_out and not terminated:
+            reward += self._RALLY_TIMEOUT_PENALTY
+            truncated = True
+
         self._prev_score1 = new_state.score1
         self._prev_score2 = new_state.score2
         self._prev_ball_x = float(new_state.ball.x)
@@ -127,6 +138,8 @@ class PikachuVolleyballEnv(gymnasium.Env):
             "score1": new_state.score1,
             "score2": new_state.score2,
             "frame": new_state.frame,
+            "stalled_out": stalled_out,
+            "consecutive_touches": self._consecutive_touches,
         }
 
         return obs, reward, terminated, truncated, info
@@ -191,55 +204,89 @@ class PikachuVolleyballEnv(gymnasium.Env):
         )
         return np.clip(obs, -1.0, 1.0)
 
+    # Anti-toss-loop constants
+    _TOUCH_REWARD_FIRST = 3.0
+    _TOUCH_REWARD_SECOND = 1.0
+    _TOUCH_PENALTY_EXCESS = -2.0
+    _NET_CROSSING_REWARD = 2.0
+    _STALL_THRESHOLD = 300
+    _STALL_PENALTY_PER_FRAME = -0.03
+    _RALLY_MAX_FRAMES = 600  # Hard termination threshold
+    _RALLY_TIMEOUT_PENALTY = -5.0
+
     def _compute_reward(self, state: Any) -> float:
         """Compute shaped reward for faster PPO convergence.
 
         Reward hierarchy (largest to smallest):
           1. Game outcome:  win +20 / loss -20
           2. Scoring:       score +10 / concede -10
-          3. Ball touch:    successful hit +3.0  (once per collision)
-          4. Net crossing:  ball sent to opponent's court +1.0
+          3. Ball touch:    +3.0 first, +1.0 second, -2.0 for 3rd+ (per round)
+          4. Net crossing:  ball sent to opponent's court +2.0, resets touch count
           5. Approach ball: move toward ball on own side +0.05/frame
           6. Ready position: near court center when ball on opp side +0.01
+          7. Stall penalty: -0.03/frame after 300 frames without net crossing
         """
         reward = 0.0
         ball = state.ball
         p1 = state.player1
+        counter_reset_this_frame = False
 
         # --- PRIMARY: scoring events ---
         scored = state.score1 - self._prev_score1
         conceded = state.score2 - self._prev_score2
         if scored > 0:
             reward += 10.0
+            self._consecutive_touches = 0
+            self._frames_since_crossing = 0
+            counter_reset_this_frame = True
         if conceded > 0:
             reward -= 10.0
+            self._consecutive_touches = 0
+            self._frames_since_crossing = 0
+            counter_reset_this_frame = True
         if state.score1 >= MAX_SCORE:
             reward += 20.0
         elif state.score2 >= MAX_SCORE:
             reward -= 20.0
 
-        # --- AUX 1: ball touch (vy-flip detection) ---
+        # --- AUX 1: ball touch with diminishing returns ---
         # Engine sets ball.vy = min(vy, -15) on player collision.
-        # Detect: ball was falling/flat, now sharply upward, near player1.
         collision_dist = PLAYER_HALF_LENGTH + BALL_RADIUS
         if self._prev_ball_vy >= 0 and ball.vy <= -14:
             if abs(ball.x - p1.x) < collision_dist * 3:
-                reward += 3.0
+                self._consecutive_touches += 1
+                if self._consecutive_touches == 1:
+                    reward += self._TOUCH_REWARD_FIRST
+                elif self._consecutive_touches == 2:
+                    reward += self._TOUCH_REWARD_SECOND
+                else:
+                    reward += self._TOUCH_PENALTY_EXCESS
 
-        # --- AUX 2: net crossing ---
+        # --- AUX 2: net crossing (strengthened, resets touch counter) ---
         prev_on_p1_side = self._prev_ball_x <= NET_PILLAR_X
         now_on_p2_side = ball.x > NET_PILLAR_X
         if prev_on_p1_side and now_on_p2_side and ball.vx > 0:
-            reward += 1.0
+            reward += self._NET_CROSSING_REWARD
+            self._consecutive_touches = 0
+            self._frames_since_crossing = 0
+            counter_reset_this_frame = True
 
-        # --- AUX 3: approach ball (gradient for early training) ---
+        # --- AUX 3: stall penalty ---
+        # Only increment when no reset this frame (counter represents frames
+        # since last crossing; this frame is stale only if nothing happened).
+        if not state.is_round_over and not counter_reset_this_frame:
+            self._frames_since_crossing += 1
+            if self._frames_since_crossing > self._STALL_THRESHOLD:
+                reward += self._STALL_PENALTY_PER_FRAME
+
+        # --- AUX 4: approach ball (gradient for early training) ---
         if ball.x <= NET_PILLAR_X and not state.is_round_over:
             prev_dist = abs(self._prev_ball_x - self._prev_p1_x)
             curr_dist = abs(float(ball.x) - float(p1.x))
             if curr_dist < prev_dist:
                 reward += 0.05
 
-        # --- AUX 4: ready position (defensive positioning) ---
+        # --- AUX 5: ready position (defensive positioning) ---
         if ball.x > NET_PILLAR_X and not state.is_round_over:
             ready_x = NET_PILLAR_X * 0.5
             dist_from_ready = abs(float(p1.x) - ready_x)

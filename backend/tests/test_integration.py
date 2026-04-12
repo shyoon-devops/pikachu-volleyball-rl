@@ -22,7 +22,7 @@ class TestEngineToEnvIntegration:
     def test_env_wraps_engine_state(self, rl_env: PikachuVolleyballEnv) -> None:
         obs, _ = rl_env.reset()
         # Observation should reflect the engine's initial state
-        assert obs.shape == (12,)
+        assert obs.shape == (18,)
         # Player1 is on the left half → normalized x < 0
         assert obs[0] < 0  # player1.x / w * 2 - 1
 
@@ -30,10 +30,10 @@ class TestEngineToEnvIntegration:
         self, rl_env: PikachuVolleyballEnv
     ) -> None:
         rl_env.reset()
-        # All 6 actions should produce valid steps
-        for action in range(6):
+        # All 12 actions should produce valid steps
+        for action in range(12):
             obs, reward, terminated, truncated, info = rl_env.step(action)
-            assert obs.shape == (12,)
+            assert obs.shape == (18,)
             if terminated or truncated:
                 rl_env.reset()
 
@@ -74,7 +74,7 @@ class TestEngineToEnvIntegration:
 
         for _ in range(5):
             obs, _ = env.reset()
-            assert obs.shape == (12,)
+            assert obs.shape == (18,)
             for _ in range(100):
                 obs, _, terminated, truncated, _ = env.step(
                     env.action_space.sample()
@@ -127,7 +127,7 @@ class TestEnvToTrainerIntegration:
 
         obs, _ = env.reset()
         action, _ = model.predict(obs, deterministic=True)
-        assert 0 <= int(action) <= 5
+        assert 0 <= int(action) <= 11
         env.close()
 
 
@@ -227,7 +227,7 @@ class TestEnvBotLevelIntegration:
     def test_env_with_each_bot_level(self, level: int) -> None:
         env = PikachuVolleyballEnv(bot_level=level, max_steps=500)
         obs, _ = env.reset()
-        assert obs.shape == (12,)
+        assert obs.shape == (18,)
 
         for _ in range(100):
             obs, _, terminated, truncated, _ = env.step(env.action_space.sample())
