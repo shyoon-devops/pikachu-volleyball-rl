@@ -14,15 +14,38 @@
 #   last_verified_at   : when this YAML entry was last confirmed via curl + docker inspect
 
 schema_version: 1
-last_file_update: 2026-04-12T22:45:00+09:00   # P0 hotfix — match-end freeze tick (cd1e6a39, BE-only change)
+last_file_update: 2026-04-12T23:55:00+09:00   # v0.2.5 post-deploy doc update + main advance
 authoritative_source: docs/VERSIONS.yml       # this file supersedes README + DEPLOYMENT-STATUS on port/version conflicts
 
 release_history:
+  - version: v0.2.5
+    tag_target: cd1e6a39                      # actual runtime source (match-end freeze P0 hotfix merged on top of Phase 2)
+    doc_head: 09a3f99d                        # dev HEAD with CHANGELOG/release note/README for v0.2.5 + post-merge cleanup
+    cut_at: 2026-04-12T22:45:00+09:00
+    deployed_envs: [dev, qa, prod]
+    superseded_by: null
+    supersedes: v0.2.4
+    scope: "Phase 2 bug bundle — gameplay FX (D11-D15, dive, punch ring, freeze-frame), bot L1-L5 upgrade, metrics chart hydration + /timeseries cap + sampling cadence label, legacy games backfill, sky RGB stripe (NEAREST filter), P0 match-end freeze tick, deploy-frontend auto-advance + docker log rotation"
+    bundle: assets/index-CFGidFNF.js
+    env_tags:
+      v0.2.5-dev: cd1e6a39
+      v0.2.5-qa: cd1e6a39
+      v0.2.5-prod: cd1e6a39
+    notes: >
+      3 env byte-identical bundle (index-CFGidFNF.js) deployed over 2 windows:
+      (1) Phase 2 FE+BE @ 22:03-22:05 → runtime 6f4a057f, (2) match-end freeze
+      P0 hotfix → runtime cd1e6a39. BE image rebuilt at ~23:20 (qa/prod) + ~23:40
+      (dev after PR #42 revert). 3 env health/live verified 23:55, uptimes
+      dev ~14min, qa ~35min, prod ~35min. main fast-forwarded from 018a2be1 to
+      cd1e6a39 — v0.2.5 tag reachable from main. PR #42 trainer attempt
+      (be4001eb) reverted in ffe1ae6a due to trainer.py:455 SyntaxError —
+      NOT in this release.
   - version: v0.2.4
     tag_target: dabd84a1                      # actual runtime source (built container image)
     doc_head: d4a89231                        # dev HEAD with CHANGELOG + release note expansion on top of dabd84a1
     cut_at: 2026-04-12T18:20:00+09:00
     deployed_envs: [dev, qa, prod]
+    superseded_by: v0.2.5
     scope: "4 CRITICAL (live-UI hydration, optimistic controls, BE stop/pause halt, rally-timeout safety valve) + hyper-ball power-hit visual + /timeseries endpoint + bot_level Option A single source + promote.sh backend restart fix"
     bundle: assets/index-DqBsWzf5.js
     env_tags:
@@ -98,9 +121,9 @@ environments:
       port: 27018
       status: UNKNOWN
     git_branch: dev
-    git_branch_head: cd1e6a39                 # P0 hotfix runtime (match-end freeze tick fix)
-    tag_at_head: null                         # v0.2.4 annotated tag is on dabd84a1; runtime cd1e6a39 (P0 hotfix above tag)
-    env_tag: v0.2.4-dev                       # → dabd84a1 (tag unchanged; runtime advanced to cd1e6a39)
+    git_branch_head: 09a3f99d                 # dev has 3 docs commits on top of cd1e6a39 runtime: v0.2.5 release docs + PR #42 revert (ffe1ae6a) + CHANGELOG cleanup (09a3f99d)
+    tag_at_head: null                         # v0.2.5 annotated tag is on cd1e6a39 (runtime); docs-only delta above
+    env_tag: v0.2.5-dev                       # → cd1e6a39 (matches runtime exactly)
     deploy_pending: false                     # all 3 envs in sync at cd1e6a39
 
   qa:
@@ -136,8 +159,8 @@ environments:
       status: UNKNOWN
     git_branch: qa
     git_branch_head: cd1e6a39                 # P0 hotfix — auto-advanced by deploy-frontend.sh step [6/6] (was 6f4a057f)
-    tag_at_head: null
-    env_tag: v0.2.4-qa                        # → dabd84a1 (tag unchanged; runtime advanced to cd1e6a39)
+    tag_at_head: v0.2.5                       # v0.2.5 annotated tag is on cd1e6a39 = qa branch HEAD
+    env_tag: v0.2.5-qa                        # → cd1e6a39 (matches runtime)
     deploy_pending: false
     notes: >
       2026-04-12 ~22:42 (BE) + ~22:40 (FE): P0 hotfix redeploy — match-end
@@ -180,17 +203,17 @@ environments:
       status: UNKNOWN
     git_branch: prod
     git_branch_head: cd1e6a39                 # P0 hotfix — auto-advanced by deploy-frontend.sh (was 6f4a057f)
-    tag_at_head: null                         # v0.2.4 annotated tag is on dabd84a1 (runtime now cd1e6a39 — P0 hotfix above tag)
-    env_tag: v0.2.4-prod                      # → dabd84a1 (tag unchanged; runtime advanced to cd1e6a39)
+    tag_at_head: v0.2.5                       # v0.2.5 annotated tag is on cd1e6a39 = prod branch HEAD
+    env_tag: v0.2.5-prod                      # → cd1e6a39 (matches runtime)
     deploy_pending: false
-    prod_branch_advance_pending: false        # DONE 2026-04-12 (18:30, 21:36, 22:03, 22:42 P0)
+    prod_branch_advance_pending: false        # DONE — main also advanced to cd1e6a39 (2026-04-12 ~23:55)
     notes: >
       2026-04-12 ~22:42 (BE) + ~22:40 (FE): P0 hotfix redeploy — match-end
       freeze tick fix (engine.py:219-220). prod branch auto-advanced
       6f4a057f → cd1e6a39. Runtime carries P0 fix (e9f72459) on top of
       full v0.2.4 + FE Phase 2 + AI sky-stripe + BE Phase 2 stack.
       Bundle byte-identical to dev/qa (BE-only change). main branch
-      advance to cd1e6a39 pending.
+      advance to cd1e6a39 completed by PM ~23:55.
 
 # =========================================================================
 # DevOps update protocol:
