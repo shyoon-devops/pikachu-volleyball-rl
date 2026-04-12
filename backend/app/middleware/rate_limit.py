@@ -30,8 +30,31 @@ class _TokenBucket:
         return False
 
 
+# Paths that must never be rate-limited. Health probes and metrics scrapes
+# come from infrastructure (k8s, Prometheus, Promtail, Loki); throttling them
+# causes cascading failures — a busy node gets marked unhealthy and pulled
+# from rotation, which makes the remaining nodes even busier. Explicit exact
+# matches plus a prefix list so we cover ``/api/health/live``,
+# ``/api/health/ready``, and any future probe endpoints.
+_EXEMPT_EXACT: frozenset[str] = frozenset(
+    {
+        "/ws",
+        "/api/health",
+        "/api/metrics",  # custom app-level Prometheus endpoint
+        "/metrics",  # prometheus-fastapi-instrumentator HTTP-level metrics
+    }
+)
+_EXEMPT_PREFIX: tuple[str, ...] = ("/api/health/",)
+
+
+def _is_exempt(path: str) -> bool:
+    if path in _EXEMPT_EXACT:
+        return True
+    return any(path.startswith(p) for p in _EXEMPT_PREFIX)
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Per-IP rate limiting. Skips WebSocket and health check."""
+    """Per-IP rate limiting. Skips WebSocket, health probes, and metrics scrapes."""
 
     def __init__(
         self,
@@ -48,11 +71,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._last_cleanup = time.monotonic()
 
     async def dispatch(self, request: Request, call_next):
-        # Skip WebSocket upgrades and every health probe (/api/health,
-        # /api/health/live, /api/health/ready). Probes must bypass the
-        # limiter or busy nodes start getting marked unhealthy.
-        path = request.url.path
-        if path == "/ws" or path == "/api/health" or path.startswith("/api/health/"):
+        if _is_exempt(request.url.path):
             return await call_next(request)
 
         client_ip = request.client.host if request.client else "unknown"
