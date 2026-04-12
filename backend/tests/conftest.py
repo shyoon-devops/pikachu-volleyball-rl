@@ -138,10 +138,16 @@ class FakeMetricsService:
         matching.sort(key=lambda r: r.get("step", 0))
         if len(matching) > limit:
             matching = matching[-limit:]
-        return [
-            {"step": r.get("step", 0), "value": r.get(field, 0.0)}
-            for r in matching
-        ]
+        out: list[dict] = []
+        for r in matching:
+            ts = r.get("timestamp")
+            ts_iso = ts.isoformat() if ts is not None else None
+            out.append({
+                "step": r.get("step", 0),
+                "value": r.get(field, 0.0),
+                "timestamp": ts_iso,
+            })
+        return out
 
 
 def _make_queue_mock(maxsize: int) -> MagicMock:

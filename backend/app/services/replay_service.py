@@ -58,7 +58,7 @@ class ReplayService:
 
 
 _PLAYER_DEFAULTS = {"is_jumping": False, "is_diving": False, "is_power_hitting": False}
-_BALL_DEFAULTS = {"rotation": 0}
+_BALL_DEFAULTS = {"rotation": 0, "is_power_hit": False}
 
 
 def _backfill_frame(frame: dict[str, Any]) -> dict[str, Any]:
