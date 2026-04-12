@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 v0.2.4 이후 scope. Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) + Evaluator PR #44 (E1-E10 baseline comparator / batch eval / history / timeseries / Elo tracker) 후속 릴리스 후보.
 
-## [0.2.4] - 2026-04-12 (post-v0.2.3 live-UI + engine-stall hotfix bundle / dev HEAD cc72e0f1)
+## [0.2.4] - 2026-04-12 (post-v0.2.3 live-UI + engine-stall hotfix bundle / dev HEAD 20c00b70)
 
 v0.2.3 을 3 환경(dev/qa/prod)에 배포한 직후 PM 의 실사용 테스트에서 확인된 4 CRITICAL 이슈 긴급 수정. 3건은 live-UI 제어 불가 (WS 상태 동기화, 새로고침 복원, Stop/Pause 실제 중단) + 1건은 엔진 무한 rally deadlock. 어느 하나도 해소되지 않으면 사용자/RL 모두 정상 훈련 사이클을 돌릴 수 없는 상태.
 
