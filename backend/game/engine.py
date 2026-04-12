@@ -66,6 +66,14 @@ class BallState:
     # They are NOT added to position — ball movement uses (vx, vy) only.
     punch_effect_x: int = 0
     punch_effect_y: int = 0
+    # True on frames where the most recent ball–player collision was a
+    # power hit (player was jumping + power_hit pressed). Drives the
+    # hyper-ball / trail sprite effect in the original view.js:513 and
+    # is the single-frame signal FE needs to render "강타" visually.
+    # Semantics match original physics.js: set true in the power-hit
+    # branch of processCollisionBetweenBallAndPlayer, set false in any
+    # other collision. Persists between collisions until flipped.
+    is_power_hit: bool = False
 
 
 @dataclass
@@ -369,6 +377,13 @@ class PikachuVolleyball:
             # Record graphic markers only — do NOT add to position.
             ball.punch_effect_x = ball.x
             ball.punch_effect_y = ball.y
+            # Flag this collision as a power hit so FE can render the
+            # hyper-ball / trail sprite (original view.js:513).
+            ball.is_power_hit = True
+        else:
+            # Non-power collision — clear the flag so the trail stops
+            # (original physics.js:727).
+            ball.is_power_hit = False
 
     # ------------------------------------------------------------------
     # Scoring — not in original engine (it returns isBallTouchingGround
