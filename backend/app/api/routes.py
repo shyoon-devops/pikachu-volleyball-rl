@@ -395,8 +395,13 @@ async def training_timeseries(
         description=f"Metric name. One of: {', '.join(sorted(_TIMESERIES_METRICS))}.",
     ),
     limit: int = Query(
-        1000, ge=1, le=1000,
-        description="Maximum number of points, newest last.",
+        1000, ge=1, le=10000,
+        description=(
+            "Maximum number of points, newest last. Cap raised from 1000 "
+            "to 10000 so long training runs (MetricsCallback now emits "
+            "every 256 steps → ~3900 points at 1M steps) can be fetched "
+            "in a single call without client-side pagination."
+        ),
     ),
     experiment_id: str | None = Query(
         None, description="Restrict to a single experiment_id.",

@@ -381,7 +381,10 @@ class TrainingManager:
                 MetricsCallback(
                     queue=self.metrics_queue,
                     loop=loop,
-                    log_interval=hp.get("metrics_interval", 100),
+                    # 256 matches the MetricsCallback default — see the
+                    # rationale there. hyperparams can still override
+                    # (e.g. a fast CI run can drop to 64 for denser logs).
+                    log_interval=hp.get("metrics_interval", 256),
                 ),
                 CheckpointCallback(
                     experiment_id=self._experiment_id,
