@@ -11,13 +11,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
-from pydantic import ValidationError
 
-from backend.app.metrics import update_training_metrics
+from backend.app.metrics import (
+    GAME_SAVE_FAILURE,
+    GAME_SAVE_SUCCESS,
+    update_training_metrics,
+)
 from backend.app.models.schemas import (
     WsReplayRequestPayload,
     WsSetLevelPayload,
     WsTrainingStartPayload,
+)
+from backend.app.ws.validation import (
+    ParsedMessage,
+    ValidationFailure,
+    parse_ws_message,
 )
 
 if TYPE_CHECKING:
@@ -39,34 +47,45 @@ async def ws_endpoint(
     try:
         while True:
             data = await ws.receive_json()
-            msg_type = data.get("type", "")
-            payload = data.get("payload", {})
-            # Heartbeat: clients reply to "ping" with "pong"; update liveness here
-            # so the manager can close truly stale connections.
-            if msg_type == "pong":
+            parsed = parse_ws_message(data)
+            if isinstance(parsed, ValidationFailure):
+                logger.info(
+                    "Rejecting WS message: code=%s message=%s",
+                    parsed.code, parsed.message,
+                )
+                await _send_error(ws, parsed.code, parsed.message)
+                continue
+            # Heartbeat: clients reply to "ping" with "pong"; update liveness
+            # here so the manager can close truly stale connections.
+            if parsed.type == "pong":
                 manager.record_pong(ws)
                 continue
-            await _dispatch(ws, msg_type, payload, training_service, replay_service, manager)
+            await _dispatch(ws, parsed, training_service, replay_service, manager)
     except WebSocketDisconnect:
         pass
     finally:
         manager.disconnect(ws)
 
 
-async def _send_error(ws: WebSocket, message: str) -> None:
-    await ws.send_json({"type": "error", "payload": {"message": message}})
+async def _send_error(ws: WebSocket, code: str, message: str) -> None:
+    await ws.send_json(
+        {"type": "error", "payload": {"code": code, "message": message}}
+    )
 
 
 async def _dispatch(
     ws: WebSocket,
-    msg_type: str,
-    payload: dict[str, Any],
+    msg: ParsedMessage,
     training_service: TrainingServiceWrapper,
     replay_service: ReplayService,
     manager: ConnectionManager | None = None,
 ) -> None:
-    """Route incoming messages to the appropriate handler."""
-    if msg_type == "training:start":
+    """Route validated messages to the appropriate handler.
+
+    Payloads are already parsed into typed Pydantic models by parse_ws_message,
+    so handlers can rely on field presence and type without re-validating.
+    """
+    if msg.type == "training:start":
         current = training_service.status()
         if current["state"] == "running":
             await ws.send_json({
@@ -74,11 +93,7 @@ async def _dispatch(
                 "payload": {"message": "Training is already running"},
             })
             return
-        try:
-            params = WsTrainingStartPayload(**(payload or {}))
-        except ValidationError as e:
-            await _send_error(ws, f"Invalid training:start payload: {e.error_count()} errors")
-            return
+        params: WsTrainingStartPayload = msg.payload  # type: ignore[assignment]
         experiment_id = await training_service.start(
             hyperparams=params.hyperparams,
             bot_level=params.bot_level,
@@ -90,7 +105,7 @@ async def _dispatch(
             "payload": {"state": "running", "experiment_id": experiment_id},
         })
 
-    elif msg_type == "training:stop":
+    elif msg.type == "training:stop":
         await training_service.stop()
         logger.info("Training stopped")
         await ws.send_json({
@@ -98,7 +113,7 @@ async def _dispatch(
             "payload": {"state": "stopped"},
         })
 
-    elif msg_type == "training:resume":
+    elif msg.type == "training:resume":
         await training_service.resume()
         logger.info("Training resumed")
         await ws.send_json({
@@ -106,29 +121,30 @@ async def _dispatch(
             "payload": {"state": "running"},
         })
 
-    elif msg_type == "training:set_level":
-        try:
-            params = WsSetLevelPayload(**(payload or {}))
-        except ValidationError as e:
-            await _send_error(ws, f"Invalid level: {e.error_count()} errors")
-            return
-        training_service.set_bot_level(params.level)
+    elif msg.type == "training:set_level":
+        params_lvl: WsSetLevelPayload = msg.payload  # type: ignore[assignment]
+        training_service.set_bot_level(params_lvl.level)
         await ws.send_json({
             "type": "training:status",
-            "payload": {"state": training_service.status()["state"], "bot_level": params.level},
+            "payload": {
+                "state": training_service.status()["state"],
+                "bot_level": params_lvl.level,
+            },
         })
 
-    elif msg_type == "replay:request":
-        try:
-            params = WsReplayRequestPayload(**(payload or {}))
-        except ValidationError as e:
-            await _send_error(ws, f"Invalid replay request: {e.error_count()} errors")
-            return
-        frames = await replay_service.load_replay(params.game_id)
+    elif msg.type == "replay:request":
+        params_rep: WsReplayRequestPayload = msg.payload  # type: ignore[assignment]
+        frames = await replay_service.load_replay(params_rep.game_id)
         await ws.send_json({"type": "replay:data", "payload": {"frames": frames}})
 
+    elif msg.type == "ping":
+        # Server-initiated ping is the usual direction, but accept client pings
+        # too — reply with pong so the client can measure round-trip.
+        await ws.send_json({"type": "pong", "payload": {}})
+
     else:
-        logger.warning("Unknown WS message type: %s", msg_type)
+        # Should be unreachable: parse_ws_message rejects unknown types.
+        logger.warning("Dispatched unexpected WS message type: %s", msg.type)
 
 
 async def metrics_push_loop(
@@ -220,6 +236,7 @@ async def results_push_loop(
         except Exception as e:
             logger.exception("Invalid game result payload, routing to dead-letter")
             _write_dead_letter(data, f"ValidationError: {e}")
+            GAME_SAVE_FAILURE.inc()
             await manager.broadcast({
                 "type": "error",
                 "payload": {
@@ -237,6 +254,7 @@ async def results_push_loop(
                 SAVE_RETRY_ATTEMPTS, record.game_id,
             )
             _write_dead_letter(data, f"{type(err).__name__}: {err}")
+            GAME_SAVE_FAILURE.inc()
             await manager.broadcast({
                 "type": "error",
                 "payload": {
@@ -245,4 +263,6 @@ async def results_push_loop(
                     "game_id": record.game_id,
                 },
             })
+        else:
+            GAME_SAVE_SUCCESS.inc()
         await manager.broadcast({"type": "game:result", "payload": data})

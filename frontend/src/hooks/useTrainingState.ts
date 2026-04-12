@@ -16,6 +16,7 @@ const MAX_RECENT_GAMES = 100
 
 interface TrainingState {
   connectionState: ConnectionState
+  reconnectAttempt: number
   status: TrainingStatus
   metrics: TrainingMetrics[]
   latestFrame: GameState | null
@@ -29,7 +30,7 @@ function getWsUrl(): string {
 }
 
 export function useTrainingState(): TrainingState {
-  const { connectionState, send, subscribe } = useWebSocket(getWsUrl())
+  const { connectionState, reconnectAttempt, send, subscribe } = useWebSocket(getWsUrl())
 
   const [status, setStatus] = useState<TrainingStatus>({
     state: 'stopped',
@@ -79,5 +80,5 @@ export function useTrainingState(): TrainingState {
     return () => { unsubs.forEach(u => u()) }
   }, [subscribe, handleMetrics, handleFrame, handleStatus, handleGameResult])
 
-  return { connectionState, status, metrics, latestFrame, recentGames, send }
+  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send }
 }

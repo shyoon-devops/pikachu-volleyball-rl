@@ -1,0 +1,72 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  Skeleton.css — loading placeholder shimmer
+ * ═══════════════════════════════════════════════════════════
+ *  Designer ownership: tune colors + shimmer intensity. This is
+ *  FE scaffolding; tokens are used so Dark/Light both work.
+ *
+ *  Class map:
+ *    .skeleton, .skeleton--line, .skeleton--rect, .skeleton--circle
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.skeleton {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.05));
+  border-radius: var(--radius-sm, 4px);
+  vertical-align: middle;
+  will-change: background-position;
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-border-strong, rgba(255, 255, 255, 0.08)) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton--line {
+  display: block;
+  width: 100%;
+  height: 0.9em;
+  border-radius: var(--radius-sm, 4px);
+}
+
+.skeleton--rect {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-md, 8px);
+}
+
+.skeleton--circle {
+  border-radius: 50%;
+  aspect-ratio: 1 / 1;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+    transform: none;
+    background: var(--color-border-strong, rgba(255, 255, 255, 0.08));
+    opacity: 0.4;
+  }
+}

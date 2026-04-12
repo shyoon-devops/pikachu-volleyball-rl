@@ -3,16 +3,29 @@ import { GameOverlay } from '../game/GameOverlay'
 import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
+import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { Hyperparams } from '../../lib/types'
 import './Dashboard.css'
 
 export function Dashboard() {
-  const { connectionState, status, metrics, latestFrame, recentGames, send } = useTrainingState()
+  const { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send } = useTrainingState()
 
   const score1 = latestFrame?.score1 ?? 0
   const score2 = latestFrame?.score2 ?? 0
   const isStopped = status.state === 'stopped'
+
+  // Show skeleton only on the very first connect attempt while we have no
+  // data at all. After anything arrives (frame / metrics / recent games)
+  // we keep the real UI up — even through reconnects — so the layout
+  // doesn't flash back to skeletons mid-session. A persistent
+  // disconnect should surface the reconnect banner, not a skeleton.
+  const hasAnyData =
+    latestFrame !== null || metrics.length > 0 || recentGames.length > 0
+  const isInitialLoading = connectionState === 'connecting' && !hasAnyData
+  if (isInitialLoading) {
+    return <DashboardSkeleton />
+  }
 
   const handleStart = (params: Hyperparams, botLevel: number) => {
     send('training:start', { hyperparams: params, bot_level: botLevel })
@@ -20,19 +33,21 @@ export function Dashboard() {
 
   return (
     <div className="dashboard">
-      <div className="dashboard-left">
+      <section className="dashboard-left" aria-labelledby="dashboard-game-heading">
+        <h2 id="dashboard-game-heading" className="sr-only">Game &amp; Controls</h2>
         <TrainingControls
           status={status}
           connectionState={connectionState}
+          reconnectAttempt={reconnectAttempt}
           send={send}
           onStartWithParams={handleStart}
         />
 
-        <div className="dashboard-game-wrapper">
-          <GameCanvas gameState={latestFrame} width={648} height={456} />
-          <GameOverlay score1={score1} score2={score2} width={648} />
+        <div className="dashboard-game-wrapper" role="img" aria-label="Live game canvas — Pikachu Volleyball agent play">
+          <GameCanvas gameState={latestFrame} />
+          <GameOverlay score1={score1} score2={score2} />
           {!latestFrame && status.state === 'running' && (
-            <div className="dashboard-game-waiting">
+            <div className="dashboard-game-waiting" role="status" aria-live="polite">
               Waiting for game frames...
             </div>
           )}
@@ -41,27 +56,28 @@ export function Dashboard() {
         {isStopped && (
           <HyperparamForm onSubmit={handleStart} disabled={connectionState !== 'connected'} />
         )}
-      </div>
+      </section>
 
-      <div className="dashboard-right">
+      <section className="dashboard-right" aria-labelledby="dashboard-metrics-heading">
+        <h2 id="dashboard-metrics-heading" className="sr-only">Training Metrics</h2>
         <MetricsChart data={metrics} dataKey="meanReward" color="#22c55e" label="Reward" />
         <MetricsChart data={metrics} dataKey="winRate" color="#3b82f6" label="Win Rate" />
         <MetricsChart data={metrics} dataKey="policyLoss" color="#ef4444" label="Policy Loss" />
         <MetricsChart data={metrics} dataKey="valueLoss" color="#f97316" label="Value Loss" />
-      </div>
+      </section>
 
-      <div className="dashboard-bottom">
+      <section className="dashboard-bottom" aria-labelledby="recent-games-heading">
         <div className="card">
-          <h3 className="card-title">Recent Games</h3>
+          <h3 className="card-title" id="recent-games-heading">Recent Games</h3>
           {recentGames.length === 0 ? (
             <p className="recent-games-empty empty-state">No games yet.</p>
           ) : (
             <div className="recent-games table-scroll">
-              <table className="recent-games-table">
+              <table className="recent-games-table" aria-labelledby="recent-games-heading">
                 <thead>
                   <tr>
                     {['#', 'Bot Level', 'Score', 'Winner', 'Frames', 'Rallies'].map(h => (
-                      <th key={h}>{h}</th>
+                      <th key={h} scope="col">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -87,7 +103,7 @@ export function Dashboard() {
             </div>
           )}
         </div>
-      </div>
+      </section>
     </div>
   )
 }
