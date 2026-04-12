@@ -69,6 +69,16 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
       vx: next.ball.vx,
       vy: next.ball.vy,
       rotation: lerp(prev.ball.rotation ?? 0, next.ball.rotation ?? 0, t),
+      // Power-hit flag + historical positions are NOT interpolated —
+      // they are per-frame authoritative signals from the engine.
+      // Taking `next` value preserves the original game's visual
+      // semantics (hyper/trail sprites render at discrete historical
+      // positions, not smoothed ones).
+      isPowerHit: next.ball.isPowerHit,
+      previousX: next.ball.previousX,
+      previousY: next.ball.previousY,
+      previousPreviousX: next.ball.previousPreviousX,
+      previousPreviousY: next.ball.previousPreviousY,
     },
     score1: next.score1,
     score2: next.score2,
