@@ -3,13 +3,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/_common.sh"
 
 cd "$PROJECT_DIR"
 
 echo "=== Deploying PROD environment ==="
-echo "  Backend:  http://localhost:8000"
-echo "  Frontend: http://localhost:5173"
-echo "  MongoDB:  localhost:27017"
+echo "  Backend:  http://localhost:8003"
+echo "  Frontend: http://192.168.0.248:3002"
+echo "  MongoDB:  localhost:27020"
 echo ""
 
 # Skip confirmation in CI environments
@@ -21,7 +22,9 @@ if [ -z "${CI:-}" ]; then
     fi
 fi
 
-docker compose -f docker-compose.prod.yml up --build -d
+$DOCKER compose -f docker-compose.prod.yml up --build -d --remove-orphans
+
+$DOCKER image prune -f >/dev/null 2>&1 || true
 
 echo ""
 echo "=== PROD deployment complete ==="

@@ -6,9 +6,10 @@ import type { TrainingStatus, ConnectionState } from '../../lib/types'
 function renderControls(overrides: {
   status?: Partial<TrainingStatus>
   connectionState?: ConnectionState
+  reconnectAttempt?: number
 } = {}) {
   const send = vi.fn()
-  const onStartWithParams = vi.fn()
+  const onStart = vi.fn()
 
   const status: TrainingStatus = {
     state: 'stopped',
@@ -21,12 +22,13 @@ function renderControls(overrides: {
     <TrainingControls
       status={status}
       connectionState={overrides.connectionState ?? 'connected'}
+      reconnectAttempt={overrides.reconnectAttempt}
       send={send}
-      onStartWithParams={onStartWithParams}
+      onStart={onStart}
     />,
   )
 
-  return { send, onStartWithParams }
+  return { send, onStart }
 }
 
 describe('TrainingControls', () => {
@@ -50,10 +52,66 @@ describe('TrainingControls', () => {
     expect(screen.getByText('Resume')).toBeInTheDocument()
   })
 
-  it('calls onStartWithParams when Start is clicked', () => {
-    const { onStartWithParams } = renderControls({ status: { state: 'stopped' } })
+  it('calls onStart when Start is clicked', () => {
+    const { onStart } = renderControls({ status: { state: 'stopped' } })
     fireEvent.click(screen.getByText('Start'))
-    expect(onStartWithParams).toHaveBeenCalledTimes(1)
+    expect(onStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders exactly one Start-training button per state (duplicate-CTA guard)', () => {
+    // Guards against the duplicate-Start-button regression. "Start" is
+    // the distinguishing label; Pause/Resume coexist with Stop as a
+    // secondary toggle and are NOT primary CTAs.
+    const states: Array<TrainingStatus['state']> = ['stopped', 'running', 'paused']
+    for (const state of states) {
+      const { unmount } = render(
+        <TrainingControls
+          status={{ state, currentStep: 0, currentEpisode: 0 }}
+          connectionState="connected"
+          send={vi.fn()}
+          onStart={vi.fn()}
+        />,
+      )
+      const startButtons = screen
+        .getAllByRole('button')
+        .filter(b => b.textContent?.trim() === 'Start')
+      expect(startButtons).toHaveLength(state === 'stopped' ? 1 : 0)
+      unmount()
+    }
+  })
+
+  it('shows Pause button when training is running', () => {
+    renderControls({ status: { state: 'running' } })
+    expect(screen.getByText('Pause')).toBeInTheDocument()
+  })
+
+  it('shows Resume (not Pause) when paused', () => {
+    renderControls({ status: { state: 'paused' } })
+    expect(screen.getByText('Resume')).toBeInTheDocument()
+    expect(screen.queryByText('Pause')).not.toBeInTheDocument()
+  })
+
+  it('does not show Pause or Resume when stopped', () => {
+    renderControls({ status: { state: 'stopped' } })
+    expect(screen.queryByText('Pause')).not.toBeInTheDocument()
+    expect(screen.queryByText('Resume')).not.toBeInTheDocument()
+  })
+
+  it('shows Stop alongside Pause/Resume while training is underway', () => {
+    renderControls({ status: { state: 'running' } })
+    expect(screen.getByText('Stop')).toBeInTheDocument()
+    expect(screen.getByText('Pause')).toBeInTheDocument()
+  })
+
+  it('calls send with training:pause when Pause is clicked', () => {
+    const { send } = renderControls({ status: { state: 'running' } })
+    fireEvent.click(screen.getByText('Pause'))
+    expect(send).toHaveBeenCalledWith('training:pause')
+  })
+
+  it('Pause button exposes accessible label', () => {
+    renderControls({ status: { state: 'running' } })
+    expect(screen.getByLabelText('Pause training')).toBeInTheDocument()
   })
 
   it('calls send with training:stop when Stop is clicked', () => {
@@ -91,5 +149,61 @@ describe('TrainingControls', () => {
     renderControls({ status: { state: 'stopped' }, connectionState: 'disconnected' })
     const startBtn = screen.getByText('Start')
     expect(startBtn).toBeDisabled()
+  })
+
+  // ── Reconnect feedback (BUG-7 #19) ──
+  it('shows "disconnected" when not connected and no reconnect attempts', () => {
+    renderControls({ connectionState: 'disconnected' })
+    expect(screen.getByText(/disconnected/i)).toBeInTheDocument()
+  })
+
+  it('shows reconnect attempt number when disconnected and reconnecting', () => {
+    renderControls({ connectionState: 'disconnected', reconnectAttempt: 3 })
+    expect(screen.getByText(/disconnected — retry 3/i)).toBeInTheDocument()
+  })
+
+  it('shows reconnect banner (role=alert) when disconnected with attempts', () => {
+    renderControls({ connectionState: 'disconnected', reconnectAttempt: 2 })
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/Reconnecting.*attempt 2/i)
+  })
+
+  it('does NOT show reconnect banner when connected', () => {
+    renderControls({ connectionState: 'connected', reconnectAttempt: 0 })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows "reconnecting (attempt N)" when connecting after failures', () => {
+    renderControls({ connectionState: 'connecting', reconnectAttempt: 4 })
+    expect(screen.getByText(/reconnecting \(attempt 4\)/i)).toBeInTheDocument()
+  })
+
+  it('shows "connecting" on first attempt (reconnectAttempt=0)', () => {
+    renderControls({ connectionState: 'connecting', reconnectAttempt: 0 })
+    expect(screen.getByText(/^connecting$/i)).toBeInTheDocument()
+  })
+
+  // ── Accessibility (FE-5 #24) ──
+  it('connection status has role=status for screen readers', () => {
+    renderControls({ connectionState: 'connected' })
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('connection status exposes aria-label with connection state', () => {
+    renderControls({ connectionState: 'connected', status: { state: 'running' } })
+    const status = screen.getByRole('status')
+    expect(status).toHaveAttribute('aria-label', expect.stringContaining('running'))
+  })
+
+  it('Start button has accessible label', () => {
+    renderControls({ status: { state: 'stopped' } })
+    expect(screen.getByLabelText('Start training')).toBeInTheDocument()
+  })
+
+  it('bot level buttons have accessible labels', () => {
+    renderControls()
+    for (let i = 1; i <= 5; i++) {
+      expect(screen.getByLabelText(`Set bot level to ${i}`)).toBeInTheDocument()
+    }
   })
 })

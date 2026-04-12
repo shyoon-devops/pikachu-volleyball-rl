@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import signal
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -20,6 +24,11 @@ from backend.rl.callbacks import (
 )
 from backend.rl.env import PikachuVolleyballEnv
 
+logger = logging.getLogger(__name__)
+
+# File written on SIGTERM so the next process can auto-resume.
+_INTERRUPTED_META_FILENAME = "interrupted.json"
+
 DEFAULT_HYPERPARAMS: dict[str, Any] = {
     "learning_rate": 3e-4,
     "n_steps": 2048,
@@ -33,6 +42,9 @@ DEFAULT_HYPERPARAMS: dict[str, Any] = {
 
 DEFAULT_NET_ARCH: list[int] = [256, 256]
 
+# Training sessions beyond this step count require force=True to stop.
+STOP_PROTECTION_THRESHOLD: int = 10_000
+
 
 class TrainingManager:
     """Manages PPO training in a background thread with async queue communication."""
@@ -45,6 +57,8 @@ class TrainingManager:
         self.model_dir = model_dir
         self.replay_dir = replay_dir
         self.status: str = "stopped"
+        self.current_step: int = 0
+        self.current_episode: int = 0
         self.metrics_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.frames_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.results_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -55,7 +69,9 @@ class TrainingManager:
         self._experiment_id: str = ""
         self._bot_level: int = 1
         self._hyperparams: dict[str, Any] = {}
-        self._total_timesteps_trained: int = 0
+        self._started_at: float = 0.0
+
+        self._install_signal_handler()
 
     async def start(
         self,
@@ -72,7 +88,9 @@ class TrainingManager:
         self._bot_level = bot_level
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         self._stop_event.clear()
-        self._total_timesteps_trained = 0
+        self.current_step = 0
+        self.current_episode = 0
+        self._started_at = time.monotonic()
 
         loop = asyncio.get_running_loop()
 
@@ -86,15 +104,35 @@ class TrainingManager:
 
         return self._experiment_id
 
-    async def stop(self) -> None:
-        """Gracefully stop training and save a final checkpoint."""
+    async def stop(self, *, force: bool = False) -> dict[str, Any]:
+        """Gracefully stop training and save a final checkpoint.
+
+        Returns a status dict. If the session has progressed past
+        STOP_PROTECTION_THRESHOLD steps and ``force`` is False, the stop
+        is **rejected** to prevent accidental termination of long-running
+        training.
+        """
         if self.status != "running":
-            return
+            return {"stopped": True, "reason": "not_running"}
+
+        if not force and self.current_step >= STOP_PROTECTION_THRESHOLD:
+            logger.warning(
+                "Stop rejected: step=%d >= threshold=%d (use force=True)",
+                self.current_step,
+                STOP_PROTECTION_THRESHOLD,
+            )
+            return {
+                "stopped": False,
+                "reason": "protected",
+                "current_step": self.current_step,
+                "threshold": STOP_PROTECTION_THRESHOLD,
+            }
 
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=30)
         self.status = "stopped"
+        return {"stopped": True, "reason": "stopped"}
 
     async def resume(
         self,
@@ -125,6 +163,117 @@ class TrainingManager:
         if level < 1 or level > 5:
             raise ValueError(f"Bot level must be 1-5, got {level}")
         self._bot_level = level
+
+    # ------------------------------------------------------------------
+    # Signal handling (uvicorn reload / SIGTERM protection)
+    # ------------------------------------------------------------------
+
+    def _install_signal_handler(self) -> None:
+        """Register SIGTERM handler to save an emergency checkpoint."""
+        try:
+            prev = signal.getsignal(signal.SIGTERM)
+            def _on_sigterm(signum: int, frame: Any) -> None:
+                self._emergency_save()
+                # Re-raise to let uvicorn/gunicorn proceed with shutdown.
+                if callable(prev) and prev not in (signal.SIG_DFL, signal.SIG_IGN):
+                    prev(signum, frame)
+                else:
+                    raise SystemExit(0)
+            signal.signal(signal.SIGTERM, _on_sigterm)
+        except (OSError, ValueError):
+            # Not in main thread or signals unsupported — skip silently.
+            pass
+
+    def _emergency_save(self) -> None:
+        """Save model + metadata so the next process can resume."""
+        if self._model is None or self.status != "running":
+            return
+        logger.warning(
+            "SIGTERM received — saving emergency checkpoint (step=%d, exp=%s)",
+            self.current_step,
+            self._experiment_id,
+        )
+        try:
+            checkpoint_dir = Path(self.model_dir) / self._experiment_id
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            self._model.save(str(checkpoint_dir / "interrupted"))
+
+            meta = {
+                "experiment_id": self._experiment_id,
+                "current_step": self.current_step,
+                "bot_level": self._bot_level,
+                "hyperparams": self._hyperparams,
+            }
+            meta_path = Path(self.model_dir) / _INTERRUPTED_META_FILENAME
+            meta_path.write_text(json.dumps(meta, indent=2))
+            logger.info("Emergency checkpoint saved to %s", checkpoint_dir)
+        except Exception:
+            logger.exception("Failed to save emergency checkpoint")
+
+    def get_interrupted_session(self) -> dict[str, Any] | None:
+        """Return metadata for an interrupted session if one exists."""
+        meta_path = Path(self.model_dir) / _INTERRUPTED_META_FILENAME
+        if not meta_path.exists():
+            return None
+        try:
+            meta = json.loads(meta_path.read_text())
+            exp_id = meta.get("experiment_id", "")
+            checkpoint = Path(self.model_dir) / exp_id / "interrupted.zip"
+            if not checkpoint.exists():
+                meta_path.unlink(missing_ok=True)
+                return None
+            return meta
+        except Exception:
+            logger.exception("Failed to read interrupted session metadata")
+            return None
+
+    def clear_interrupted_session(self) -> None:
+        """Remove the interrupted session marker after explicit resume or discard."""
+        meta_path = Path(self.model_dir) / _INTERRUPTED_META_FILENAME
+        meta_path.unlink(missing_ok=True)
+
+    async def resume_interrupted(
+        self,
+        total_timesteps: int = 1_000_000,
+        n_envs: int = 8,
+    ) -> str | None:
+        """Resume from an interrupted (SIGTERM) session if one exists.
+
+        Returns the experiment_id if resumed, None otherwise.
+        """
+        meta = self.get_interrupted_session()
+        if meta is None:
+            return None
+
+        exp_id = meta["experiment_id"]
+        self._experiment_id = exp_id
+        self._bot_level = meta.get("bot_level", 1)
+        self._hyperparams = {**DEFAULT_HYPERPARAMS, **meta.get("hyperparams", {})}
+
+        checkpoint_path = str(
+            Path(self.model_dir) / exp_id / "interrupted"
+        )
+        self._stop_event.clear()
+        self.current_step = meta.get("current_step", 0)
+        self._started_at = time.monotonic()
+
+        loop = asyncio.get_running_loop()
+
+        self._thread = threading.Thread(
+            target=self._train_loop,
+            args=(loop, total_timesteps, n_envs, checkpoint_path),
+            daemon=True,
+        )
+        self.status = "running"
+        self._thread.start()
+
+        self.clear_interrupted_session()
+        logger.info(
+            "Resumed interrupted session %s from step %d",
+            exp_id,
+            self.current_step,
+        )
+        return exp_id
 
     def _train_loop(
         self,
@@ -185,7 +334,7 @@ class TrainingManager:
                     play_interval=hp.get("live_frame_interval", 5000),
                     replay_dir=self.replay_dir,
                 ),
-                _StopEventCallback(self._stop_event),
+                _StopEventCallback(self._stop_event, self),
             ])
 
             self._model.learn(
@@ -197,7 +346,7 @@ class TrainingManager:
             # Save final checkpoint
             self._save_final_checkpoint()
         except Exception:
-            pass
+            logger.exception("Training thread crashed")
         finally:
             self.status = "stopped"
             try:
@@ -230,11 +379,17 @@ class TrainingManager:
 
 
 class _StopEventCallback(BaseCallback):
-    """Stops training when the threading.Event is set."""
+    """Stops training when the threading.Event is set and reports step counts."""
 
-    def __init__(self, stop_event: threading.Event) -> None:
+    def __init__(
+        self,
+        stop_event: threading.Event,
+        manager: TrainingManager,
+    ) -> None:
         super().__init__(verbose=0)
         self._stop_event = stop_event
+        self._manager = manager
 
     def _on_step(self) -> bool:
+        self._manager.current_step = self.num_timesteps
         return not self._stop_event.is_set()

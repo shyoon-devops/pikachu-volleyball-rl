@@ -26,19 +26,22 @@ export function ReplayControls({
       <div className="replay-controls-bar">
         <button
           onClick={onTogglePlay}
-          className="replay-controls-play-btn"
+          className="replay-controls-play-btn btn btn-primary"
           data-playing={isPlaying}
         >
           {isPlaying ? 'Pause' : 'Play'}
         </button>
 
-        <div className="replay-controls-speeds">
+        <div className="replay-controls-speeds" role="group" aria-label="Playback speed">
           {SPEEDS.map(s => (
             <button
               key={s}
               onClick={() => onSpeedChange(s)}
-              className="replay-controls-speed-btn"
+              className="replay-controls-speed-btn btn btn-ghost"
               data-active={speed === s}
+              aria-pressed={speed === s}
+              aria-label={`Playback speed ${s}x`}
+              title={`Playback speed ${s}x`}
             >
               {s}x
             </button>
@@ -57,7 +60,19 @@ export function ReplayControls({
         value={currentFrame}
         onChange={e => onSeek(Number(e.target.value))}
         className="replay-controls-seek"
+        aria-label="Seek replay frame"
+        aria-valuemin={0}
+        aria-valuemax={Math.max(0, totalFrames - 1)}
+        aria-valuenow={currentFrame}
       />
+
+      <div className="replay-controls-shortcuts">
+        <kbd>Space</kbd> Play/Pause
+        <kbd>&larr;</kbd><kbd>&rarr;</kbd> &plusmn;1 frame
+        <kbd>&darr;</kbd><kbd>&uarr;</kbd> &plusmn;10 frames
+        <kbd>Home</kbd><kbd>End</kbd> Jump to start/end
+        <kbd>0</kbd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Speed (0.5 / 1 / 2 / 4&times;)
+      </div>
     </div>
   )
 }

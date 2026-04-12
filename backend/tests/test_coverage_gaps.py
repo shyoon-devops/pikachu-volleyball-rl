@@ -74,7 +74,10 @@ class TestEngineDiving:
 
         state = game.step(NOOP, NOOP)
         # After landing from dive, lying_down_duration should be set
-        assert state.player1.lying_down_duration == 30 or state.is_round_over
+        # to LYING_DOWN_DURATION (3 frames per original physics.js).
+        from backend.game.constants import LYING_DOWN_DURATION
+
+        assert state.player1.lying_down_duration == LYING_DOWN_DURATION or state.is_round_over
 
 
 class TestEngineNetCollisionZeroVx:
@@ -259,18 +262,20 @@ class TestStopEventCallback:
     """Cover _StopEventCallback."""
 
     def test_stop_event_continues_when_not_set(self) -> None:
-        from backend.rl.trainer import _StopEventCallback
+        from backend.rl.trainer import _StopEventCallback, TrainingManager
 
         event = threading.Event()
-        cb = _StopEventCallback(event)
+        manager = TrainingManager()
+        cb = _StopEventCallback(event, manager)
         assert cb._on_step() is True
 
     def test_stop_event_stops_when_set(self) -> None:
-        from backend.rl.trainer import _StopEventCallback
+        from backend.rl.trainer import _StopEventCallback, TrainingManager
 
         event = threading.Event()
         event.set()
-        cb = _StopEventCallback(event)
+        manager = TrainingManager()
+        cb = _StopEventCallback(event, manager)
         assert cb._on_step() is False
 
 
@@ -398,7 +403,7 @@ class TestEnvAutopower:
 
         # Action 3 = jump (y_dir=-1), but since already jumping, the auto power-hit triggers
         obs, reward, _, _, _ = env.step(3)
-        assert obs.shape == (12,)
+        assert obs.shape == (18,)
         env.close()
 
 
@@ -406,7 +411,7 @@ class TestActionMap:
     """Cover all entries in ACTION_MAP."""
 
     def test_all_actions_are_valid(self) -> None:
-        assert len(ACTION_MAP) == 6
+        assert len(ACTION_MAP) == 12
         for action_id, inp in ACTION_MAP.items():
             assert isinstance(inp, PlayerInput)
             assert inp.x_dir in (-1, 0, 1)

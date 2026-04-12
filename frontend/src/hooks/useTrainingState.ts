@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { useWebSocket } from './useWebSocket'
+import { snakeToCamel } from '../lib/api'
 import type {
   GameState,
   TrainingMetrics,
@@ -13,8 +14,9 @@ import type {
 const MAX_METRICS_POINTS = 1000
 const MAX_RECENT_GAMES = 100
 
-interface TrainingState {
+export interface TrainingState {
   connectionState: ConnectionState
+  reconnectAttempt: number
   status: TrainingStatus
   metrics: TrainingMetrics[]
   latestFrame: GameState | null
@@ -27,8 +29,14 @@ function getWsUrl(): string {
   return `${protocol}//${window.location.host}/ws`
 }
 
-export function useTrainingState(): TrainingState {
-  const { connectionState, send, subscribe } = useWebSocket(getWsUrl())
+/**
+ * Internal: subscribes to the WebSocket and derives training state.
+ * Exported for use by TrainingStateProvider only — every call opens a
+ * new socket, so app code should never call this directly. Read via
+ * `useTrainingState()` which consumes the shared context instead.
+ */
+export function useTrainingStateImpl(): TrainingState {
+  const { connectionState, reconnectAttempt, send, subscribe } = useWebSocket(getWsUrl())
 
   const [status, setStatus] = useState<TrainingStatus>({
     state: 'stopped',
@@ -40,7 +48,7 @@ export function useTrainingState(): TrainingState {
   const [recentGames, setRecentGames] = useState<GameRecord[]>([])
 
   const handleMetrics = useCallback((msg: WSMessage) => {
-    const payload = msg.payload as TrainingMetrics
+    const payload = snakeToCamel<TrainingMetrics>(msg.payload)
     setMetrics(prev => {
       const next = [...prev, payload]
       return next.length > MAX_METRICS_POINTS ? next.slice(-MAX_METRICS_POINTS) : next
@@ -48,15 +56,20 @@ export function useTrainingState(): TrainingState {
   }, [])
 
   const handleFrame = useCallback((msg: WSMessage) => {
-    setLatestFrame(msg.payload as GameState)
+    setLatestFrame(snakeToCamel<GameState>(msg.payload))
   }, [])
 
   const handleStatus = useCallback((msg: WSMessage) => {
-    setStatus(msg.payload as TrainingStatus)
+    const incoming = snakeToCamel<Partial<TrainingStatus>>(msg.payload)
+    setStatus(prev => ({
+      ...prev,
+      ...incoming,
+      state: incoming.state ?? prev.state,
+    }))
   }, [])
 
   const handleGameResult = useCallback((msg: WSMessage) => {
-    const record = msg.payload as GameRecord
+    const record = snakeToCamel<GameRecord>(msg.payload)
     setRecentGames(prev => {
       const next = [record, ...prev]
       return next.length > MAX_RECENT_GAMES ? next.slice(0, MAX_RECENT_GAMES) : next
@@ -73,5 +86,25 @@ export function useTrainingState(): TrainingState {
     return () => { unsubs.forEach(u => u()) }
   }, [subscribe, handleMetrics, handleFrame, handleStatus, handleGameResult])
 
-  return { connectionState, status, metrics, latestFrame, recentGames, send }
+  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send }
+}
+
+export const TrainingStateContext = createContext<TrainingState | null>(null)
+
+/**
+ * Access the shared training state.
+ *
+ * Must be rendered under <TrainingStateProvider /> (normal runtime) so
+ * every consumer reads from the one WebSocket. Component tests that
+ * exercise a consumer in isolation should use `vi.mock` on this module,
+ * matching the pattern in Dashboard.test.tsx.
+ */
+export function useTrainingState(): TrainingState {
+  const ctx = useContext(TrainingStateContext)
+  if (!ctx) {
+    throw new Error(
+      'useTrainingState must be used within <TrainingStateProvider />',
+    )
+  }
+  return ctx
 }

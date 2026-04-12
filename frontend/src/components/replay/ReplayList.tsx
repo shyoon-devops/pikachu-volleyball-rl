@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getGames } from '../../lib/api'
-import type { GameRecord } from '../../lib/types'
+import { getGames, getAvailableReplays } from '../../lib/api'
+import type { GameRecord, ReplayInfo } from '../../lib/types'
 import './ReplayList.css'
 
 export function ReplayList() {
   const navigate = useNavigate()
   const [games, setGames] = useState<GameRecord[]>([])
+  const [replays, setReplays] = useState<ReplayInfo[]>([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -15,16 +16,17 @@ export function ReplayList() {
 
   useEffect(() => {
     let cancelled = false
-    getGames(page, limit)
-      .then(res => {
+    Promise.all([getGames(page, limit), getAvailableReplays()])
+      .then(([gamesRes, replaysRes]) => {
         if (cancelled) return
-        setGames(res.data)
-        setTotal(res.total)
+        setGames(gamesRes.data)
+        setTotal(gamesRes.total)
+        setReplays(replaysRes)
         setError(null)
       })
       .catch(err => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Failed to load games')
+        setError(err instanceof Error ? err.message : 'Failed to load data')
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -47,11 +49,35 @@ export function ReplayList() {
         <div className="replay-list-error alert-error">{error}</div>
       )}
 
-      <div className="replay-list-table-wrapper card">
+      {/* Available Replays */}
+      {replays.length > 0 && (
+        <div className="replay-list-available card">
+          <h3 className="replay-list-subtitle">Available Replays</h3>
+          <div className="replay-list-replay-grid">
+            {replays.slice(0, 12).map(r => (
+              <button
+                key={r.gameId}
+                onClick={() => navigate(`/replay/${r.gameId}`)}
+                className="replay-list-replay-card btn btn-ghost"
+              >
+                <span className="replay-list-replay-id">{r.gameId.slice(0, 8)}</span>
+                <span className="replay-list-replay-meta">
+                  {(r.sizeBytes / 1024).toFixed(0)}KB
+                  {' \u00b7 '}
+                  {new Date(r.createdAt * 1000).toLocaleString()}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Game History Table */}
+      <div className="replay-list-table-wrapper card table-scroll">
         <table className="replay-list-table">
           <thead>
             <tr>
-              {['Date', 'Bot Level', 'Score', 'Winner', 'Frames', 'Rallies', ''].map(h => (
+              {['Date', 'Bot Level', 'Score', 'Winner', 'Frames', 'Rallies'].map(h => (
                 <th key={h}>{h}</th>
               ))}
             </tr>
@@ -59,11 +85,11 @@ export function ReplayList() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="replay-list-empty">Loading...</td>
+                <td colSpan={6} className="replay-list-empty">Loading...</td>
               </tr>
             ) : games.length === 0 ? (
               <tr>
-                <td colSpan={7} className="replay-list-empty">No games recorded yet.</td>
+                <td colSpan={6} className="replay-list-empty empty-state">No games recorded yet.</td>
               </tr>
             ) : (
               games.map(g => (
@@ -82,14 +108,6 @@ export function ReplayList() {
                   </td>
                   <td className="text-muted">{g.durationFrames}</td>
                   <td className="text-muted">{g.rallyCount}</td>
-                  <td>
-                    <button
-                      onClick={() => navigate(`/replay/${g.id}`)}
-                      className="replay-list-btn"
-                    >
-                      Replay
-                    </button>
-                  </td>
                 </tr>
               ))
             )}
@@ -102,7 +120,7 @@ export function ReplayList() {
           <button
             onClick={() => changePage(Math.max(1, page - 1))}
             disabled={page <= 1}
-            className="replay-list-page-btn"
+            className="replay-list-page-btn btn btn-ghost"
           >
             Prev
           </button>
@@ -112,7 +130,7 @@ export function ReplayList() {
           <button
             onClick={() => changePage(Math.min(totalPages, page + 1))}
             disabled={page >= totalPages}
-            className="replay-list-page-btn"
+            className="replay-list-page-btn btn btn-ghost"
           >
             Next
           </button>

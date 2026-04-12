@@ -1,0 +1,131 @@
+# Deployed Versions by Environment
+#
+# Source of truth for what is ACTUALLY running in each environment.
+# MUST be updated by DevOps within 30 minutes of every deploy (see WORKFLOW.md § Post-Deploy Doc Update).
+# Unverified fields are marked UNKNOWN and must be filled in via GitHub issue #38 or subsequent deploy reports.
+#
+# Verification protocol:
+#   backend_commit     : source of truth is the git SHA baked into the container image at build time
+#                        (e.g. LABEL org.opencontainers.image.revision, /etc/app-version, or API /api/version if later added)
+#   frontend_commit    : git SHA of the source used for the build rsynced to yoonbian-2
+#   frontend_bundle    : primary bundle filename from index.html (e.g. assets/index-<hash>.js)
+#   backend_image      : `docker inspect <container> --format '{{.Image}}'`
+#   last_deployed_at   : ISO-8601 in Asia/Seoul
+#   last_verified_at   : when this YAML entry was last confirmed via curl + docker inspect
+
+schema_version: 1
+last_file_update: 2026-04-12T16:05:00+09:00   # v0.2.2 tag cut — dev branch updated
+authoritative_source: docs/VERSIONS.yml       # this file supersedes README + DEPLOYMENT-STATUS on port/version conflicts
+
+environments:
+  dev:
+    host_backend: 192.168.0.250
+    host_frontend: 192.168.0.248
+    backend:
+      port: 8001
+      status: stale            # v0.2.2 tagged in git but deploy not executed yet — dev server still running v0.2.1 (482df2d1)
+      health_endpoint: /api/health
+      live_endpoint: /api/health/live   # present (BE-3 verified in v0.2.1)
+      ready_endpoint: /api/health/ready # present
+      openapi_version_field: "0.1.0"    # hardcoded in FastAPI app, not reliable
+      commit: UNKNOWN          # DevOps to fill in (#38 + v0.2.2 redeploy)
+      image: UNKNOWN
+      built_at: UNKNOWN
+      deployed_at: UNKNOWN
+      training_state: stopped  # verified 2026-04-12
+    frontend:
+      port: 3000
+      status: stale            # serving v0.2.1 bundle index-CAYlGd5L.js until v0.2.2 frontend rebuild
+      bundle: assets/index-CAYlGd5L.js
+      commit: UNKNOWN
+      built_at: UNKNOWN
+      deployed_at: UNKNOWN
+    mongodb:
+      port: UNKNOWN            # documented :27018 — unverified
+      status: UNKNOWN
+    git_branch: dev
+    git_branch_head: 2582886b  # v0.2.2 tag target — product-manager merge w/ VERSION+CHANGELOG+release note
+    tag_at_head: v0.2.2        # tag points here (annotated)
+    deploy_pending: true       # runtime still v0.2.1 until DevOps executes deploy-{backend,frontend}.sh dev
+    notes: >
+      v0.2.2 tag cut at 2582886b on 2026-04-12. Git branch includes Sprint 2 scope
+      (BE-5/6/7, FE-6/7/8/9, AI Engineer faithful physics port, Designer D6-D10,
+      QA reverify, DevOps monitoring). Runtime still on v0.2.1 — waiting on
+      DevOps to deploy-dev.sh + deploy-frontend.sh dev. Trainer PR #42 deferred to v0.2.3.
+
+  qa:
+    host_backend: 192.168.0.250
+    host_frontend: 192.168.0.248
+    backend:
+      port: 8002               # documented; currently DOWN
+      status: down             # verified via curl 2026-04-12 — ISSUE #38
+      commit: UNKNOWN
+      image: UNKNOWN
+      built_at: UNKNOWN
+      deployed_at: UNKNOWN
+    frontend:
+      port: 3001
+      status: up
+      bundle: assets/index-CAYlGd5L.js   # byte-identical to dev + prod
+      commit: UNKNOWN
+      built_at: UNKNOWN
+      deployed_at: UNKNOWN
+    mongodb:
+      port: UNKNOWN
+      status: UNKNOWN
+    git_branch: qa
+    git_branch_head: 1baa3e3b  # "chore: promote dev to qa" (includes BE-2/BE-3)
+    tag_at_head: null
+    notes: >
+      Backend currently down. Git branch includes v0.2.1 scope via re-promotion,
+      but nothing is actually serving.
+
+  prod:
+    host_backend: 192.168.0.250
+    host_frontend: 192.168.0.248
+    backend:
+      port: 8003               # VERIFIED — previously documented :8000 was wrong
+      status: up
+      health_endpoint: /api/health
+      live_endpoint: MISSING   # /api/health/live returns 404 — pre-BE-3 code
+      ready_endpoint: MISSING  # /api/health/ready returns 404
+      openapi_version_field: "0.1.0"
+      commit: UNKNOWN          # DevOps to fill; feature set suggests pre-v0.2.1
+      image: UNKNOWN
+      built_at: UNKNOWN
+      deployed_at: UNKNOWN
+      training_state: stopped
+    frontend:
+      port: 3002               # VERIFIED — previously documented :5173 was wrong
+      status: up
+      bundle: assets/index-CAYlGd5L.js   # byte-identical to dev + qa
+      commit: UNKNOWN
+      built_at: UNKNOWN
+      deployed_at: UNKNOWN
+    mongodb:
+      port: 27020              # per PM report, unverified by curl (mongodb wire protocol)
+      status: UNKNOWN
+    git_branch: prod
+    git_branch_head: 41f4fdb1
+    tag_at_head: null          # v0.1.0 tag is on main (fdc41de), prod has drifted
+    notes: >
+      Running pre-BE-3 / pre-BUG-2 code. v0.2.1 NOT deployed despite v0.2.1 tag
+      existing on github/dev. Prod backend returns hardcoded {"status":"ok"} to
+      /api/health (the exact behavior BUG-2 was filed against).
+
+# =========================================================================
+# DevOps update protocol:
+#
+#   1. Immediately before a deploy: open a PR to this file with the target
+#      values filled in (even if UNKNOWN for commit — use the planned SHA).
+#   2. Within 30 minutes of the deploy completing: update with actual
+#      verified values (commit hash, image SHA, build time, deploy time).
+#   3. Bump `last_file_update` to the commit time of the update.
+#   4. Violations (no update within 30 min) → next deploy approval revoked
+#      per WORKFLOW.md § Post-Deploy Doc Update.
+#
+# Port-change protocol (see WORKFLOW.md § Port Change Policy):
+#   A port may not be changed without a PR to this file AND
+#   DEPLOYMENT-STATUS.md AND README.md landed in the same commit as the
+#   deploy script change. PM must approve the port change before deploy.
+# =========================================================================

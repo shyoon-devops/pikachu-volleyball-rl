@@ -2,18 +2,9 @@
  * ═══════════════════════════════════════════════════════════
  *  Dashboard.css — 대시보드 레이아웃
  * ═══════════════════════════════════════════════════════════
- *
- *  Designer: FE에게 Dashboard.tsx에 아래 변경 요청:
- *
- *  1. import './Dashboard.css' 추가
- *  2. 루트 grid <div>에 className="dashboard" 추가
- *  3. 좌측 컬럼 <div>에 className="dashboard__left" 추가
- *  4. 게임 캔버스 wrapper <div>에 className="dashboard__game-wrapper" 추가
- *  5. 우측 차트 <div>에 className="dashboard__right" 추가
- *  6. 하단 게임 히스토리 <div>에 className="dashboard__recent-games" 추가
- *  7. 히스토리 카드 <div>에 className="card recent-games-card" 추가
- *  8. 위 요소들의 inline style={{}} 제거
- *
+ *  FE className 매핑:
+ *    .dashboard, .dashboard-left, .dashboard-game-wrapper,
+ *    .dashboard-right, .dashboard-bottom
  * ═══════════════════════════════════════════════════════════
  */
 
@@ -26,42 +17,147 @@
   margin: 0 auto;
 }
 
-.dashboard__left {
+.dashboard-left {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
 
-.dashboard__game-wrapper {
+.dashboard-game-wrapper {
   position: relative;
   border-radius: var(--radius-lg);
   overflow: hidden;
+  width: 100%;
+  /* Preserve the original 432:304 court aspect ratio at every viewport size */
+  aspect-ratio: 432 / 304;
+  max-width: 100%;
 }
 
-.dashboard__right {
+.dashboard-game-wrapper .game-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.dashboard-game-wrapper canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+.dashboard-game-waiting {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  pointer-events: none;
+}
+
+.dashboard-right {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
 }
 
-.dashboard__recent-games {
+.dashboard-bottom {
   grid-column: 1 / -1;
 }
 
-.recent-games-card h3 {
+/* ── Recent Games ──────────────────────────────────────── */
+.card-title {
   margin: 0 0 var(--space-3);
   font-size: var(--text-base);
   color: var(--color-text-secondary);
   font-weight: var(--weight-medium);
 }
 
+.recent-games-empty {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.recent-games {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.recent-games-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  min-width: 500px;
+}
+
+.recent-games-table th {
+  text-align: left;
+  padding: var(--space-3);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.recent-games-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/*
+ * 행 호버 · 선택 상태.
+ *   - 첫 td 에 ::before 의사요소 없이 좌측 box-shadow inset 로 accent bar 생성.
+ *   - :focus-within 은 tab 이동 시에도 행 전체 하이라이트.
+ *   - [aria-selected="true"] / .selected 는 FE 가 선택 상태 도입 시 사용.
+ */
+.recent-games-table tbody tr {
+  transition: background var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.recent-games-table tbody tr:hover,
+.recent-games-table tbody tr:focus-within {
+  background: var(--color-bg-hover);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.recent-games-table tbody tr[aria-selected="true"],
+.recent-games-table tbody tr.selected {
+  background: var(--color-accent-dim);
+  box-shadow: inset 3px 0 0 var(--color-accent),
+              0 0 0 1px var(--color-border-accent);
+}
+
+.recent-games-table tbody tr[aria-selected="true"]:hover,
+.recent-games-table tbody tr.selected:hover {
+  background: var(--color-accent-dim);
+  filter: brightness(1.05);
+}
+
+/* ── Responsive ────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .dashboard {
     grid-template-columns: 1fr;
     padding: var(--space-4);
   }
 
-  .dashboard__recent-games {
+  .dashboard-bottom {
     grid-column: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard {
+    padding: var(--space-3);
+    gap: var(--space-3);
   }
 }

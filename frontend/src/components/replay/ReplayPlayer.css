@@ -2,25 +2,16 @@
  * ═══════════════════════════════════════════════════════════
  *  ReplayPlayer.css — 리플레이 재생 페이지
  * ═══════════════════════════════════════════════════════════
- *
- *  Designer: FE에게 ReplayPlayer.tsx에 아래 변경 요청:
- *
- *  1. import './ReplayPlayer.css' 추가
- *  2. 루트 <div>에 className="replay-player" 추가
- *  3. 헤더 행 <div>에 className="replay-player__header" 추가
- *  4. Back <Link>에 className="replay-player__back" 추가
- *  5. <h2>에 className="replay-player__title" 추가
- *  6. 캔버스 wrapper <div>에 className="replay-player__canvas" 추가
- *  7. 로딩 <div>에 className="replay-player__loading" 추가
- *     (spinner 사용: <div className="spinner" /> 추가)
- *  8. 에러 <div>에 className="replay-player__error" 추가
- *  9. 위 요소들의 inline style={{}} 제거
- *
+ *  FE className 매핑:
+ *    .replay-player, .replay-player-header, .replay-player-back,
+ *    .replay-player-title, .replay-player-game,
+ *    .replay-player-loading, .replay-player-error-wrapper,
+ *    .replay-player-error, .replay-player-error-back
  * ═══════════════════════════════════════════════════════════
  */
 
 .replay-player {
-  max-width: 700px;
+  max-width: var(--page-narrow-width);
   margin: 0 auto;
   padding: var(--space-6);
   display: flex;
@@ -28,35 +19,35 @@
   gap: var(--space-4);
 }
 
-.replay-player__header {
+.replay-player-header {
   display: flex;
   align-items: center;
   gap: var(--space-3);
 }
 
-.replay-player__back {
+.replay-player-back {
   font-size: var(--text-sm);
   color: var(--color-blue);
   text-decoration: none;
   transition: color var(--duration-fast);
 }
 
-.replay-player__back:hover {
+.replay-player-back:hover {
   color: var(--color-accent);
 }
 
-.replay-player__title {
+.replay-player-title {
   font-size: var(--text-lg);
   color: var(--color-text-secondary);
   margin: 0;
   font-family: var(--font-mono);
 }
 
-.replay-player__canvas {
+.replay-player-game {
   position: relative;
 }
 
-.replay-player__loading {
+.replay-player-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -65,12 +56,209 @@
   color: var(--color-text-muted);
 }
 
-.replay-player__error {
+.replay-player-error-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-12);
+}
+
+.replay-player-error {
   padding: var(--space-3);
   background: var(--color-danger-dim);
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  border: 1px solid var(--color-danger-border);
   border-radius: var(--radius-md);
   color: var(--color-danger);
   font-size: var(--text-sm);
-  margin-bottom: var(--space-4);
+}
+
+.replay-player-error-back {
+  font-size: var(--text-sm);
+  color: var(--color-blue);
+  text-decoration: none;
+}
+
+.replay-player-error-back:hover {
+  color: var(--color-accent);
+}
+
+/* ── Responsive ────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .replay-player {
+    padding: var(--space-3);
+    gap: var(--space-3);
+  }
+
+  .replay-player-title {
+    font-size: var(--text-base);
+  }
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  전체화면 모드 (D8)
+ * ═══════════════════════════════════════════════════════════
+ *  FE 구현 방식 2가지 모두 CSS 로 대응:
+ *    (A) HTMLElement.requestFullscreen() 사용 → :fullscreen 매치
+ *    (B) CSS-only 의사 전체화면(.replay-player--fullscreen 토글) → 클래스 매치
+ *
+ *  대상 요소는 .replay-player-game (게임 + 컨트롤 묶음 권장) 또는
+ *  .replay-player (전체 페이지). 두 경우 모두 지원.
+ *
+ *  전체화면에서 우선 순위:
+ *    1) 캔버스가 vh 기준으로 최대화 (aspect-ratio 유지)
+ *    2) 헤더 / 타이틀은 숨김 or 반투명 오버레이로 이동
+ *    3) 컨트롤 바는 하단 고정
+ *    4) 배경은 pure black 으로 몰입감
+ * ═══════════════════════════════════════════════════════════
+ */
+
+/* (A) 네이티브 fullscreen API 로 .replay-player 가 전체화면이 될 때 */
+.replay-player:fullscreen,
+.replay-player:-webkit-full-screen {
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  gap: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.replay-player:fullscreen .replay-player-header,
+.replay-player:-webkit-full-screen .replay-player-header {
+  padding: var(--space-2) var(--space-4);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.replay-player:fullscreen .replay-player-game,
+.replay-player:-webkit-full-screen .replay-player-game {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  min-height: 0; /* grid 자식이 부모를 밀지 않도록 */
+}
+
+/* 전체화면 내에서 캔버스는 가용 공간 최대로, aspect-ratio 는 유지 */
+.replay-player:fullscreen .game-canvas,
+.replay-player:-webkit-full-screen .game-canvas {
+  width: auto;
+  height: auto;
+  max-width: min(100%, calc((100vh - 180px) * 432 / 304));
+  max-height: calc(100vh - 180px);
+}
+
+/* (B) 클래스 토글 기반 의사 전체화면 — FE 가 document.fullscreenEnabled=false
+ *     환경(iOS Safari 일부) 에서 사용 가능하도록 */
+.replay-player--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #000;
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  gap: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: auto;
+}
+
+.replay-player--fullscreen .replay-player-header {
+  padding: var(--space-2) var(--space-4);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.replay-player--fullscreen .replay-player-game {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+
+.replay-player--fullscreen .game-canvas {
+  width: auto;
+  height: auto;
+  max-width: min(100%, calc((100vh - 180px) * 432 / 304));
+  max-height: calc(100vh - 180px);
+}
+
+/*
+ * Fullscreen 버튼 유틸리티 — FE 가 버튼 마크업에 추가하면 적용.
+ *   <button class="replay-fullscreen-btn" aria-label="Fullscreen">
+ *     <svg class="replay-fullscreen-btn-icon"> ... </svg>
+ *   </button>
+ * 아이콘은 CSS 로 대각선 4코너 브라켓 (pure CSS, SVG 없이도 동작).
+ */
+.replay-fullscreen-btn {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.replay-fullscreen-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-border-accent);
+  background: var(--color-bg-hover);
+}
+
+/* 전체화면 진입/나가기 아이콘 — ::before / ::after 로 4코너 L-브라켓 */
+.replay-fullscreen-btn::before,
+.replay-fullscreen-btn::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border: 2px solid currentColor;
+  border-radius: 1px;
+}
+
+.replay-fullscreen-btn::before {
+  top: 6px;
+  left: 6px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.replay-fullscreen-btn::after {
+  bottom: 6px;
+  right: 6px;
+  border-left: none;
+  border-top: none;
+}
+
+/* 전체화면 중일 때 아이콘은 반대(내부로 화살표) — inset 8코너 */
+.replay-player:fullscreen .replay-fullscreen-btn::before,
+.replay-player:-webkit-full-screen .replay-fullscreen-btn::before,
+.replay-player--fullscreen .replay-fullscreen-btn::before {
+  top: 10px;
+  left: 10px;
+  border: 2px solid currentColor;
+  border-left: none;
+  border-top: none;
+}
+
+.replay-player:fullscreen .replay-fullscreen-btn::after,
+.replay-player:-webkit-full-screen .replay-fullscreen-btn::after,
+.replay-player--fullscreen .replay-fullscreen-btn::after {
+  bottom: 10px;
+  right: 10px;
+  border: 2px solid currentColor;
+  border-right: none;
+  border-bottom: none;
 }

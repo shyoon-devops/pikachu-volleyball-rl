@@ -32,7 +32,11 @@ export function ReplayPlayer() {
       })
       .catch(err => {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Failed to load replay')
+        const msg = err instanceof Error ? err.message : 'Failed to load replay'
+        setError(msg.includes('not found') || msg.includes('404')
+          ? 'Replay data not available for this game. Replays are only saved during training sessions.'
+          : msg,
+        )
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -65,17 +69,81 @@ export function ReplayPlayer() {
     return clearTimer
   }, [isPlaying, speed, frames.length, clearTimer])
 
-  const handleTogglePlay = () => {
+  const handleTogglePlay = useCallback(() => {
     if (currentIndex >= frames.length - 1) {
       setCurrentIndex(0)
     }
     setIsPlaying(prev => !prev)
-  }
+  }, [currentIndex, frames.length])
 
-  const handleSeek = (frame: number) => {
+  const handleSeek = useCallback((frame: number) => {
     setCurrentIndex(frame)
     setIsPlaying(false)
-  }
+  }, [])
+
+  const stepFrame = useCallback((delta: number) => {
+    setCurrentIndex(prev => Math.max(0, Math.min(frames.length - 1, prev + delta)))
+    setIsPlaying(false)
+  }, [frames.length])
+
+  useEffect(() => {
+    if (frames.length === 0) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+
+      // Scrubbing UX: horizontal arrows step one frame, vertical arrows
+      // jump ten frames — matches common video-editor muscle memory.
+      switch (e.code) {
+        case 'Space':
+          e.preventDefault()
+          handleTogglePlay()
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          stepFrame(-1)
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          stepFrame(1)
+          break
+        case 'ArrowDown':
+          e.preventDefault()
+          stepFrame(-10)
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          stepFrame(10)
+          break
+        case 'Home':
+          e.preventDefault()
+          setCurrentIndex(0)
+          setIsPlaying(false)
+          break
+        case 'End':
+          e.preventDefault()
+          setCurrentIndex(Math.max(0, frames.length - 1))
+          setIsPlaying(false)
+          break
+        case 'Digit0':
+          setSpeed(0.5)
+          break
+        case 'Digit1':
+          setSpeed(1)
+          break
+        case 'Digit2':
+          setSpeed(2)
+          break
+        case 'Digit3':
+          setSpeed(4)
+          break
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [frames.length, handleTogglePlay, stepFrame])
 
   const currentFrame = frames[currentIndex] ?? null
   const score1 = currentFrame?.score1 ?? 0

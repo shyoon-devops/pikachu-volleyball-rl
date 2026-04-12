@@ -1,59 +1,86 @@
-import { useState } from 'react'
 import type { Hyperparams } from '../../lib/types'
 import './HyperparamForm.css'
 
+// DEFAULT_HYPERPARAMS lives in its own file so this module stays
+// component-only (react-refresh/only-export-components).
+
 interface HyperparamFormProps {
-  onSubmit: (params: Hyperparams, botLevel: number) => void
+  /** Current hyperparameter values (controlled). */
+  params: Hyperparams
+  /** Selected bot level to start training against (controlled). */
+  botLevel: number
+  /** Emitted when any hyperparameter field changes. */
+  onParamsChange: (next: Hyperparams) => void
+  /** Emitted when bot level select changes. */
+  onBotLevelChange: (level: number) => void
+  /** Disable all inputs (e.g. while disconnected). */
   disabled: boolean
 }
 
-const DEFAULTS: Hyperparams = {
-  learning_rate: 3e-4,
-  n_steps: 2048,
-  batch_size: 64,
-  gamma: 0.99,
-  clip_range: 0.2,
-}
+const FIELD_KEYS: Array<keyof Hyperparams> = [
+  'learning_rate',
+  'n_steps',
+  'batch_size',
+  'gamma',
+  'clip_range',
+]
 
-export function HyperparamForm({ onSubmit, disabled }: HyperparamFormProps) {
-  const [params, setParams] = useState<Hyperparams>(DEFAULTS)
-  const [botLevel, setBotLevel] = useState(1)
-
-  const handleChange = (key: keyof Hyperparams, value: string) => {
+/**
+ * HyperparamForm — a controlled input form for PPO hyperparameters and the
+ * starting bot level. Intentionally does NOT render a submit button: the
+ * single Start control lives in <TrainingControls /> to avoid a
+ * duplicate-CTA UX bug. Submit the values via that button.
+ */
+export function HyperparamForm({
+  params,
+  botLevel,
+  onParamsChange,
+  onBotLevelChange,
+  disabled,
+}: HyperparamFormProps) {
+  const handleFieldChange = (key: keyof Hyperparams, value: string) => {
     const num = Number(value)
-    if (!Number.isNaN(num)) {
-      setParams(prev => ({ ...prev, [key]: num }))
-    }
-  }
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    onSubmit(params, botLevel)
+    if (Number.isNaN(num)) return
+    onParamsChange({ ...params, [key]: num })
   }
 
   return (
-    <form onSubmit={handleSubmit} className="hyperparam-form card">
-      <h3 className="hyperparam-form-title">Hyperparameters</h3>
+    <section
+      className="hyperparam-form card"
+      aria-labelledby="hyperparam-form-title"
+    >
+      <h3 className="hyperparam-form-title" id="hyperparam-form-title">
+        Hyperparameters
+      </h3>
 
       <div className="hyperparam-form-grid">
-        {(Object.keys(DEFAULTS) as Array<keyof Hyperparams>).map(key => (
-          <div key={key}>
-            <label className="hyperparam-form-label">{key}</label>
-            <input
-              type="number"
-              step="any"
-              value={params[key]}
-              onChange={e => handleChange(key, e.target.value)}
-              className="hyperparam-form-input"
-              disabled={disabled}
-            />
-          </div>
-        ))}
+        {FIELD_KEYS.map(key => {
+          const fieldId = `hyperparam-${key}`
+          return (
+            <div key={key}>
+              <label className="hyperparam-form-label" htmlFor={fieldId}>
+                {key}
+              </label>
+              <input
+                id={fieldId}
+                type="number"
+                step="any"
+                value={params[key]}
+                onChange={e => handleFieldChange(key, e.target.value)}
+                className="hyperparam-form-input"
+                disabled={disabled}
+              />
+            </div>
+          )
+        })}
         <div>
-          <label className="hyperparam-form-label">bot_level</label>
+          <label className="hyperparam-form-label" htmlFor="hyperparam-bot-level">
+            bot_level
+          </label>
           <select
+            id="hyperparam-bot-level"
             value={botLevel}
-            onChange={e => setBotLevel(Number(e.target.value))}
+            onChange={e => onBotLevelChange(Number(e.target.value))}
             className="hyperparam-form-select"
             disabled={disabled}
           >
@@ -64,9 +91,9 @@ export function HyperparamForm({ onSubmit, disabled }: HyperparamFormProps) {
         </div>
       </div>
 
-      <button type="submit" disabled={disabled} className="hyperparam-form-submit">
-        Start Training
-      </button>
-    </form>
+      <p className="hyperparam-form-hint">
+        Adjust values, then press <strong>Start</strong> above to begin training.
+      </p>
+    </section>
   )
 }

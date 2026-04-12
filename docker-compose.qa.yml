@@ -9,7 +9,7 @@ services:
       - mongo_data_qa:/data/db
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok && db.stats().ok"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -37,20 +37,14 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "--max-time", "3", "http://localhost:8000/api/health"]
       interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 20s
+      retries: 5
+      start_period: 30s
 
-  frontend:
-    build: ./frontend
-    ports:
-      - "3001:80"
-    depends_on:
-      backend:
-        condition: service_healthy
-    restart: unless-stopped
+  # Frontend runs on yoonbian-2 (192.168.0.248:3001) via nginx
+  # Deploy with: bash scripts/deploy-frontend.sh qa
 
 volumes:
   mongo_data_qa:

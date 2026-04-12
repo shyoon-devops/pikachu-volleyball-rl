@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getModels, getEvalResults, runEvaluation } from '../../lib/api'
 import { EvalChart } from './EvalChart'
+import { CheckpointList } from './CheckpointList'
 import type { ModelInfo, EvalResult } from '../../lib/types'
 import './EvalPanel.css'
 
@@ -46,7 +47,7 @@ export function EvalPanel() {
   }
 
   if (loading) {
-    return <div className="eval-panel-loading">Loading...</div>
+    return <div className="eval-panel-loading"><div className="spinner" />Loading...</div>
   }
 
   return (
@@ -59,23 +60,16 @@ export function EvalPanel() {
 
       <div className="eval-form card">
         <h3 className="eval-form-title">Run Evaluation</h3>
+        <div className="eval-form-field">
+          <label className="eval-form-label" id="eval-checkpoint-label">Model Checkpoint</label>
+          <CheckpointList
+            models={models}
+            selectedPath={selectedModel}
+            onSelect={setSelectedModel}
+            disabled={running}
+          />
+        </div>
         <div className="eval-form-row">
-          <div>
-            <label className="eval-form-label">Model</label>
-            <select
-              value={selectedModel}
-              onChange={e => setSelectedModel(e.target.value)}
-              className="eval-form-select eval-form-select--model"
-              disabled={running}
-            >
-              {models.length === 0 && <option value="">No models available</option>}
-              {models.map(m => (
-                <option key={m.path} value={m.path}>
-                  {m.path.split('/').pop()} (step {m.step})
-                </option>
-              ))}
-            </select>
-          </div>
           <div>
             <label className="eval-form-label">Bot Level</label>
             <select
@@ -104,7 +98,7 @@ export function EvalPanel() {
           <button
             onClick={handleRun}
             disabled={running || !selectedModel}
-            className="eval-form-submit"
+            className="eval-form-submit btn btn-primary"
           >
             {running ? 'Running...' : 'Run Evaluation'}
           </button>
@@ -115,8 +109,7 @@ export function EvalPanel() {
         <span className="eval-filter-label">Filter by level:</span>
         <button
           onClick={() => setFilterLevel(null)}
-          className="eval-filter-btn"
-          data-active={filterLevel === null}
+          className={`eval-filter-btn btn ${filterLevel === null ? 'btn-ghost active' : 'btn-ghost'}`}
         >
           All
         </button>
@@ -124,8 +117,7 @@ export function EvalPanel() {
           <button
             key={l}
             onClick={() => setFilterLevel(l)}
-            className="eval-filter-btn"
-            data-active={filterLevel === l}
+            className={`eval-filter-btn btn ${filterLevel === l ? 'btn-ghost active' : 'btn-ghost'}`}
           >
             L{l}
           </button>
@@ -134,7 +126,7 @@ export function EvalPanel() {
 
       <EvalChart results={results} filterLevel={filterLevel} />
 
-      <div className="eval-results-table-wrapper card">
+      <div className="eval-results-table-wrapper card table-scroll">
         <table className="eval-results-table">
           <thead>
             <tr>
@@ -146,7 +138,7 @@ export function EvalPanel() {
           <tbody>
             {results.length === 0 ? (
               <tr>
-                <td colSpan={6} className="eval-results-empty">No evaluation results yet.</td>
+                <td colSpan={6} className="eval-results-empty empty-state">No evaluation results yet.</td>
               </tr>
             ) : (
               results.map((r, i) => (

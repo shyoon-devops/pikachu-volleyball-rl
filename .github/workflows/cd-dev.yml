@@ -2,13 +2,39 @@ name: CD - Dev
 
 on:
   push:
-    branches: [develop]
+    branches: [dev]
+
+concurrency:
+  group: cd-dev
+  cancel-in-progress: false
 
 jobs:
   deploy-dev:
     runs-on: self-hosted
+    environment: development
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to dev
-        run: bash scripts/deploy-dev.sh
+      - name: Pre-deploy check
+        run: |
+          echo "Checking if training is running..."
+          TRAINING_STATUS=$(curl -sf http://localhost:8001/api/health 2>/dev/null || echo "offline")
+          echo "Backend status: $TRAINING_STATUS"
+
+      - name: Deploy backend
+        run: |
+          docker compose -f docker-compose.dev.yml up --build -d
+          echo "Waiting for healthy status..."
+          timeout 60 bash -c 'until curl -sf http://localhost:8001/api/health; do sleep 3; done'
+
+      - name: Deploy frontend to yoonbian-2
+        run: bash scripts/deploy-frontend.sh dev
+
+      - name: Verify deployment
+        run: |
+          echo "Backend health:"
+          curl -sf http://localhost:8001/api/health
+          echo ""
+          echo "Frontend proxy (yoonbian-2):"
+          ssh -o ConnectTimeout=5 -i ~/.ssh/id_ed25519_yoonbian-2 yoon@192.168.0.248 \
+            "curl -sf --connect-timeout 5 http://localhost:3000/api/health"
