@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from backend.app.metrics import update_training_metrics
+from backend.app.metrics import (
+    GAME_SAVE_FAILURE,
+    GAME_SAVE_SUCCESS,
+    update_training_metrics,
+)
 from backend.app.models.schemas import (
     WsReplayRequestPayload,
     WsSetLevelPayload,
@@ -232,6 +236,7 @@ async def results_push_loop(
         except Exception as e:
             logger.exception("Invalid game result payload, routing to dead-letter")
             _write_dead_letter(data, f"ValidationError: {e}")
+            GAME_SAVE_FAILURE.inc()
             await manager.broadcast({
                 "type": "error",
                 "payload": {
@@ -249,6 +254,7 @@ async def results_push_loop(
                 SAVE_RETRY_ATTEMPTS, record.game_id,
             )
             _write_dead_letter(data, f"{type(err).__name__}: {err}")
+            GAME_SAVE_FAILURE.inc()
             await manager.broadcast({
                 "type": "error",
                 "payload": {
@@ -257,4 +263,6 @@ async def results_push_loop(
                     "game_id": record.game_id,
                 },
             })
+        else:
+            GAME_SAVE_SUCCESS.inc()
         await manager.broadcast({"type": "game:result", "payload": data})

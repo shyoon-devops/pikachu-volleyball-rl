@@ -8,8 +8,15 @@ from functools import wraps
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
+
+from backend.app.metrics import (
+    MONGO_PING_LATENCY,
+    MONGO_PING_OK,
+    sample_runtime_metrics,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -51,18 +58,24 @@ def endpoint_guard(name: str):
 
 
 async def _check_mongo(request: Request) -> dict:
-    """Ping MongoDB; return {ok, latency_ms, error?}."""
+    """Ping MongoDB; return {ok, latency_ms, error?} and publish gauges."""
     client = getattr(request.app.state, "mongo_client", None)
     if client is None:
+        MONGO_PING_OK.set(0)
         return {"ok": False, "error": "mongo_client not initialized"}
     loop = asyncio.get_running_loop()
     start = loop.time()
     try:
         await asyncio.wait_for(client.admin.command("ping"), timeout=_MONGO_PING_TIMEOUT)
-        return {"ok": True, "latency_ms": round((loop.time() - start) * 1000, 2)}
+        latency_s = loop.time() - start
+        MONGO_PING_LATENCY.set(latency_s)
+        MONGO_PING_OK.set(1)
+        return {"ok": True, "latency_ms": round(latency_s * 1000, 2)}
     except asyncio.TimeoutError:
+        MONGO_PING_OK.set(0)
         return {"ok": False, "error": f"ping timed out after {_MONGO_PING_TIMEOUT}s"}
     except Exception as e:
+        MONGO_PING_OK.set(0)
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
@@ -154,6 +167,23 @@ async def health_check(request: Request):
         logger.warning("Health check failed: %s", payload)
         return JSONResponse(status_code=503, content=payload)
     return payload
+
+
+@router.get("/metrics", response_class=PlainTextResponse)
+@endpoint_guard("metrics")
+async def prometheus_metrics(request: Request) -> PlainTextResponse:
+    """Expose app metrics in Prometheus text-exposition format.
+
+    Samples live runtime state (WS connections, queue depths) before
+    rendering so each scrape reflects current values. Counters are
+    maintained by event paths (save success/failure) and simply reported.
+    """
+    # Make sure the mongo ping gauge is fresh; this is cheap and makes the
+    # endpoint self-contained when /api/health has not been hit recently.
+    await _check_mongo(request)
+    sample_runtime_metrics(request.app.state)
+    body = generate_latest()
+    return PlainTextResponse(content=body, media_type=CONTENT_TYPE_LATEST)
 
 
 @router.get("/training/status")
