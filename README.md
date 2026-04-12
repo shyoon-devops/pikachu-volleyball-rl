@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/shyoon-devops/pikachu-volleyball-rl/actions"><img src="https://github.com/shyoon-devops/pikachu-volleyball-rl/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-0.2.4-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.2.5-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=white" alt="React">
   <img src="https://img.shields.io/badge/SB3-PPO-FF6F00" alt="Stable-Baselines3">
@@ -31,7 +31,7 @@ PPO 에이전트가 Rule-based Bot(L1~L5)을 상대로 피카추 배구를 학�
 
 > Inspired by the original [Pikachu Volleyball](https://github.com/gorisanson/pikachu-volleyball) (1997).
 
-**Status**: v0.2.3 deployed to all 3 envs (dev/qa/prod) · **v0.2.4 tagged on dev — live-UI hotfix bundle (REST hydration + optimistic controls + BE stop/pause halt), DevOps 재배포 중** — see [release note](docs/releases/v0.2.4.md) · [deployment status](docs/DEPLOYMENT-STATUS.md) · [VERSIONS.yml](docs/VERSIONS.yml). Trainer PR #42 + Evaluator PR #44 deferred to v0.2.5+.
+**Status**: v0.2.4 deployed to all 3 envs (dev/qa/prod, v0.2.4 main reachable) · **v0.2.5 tagged on dev — Phase 2 bug bundle (gameplay FX + bot L1-L5 upgrade + metrics fidelity + P0 match-end freeze), DevOps 재배포 중** — see [release note](docs/releases/v0.2.5.md) · [deployment status](docs/DEPLOYMENT-STATUS.md) · [VERSIONS.yml](docs/VERSIONS.yml). Trainer PR #42 + Evaluator PR #44 deferred to v0.2.6+.
 
 ## Quick Start
 
@@ -202,5 +202,5 @@ This project is for educational and research purposes.
 ---
 
 <p align="center">
-  <sub>v0.2.4 &bull; <a href="CHANGELOG.md">Changelog</a> &bull; <a href="docs/DEPLOYMENT-STATUS.md">Deployment Status</a></sub>
+  <sub>v0.2.5 &bull; <a href="CHANGELOG.md">Changelog</a> &bull; <a href="docs/DEPLOYMENT-STATUS.md">Deployment Status</a></sub>
 </p>
