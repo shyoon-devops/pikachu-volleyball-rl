@@ -493,6 +493,70 @@ class TestScoringSide:
 # ─── Punch effect markers don't alter position ───────────────────────────────
 
 
+class TestCollisionDoesNotRefireWithinBox:
+    """Per original physics.js: once a ball enters the 32px collision box,
+    collision fires ONCE. Subsequent frames while ball is still in the box
+    do not re-reflect velocity. Flag resets when ball leaves the box."""
+
+    def test_second_frame_in_box_does_not_reflect_vy_again(self) -> None:
+        game = PikachuVolleyball()
+        game.reset()
+        # Make player jump up to 100 so ball can meet them in mid-air without
+        # dropping the ball to the ground.
+        state = game._state
+        state.player1.y = 100
+        state.player1.is_jumping = True
+        state.ball.x = state.player1.x
+        state.ball.y = 120  # 20px below player head, inside 32px box
+        state.ball.vx = 0
+        state.ball.vy = 5  # falling slowly
+
+        # Frame 1: collision fires. Expect vy reflected to negative (≤ -15).
+        game.step(NOOP, NOOP)
+        assert game._state.player1.is_collision_with_ball_happened is True
+        vy_after_first_hit = game._state.ball.vy
+        assert vy_after_first_hit < 0, "Collision should reflect vy negative"
+
+        # Keep player in mid-air and force the ball back inside the box
+        # with the same falling velocity (as if physics were re-applying).
+        state.player1.y = 100
+        state.player1.is_jumping = True
+        state.ball.x = state.player1.x
+        state.ball.y = 120
+        state.ball.vx = 0
+        state.ball.vy = 5
+
+        # Frame 2: ball still in box, flag still True → NO reflection.
+        game.step(NOOP, NOOP)
+        # vy at end = input vy (5) + gravity (1) = 6. No reflection fired.
+        assert game._state.ball.vy == 6, (
+            f"Expected vy=6 (no reflection); got vy={game._state.ball.vy}"
+        )
+
+    def test_flag_resets_when_ball_leaves_box(self) -> None:
+        game = PikachuVolleyball()
+        game.reset()
+        # Enter box (mid-air).
+        state = game._state
+        state.player1.y = 100
+        state.player1.is_jumping = True
+        state.ball.x = state.player1.x
+        state.ball.y = 120
+        state.ball.vx = 0
+        state.ball.vy = 5
+        game.step(NOOP, NOOP)
+        assert game._state.player1.is_collision_with_ball_happened is True
+
+        # Move ball far away (out of box) but still in air.
+        state.ball.x = state.player1.x + 200
+        state.ball.y = 50
+        state.ball.vx = 0
+        state.ball.vy = 0
+        game.step(NOOP, NOOP)
+        # Flag should reset because ball is no longer in the box.
+        assert game._state.player1.is_collision_with_ball_happened is False
+
+
 class TestPunchEffectMarkersDoNotMovePosition:
     """punch_effect_x/y are graphic markers only."""
 

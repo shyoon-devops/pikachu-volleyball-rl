@@ -49,6 +49,10 @@ class PlayerState:
     is_power_hitting: bool = False
     lying_down_duration: int = 0
     diving_direction: int = 0  # -1 left, 0 none, 1 right
+    # Per original physics.js (Player.isCollisionWithBallHappened, 0xBC):
+    # Prevents collision from re-firing while the ball is still within the
+    # 32px box across frames. Cleared when the ball leaves the box.
+    is_collision_with_ball_happened: bool = False
 
 
 @dataclass
@@ -271,13 +275,26 @@ class PikachuVolleyball:
         Detection distance matches original exactly: PLAYER_HALF_LENGTH (32px)
         on both x and y axes. Collision does NOT move the ball; it only updates
         (vx, vy) which take effect on the next _update_ball_and_world call.
+
+        Per original (physicsEngine, FUN_00403dd0): if the ball stays within
+        the 32px box across multiple frames, the collision is only processed
+        on the FIRST frame. The flag resets when the ball exits the box.
+        Without this gate, a slowly moving / tangential ball would retrigger
+        the velocity reflection every frame and produce chaotic physics.
         """
         dx_signed = ball.x - player.x
-        if abs(dx_signed) > BALL_PLAYER_COLLISION_DIST:
-            return
         dy_signed = ball.y - player.y
-        if abs(dy_signed) > BALL_PLAYER_COLLISION_DIST:
+        in_box = (
+            abs(dx_signed) <= BALL_PLAYER_COLLISION_DIST
+            and abs(dy_signed) <= BALL_PLAYER_COLLISION_DIST
+        )
+        if not in_box:
+            player.is_collision_with_ball_happened = False
             return
+        if player.is_collision_with_ball_happened:
+            # Still in the box from a prior collision — don't re-fire.
+            return
+        player.is_collision_with_ball_happened = True
 
         # Base horizontal velocity — signed integer division by 3.
         if dx_signed < 0:
