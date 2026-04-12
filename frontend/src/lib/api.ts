@@ -5,6 +5,7 @@ import type {
   ModelInfo,
   PaginatedResponse,
   ReplayInfo,
+  TrainingMetrics,
   TrainingStatus,
 } from './types'
 
@@ -104,4 +105,113 @@ export async function getAvailableReplays(): Promise<ReplayInfo[]> {
 export async function getTrainingStatus(): Promise<TrainingStatus> {
   const raw = await request<unknown>('/api/training/status')
   return snakeToCamel<TrainingStatus>(raw)
+}
+
+/**
+ * Training command REST endpoints (API spec v0.2.4).
+ *
+ * Backend is adding these alongside the existing WS channel. Until
+ * they ship everywhere, the frontend fires *both* REST and WS so the
+ * command still lands whichever path is live; either call returning
+ * 404 is treated as "this endpoint isn't deployed yet" — not an error
+ * the user needs to see. See useTrainingState.send() for the caller.
+ *
+ * All four are best-effort: callers MUST swallow rejections (or use
+ * the `*Safe` helpers below) — the WS path plus the optimistic UI
+ * update are the user-visible guarantee.
+ */
+export function stopTraining(): Promise<void> {
+  return request('/api/training/stop', { method: 'POST' })
+}
+
+export function pauseTraining(): Promise<void> {
+  return request('/api/training/pause', { method: 'POST' })
+}
+
+export function resumeTraining(): Promise<void> {
+  return request('/api/training/resume', { method: 'POST' })
+}
+
+export function patchTrainingLevel(level: number): Promise<{ level: number }> {
+  return request('/api/training/level', {
+    method: 'PATCH',
+    body: JSON.stringify({ level }),
+  })
+}
+
+/**
+ * Live game-canvas frame for refresh recovery.
+ *
+ * Returns null if training isn't running (backend responds 404 or a
+ * null body) — the UI should show a loading/idle placeholder and wait
+ * for the first WS `training:frame` instead of crashing.
+ */
+export async function getCurrentFrame(): Promise<GameState | null> {
+  try {
+    const raw = await request<unknown>('/api/training/current_frame')
+    if (raw === null || raw === undefined) return null
+    return snakeToCamel<GameState>(raw)
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
+/**
+ * Fetch the most-recent completed games for the Dashboard's "Recent
+ * Games" panel. WebSocket `game:result` pushes the live stream; this
+ * REST call seeds the list on mount / reconnect so a refresh doesn't
+ * wipe the panel.
+ */
+export async function getRecentGames(limit = 20): Promise<GameRecord[]> {
+  const resp = await getGames(1, limit)
+  return resp.data
+}
+
+interface MetricsAggregateBucket {
+  bucket_start?: string
+  count?: number
+  step_max?: number | null
+  avg_mean_reward?: number | null
+  avg_win_rate?: number | null
+  avg_policy_loss?: number | null
+  avg_value_loss?: number | null
+}
+
+interface MetricsAggregateResponse {
+  data?: MetricsAggregateBucket[]
+  count?: number
+  bucket?: string
+  experiment_id?: string | null
+}
+
+/**
+ * Fetch time-bucketed training metrics and map them to the
+ * `TrainingMetrics` shape the charts consume. Used on mount /
+ * reconnect so a refresh doesn't wipe the graphs — the live stream
+ * continues to append per-step samples over WebSocket on top of this
+ * historical seed.
+ *
+ * The aggregate endpoint groups metrics into fixed-width time buckets
+ * and reports averages; `step_max` per bucket is used as the x-axis
+ * value so the chart reflects training progress even when cadence is
+ * irregular. Unknown / null fields collapse to 0 rather than blowing
+ * up the chart pipeline.
+ */
+export async function getMetricsHistory(
+  bucket: '1m' | '5m' | '1h' = '1m',
+): Promise<TrainingMetrics[]> {
+  const params = new URLSearchParams({ bucket })
+  const raw = await request<MetricsAggregateResponse>(
+    `/api/training/metrics/aggregate?${params.toString()}`,
+  )
+  const buckets = Array.isArray(raw.data) ? raw.data : []
+  return buckets.map<TrainingMetrics>(b => ({
+    step: Number(b.step_max ?? 0),
+    episode: 0,
+    meanReward: Number(b.avg_mean_reward ?? 0),
+    winRate: Number(b.avg_win_rate ?? 0),
+    policyLoss: Number(b.avg_policy_loss ?? 0),
+    valueLoss: Number(b.avg_value_loss ?? 0),
+  }))
 }
