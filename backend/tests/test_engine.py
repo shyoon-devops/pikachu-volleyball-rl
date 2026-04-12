@@ -64,16 +64,42 @@ class TestBallNetCollision:
     def test_ball_vx_reverses_on_net_collision(
         self, game: PikachuVolleyball
     ) -> None:
+        """Ball hitting the side of the net pillar should have vx reflected.
+
+        Per original physics.js: when the ball is at the side of the pillar
+        (ball.y > NET_PILLAR_TOP_BOTTOM_Y_COORD = 192), the ball's vx is forced
+        to point away from the net.
+        """
+        from backend.game.constants import NET_PILLAR_TOP_BOTTOM_Y
+
         game.reset()
-        # Place ball at net position, below net top
-        game._state.ball.x = NET_PILLAR_X
-        game._state.ball.y = NET_PILLAR_TOP_Y + 10
-        game._state.ball.vx = 5
+        # Place ball on the LEFT side of the net, below the pillar top
+        # (ball.y must be > NET_PILLAR_TOP_BOTTOM_Y to hit the pillar's side).
+        game._state.ball.x = NET_PILLAR_X - 5
+        game._state.ball.y = NET_PILLAR_TOP_BOTTOM_Y + 5
+        game._state.ball.vx = 5  # moving right, into net
         game._state.ball.vy = 0
 
         new_state = game.step(NOOP, NOOP)
-        # vx should have reversed
+        # Left-side collision: vx should be forced negative (away from net).
         assert new_state.ball.vx <= 0 or new_state.is_round_over
+
+    def test_ball_vy_reverses_on_net_pillar_top(
+        self, game: PikachuVolleyball
+    ) -> None:
+        """Ball landing on TOP of net pillar should have vy flipped upward."""
+        from backend.game.constants import NET_PILLAR_TOP_BOTTOM_Y
+
+        game.reset()
+        # On top of the pillar: NET_PILLAR_TOP_Y < y <= NET_PILLAR_TOP_BOTTOM_Y
+        game._state.ball.x = NET_PILLAR_X
+        game._state.ball.y = NET_PILLAR_TOP_BOTTOM_Y - 2
+        game._state.ball.vx = 0
+        game._state.ball.vy = 5  # moving down, onto pillar top
+
+        new_state = game.step(NOOP, NOOP)
+        # Top-of-pillar collision should send ball back upward.
+        assert new_state.ball.vy < 5 or new_state.is_round_over
 
 
 class TestScoring:
