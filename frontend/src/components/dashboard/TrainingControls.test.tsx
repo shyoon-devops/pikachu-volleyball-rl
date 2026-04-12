@@ -6,6 +6,7 @@ import type { TrainingStatus, ConnectionState } from '../../lib/types'
 function renderControls(overrides: {
   status?: Partial<TrainingStatus>
   connectionState?: ConnectionState
+  reconnectAttempt?: number
 } = {}) {
   const send = vi.fn()
   const onStartWithParams = vi.fn()
@@ -21,6 +22,7 @@ function renderControls(overrides: {
     <TrainingControls
       status={status}
       connectionState={overrides.connectionState ?? 'connected'}
+      reconnectAttempt={overrides.reconnectAttempt}
       send={send}
       onStartWithParams={onStartWithParams}
     />,
@@ -91,5 +93,61 @@ describe('TrainingControls', () => {
     renderControls({ status: { state: 'stopped' }, connectionState: 'disconnected' })
     const startBtn = screen.getByText('Start')
     expect(startBtn).toBeDisabled()
+  })
+
+  // ── Reconnect feedback (BUG-7 #19) ──
+  it('shows "disconnected" when not connected and no reconnect attempts', () => {
+    renderControls({ connectionState: 'disconnected' })
+    expect(screen.getByText(/disconnected/i)).toBeInTheDocument()
+  })
+
+  it('shows reconnect attempt number when disconnected and reconnecting', () => {
+    renderControls({ connectionState: 'disconnected', reconnectAttempt: 3 })
+    expect(screen.getByText(/disconnected — retry 3/i)).toBeInTheDocument()
+  })
+
+  it('shows reconnect banner (role=alert) when disconnected with attempts', () => {
+    renderControls({ connectionState: 'disconnected', reconnectAttempt: 2 })
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/Reconnecting.*attempt 2/i)
+  })
+
+  it('does NOT show reconnect banner when connected', () => {
+    renderControls({ connectionState: 'connected', reconnectAttempt: 0 })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows "reconnecting (attempt N)" when connecting after failures', () => {
+    renderControls({ connectionState: 'connecting', reconnectAttempt: 4 })
+    expect(screen.getByText(/reconnecting \(attempt 4\)/i)).toBeInTheDocument()
+  })
+
+  it('shows "connecting" on first attempt (reconnectAttempt=0)', () => {
+    renderControls({ connectionState: 'connecting', reconnectAttempt: 0 })
+    expect(screen.getByText(/^connecting$/i)).toBeInTheDocument()
+  })
+
+  // ── Accessibility (FE-5 #24) ──
+  it('connection status has role=status for screen readers', () => {
+    renderControls({ connectionState: 'connected' })
+    expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('connection status exposes aria-label with connection state', () => {
+    renderControls({ connectionState: 'connected', status: { state: 'running' } })
+    const status = screen.getByRole('status')
+    expect(status).toHaveAttribute('aria-label', expect.stringContaining('running'))
+  })
+
+  it('Start button has accessible label', () => {
+    renderControls({ status: { state: 'stopped' } })
+    expect(screen.getByLabelText('Start training')).toBeInTheDocument()
+  })
+
+  it('bot level buttons have accessible labels', () => {
+    renderControls()
+    for (let i = 1; i <= 5; i++) {
+      expect(screen.getByLabelText(`Set bot level to ${i}`)).toBeInTheDocument()
+    }
   })
 })

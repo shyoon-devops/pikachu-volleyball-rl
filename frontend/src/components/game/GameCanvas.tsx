@@ -31,6 +31,10 @@ const SPRITE_SHEET_PATH = '/assets/sprite_sheet.json'
 
 interface GameCanvasProps {
   gameState: GameState | null
+  /**
+   * Optional — forces a fixed CSS pixel size. When omitted the canvas fills
+   * its container (CSS handles responsive scaling via aspect-ratio).
+   */
   width?: number
   height?: number
 }
@@ -404,7 +408,7 @@ function buildSpriteScene(
   }
 }
 
-export function GameCanvas({ gameState, width = COURT_WIDTH, height = COURT_HEIGHT }: GameCanvasProps) {
+export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const appRef = useRef<Application | null>(null)
   const graphicsRef = useRef<Graphics | null>(null)
@@ -441,8 +445,11 @@ export function GameCanvas({ gameState, width = COURT_WIDTH, height = COURT_HEIG
       }
 
       const canvas = app.canvas as HTMLCanvasElement
-      canvas.style.width = `${width}px`
-      canvas.style.height = `${height}px`
+      // When width/height props are provided, force a fixed pixel size.
+      // Otherwise let CSS (width:100%; height:100% on .game-canvas canvas) scale
+      // the canvas responsively while preserving the 432:304 aspect ratio.
+      if (width !== undefined) canvas.style.width = `${width}px`
+      if (height !== undefined) canvas.style.height = `${height}px`
       container.appendChild(canvas)
       appRef.current = app
 
