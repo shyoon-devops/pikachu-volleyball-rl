@@ -7,7 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Sprint 1 코드 완료 — QA v0.2.1 배포 및 검증 대기 중. 추적: [docs/sprint-tracking/sprint1-v0.2.1.md](docs/sprint-tracking/sprint1-v0.2.1.md)
+v0.2.2 이후 scope. Trainer PR #42 (reward rebalance 검증 + TensorBoard + early stopping + reproducibility + grid search + curriculum learning) 는 v0.2.3 hotfix 후보.
+
+## [0.2.2] - 2026-04-12 (Sprint 2 complete / dev HEAD 121cb478)
+
+Sprint 2 배치 — Backend 성능 3종(BE-5/6/7) + Frontend UX 4종(FE-6/7/8/9) + AI Engineer 의 gorisanson/pikachu-volleyball 원본 충실 포팅 + Designer D6-D10 + QA Sprint 1 회귀/재검증 스위트 + DevOps 모니터링 스택. 태그는 dev HEAD (`121cb478`) 기준. Trainer PR #42 는 v0.2.2 에 포함되지 않음 — v0.2.3 hotfix 로 이월.
+
+### Added — Backend (performance & features)
+- **BE-5 hot-path MongoDB indexes** (`ee7a6c0b`): startup 시 games / metrics / evaluations 컬렉션 인덱스 선언으로 조회 지연 저감
+- **BE-6 parallel WS broadcast with serialize-once fan-out** (`fb1f5e64`): 메시지 1회 직렬화 후 클라이언트별 병렬 송출 — 다중 클라이언트 시 브로드캐스트 경로 최적화
+- **BE-7 training metric persistence + time-bucket aggregation** (`027bc08e`): 학습 메트릭 MongoDB 영속화 + 시간-버킷 집계 조회
+
+### Added — Frontend (UX)
+- **FE-6 global ConnectionIndicator pill** (`265e3c30`): 앱 헤더에 WebSocket 연결 상태 전역 표시
+- **FE-7 replay keyboard scrubbing** (`f10b6c25`): ←/→ 1프레임 단위, ↓/↑ 10프레임 단위 스텝 이동
+- **FE-8 training Pause / Resume toggle** (`360fa1dd`): Stop 과 별개로 일시중지/재개 컨트롤 추가
+- **FE-9 CheckpointList picker for model evaluation** (`668df41d`): Evaluation 패널에서 모델 체크포인트 리치 선택 UI
+
+### Added — Design (D6-D10 polish)
+- **D6-D10 training progress, chart tooltip, fullscreen, toast, error/skeleton** (`3cdef948`)
+- **Chart semantics, arcade frame, button micro-anim, row states, mobile tab bar** (`9edec27b`)
+- **Dev audit artifacts** (`08b86ead`)
+
+### Changed — RL / Game engine (AI Engineer — 원본 충실도 복원)
+- **Faithful port of game engine to gorisanson/pikachu-volleyball original** (`b0d0aaee`): 오리지널(1997) 물리 거동 충실 포팅
+- **Gate ball-player collision with isCollisionWithBallHappened flag** (`e5d765a0`): 충돌 중복 방지 플래그 게이팅
+- **Rebalance reward weights to prioritize winning over shaping** (`0f32235e`): 승리 기반 보상 가중치 상향, shaping 비중 하향
+- **Remove duplicate Start button, unify training controls** (`9f050c87`)
+
+### Added — Tests (QA & AI Engineer)
+- **Physics regression suite pinning behavior to original source** (`ab0151cd`)
+- **Rework tests affected by faithful physics port** (`47aa4ced`)
+- **E2E, WS resilience, load, rate-limit, coverage report** (`a12c3117`)
+- **16-bug regression suite + prod-20260412 QA report** (`720458bb`)
+- **Sprint 1 fix verification suite — SEC-1/2/3, BUG-3/5, BE-1** (`d5aa9fce`)
+- **Post-promotion QA re-verification script** (`057dc651`) + 확장 (`c3e2cc08`)
+- **QA env verification report + dev-vs-QA diff** (`82f86187`, `c24764e5`)
+- **Re-verify QA after redeploy — 6 fail / 35 pass, Sprint 1 fixes 랜딩 확인** (`d309a574`)
+- **/api/health exemption probe + /live /ready split finding** (`243c6a14`)
+
+### Fixed
+- **Middleware: exempt metrics + health probes from rate limiter** (`38e29bdd`): `/api/metrics`, `/api/health*` 제외 — Prometheus / k8s 프로브 안정화
+- **Double score display + canvas responsive scaling** (`ede4e347`, #27)
+- **test_ws_resilience — 3 test bugs masked as server regressions** (`0a79eb44`): 테스트 버그 수정, BE-1 해당 없음으로 판정
+- **/api/health rate-limit exemption test + 3 flakes** (`26e038b6`)
+
+### Infrastructure (DevOps)
+- **Loki + Promtail centralized log aggregation** (`f863c11e`)
+- **CPU/GPU/memory/disk resources dashboard** (`fc44b70f`)
+- **Backup/restore verification harness** (`da6a93c6`) — DO-3 선행 작업
+- **promote.sh fix + smoke-test.sh for qa/prod verification** (`dac05c89`)
+- **Prevent orphan containers + document two-server arch** (`79599088`)
+
+### Docs
+- **Retract BE-1 finding — root cause was my test bugs not server** (`2a11a0f4`)
+- **Full-suite stability note + clarify isolated vs bundled pass rates** (`d981d05d`)
+- **Notify Trainer of reward rebalance + rerun-training request** (`1a40c8fa`)
+
+### Deployment
+- **dev tag** — `121cb478` (v0.2.2 tag target)
+- **qa/prod 배포** — DevOps 수행 대기 (env tag `v0.2.2-qa`, `v0.2.2-prod` 부착 필수)
+- **prod → main 머지** — prod 승격 후 필수
+
+### Not in v0.2.2 (deferred to v0.2.3)
+- **Trainer PR #42**: reward rebalance 검증 + TensorBoard integration + early stopping + reproducibility + grid search + curriculum learning — dev 미머지
+
+### Known gaps
+- FE 중복 Start 버튼 제거(`9f050c87`) 이후 전 환경 재배포 필요 — 현재 qa/prod frontend 는 v0.2.1 pre-fix 번들 서빙 중
+- qa backend 가시성 복구 (#38) 선행 후 v0.2.2 QA 검증 진행
 
 ## [0.2.1] - 2026-04-12 (QA 재배포 완료, prod 대기 / dev HEAD 482df2d1)
 
