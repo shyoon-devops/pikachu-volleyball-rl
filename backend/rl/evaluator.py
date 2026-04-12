@@ -23,6 +23,32 @@ class EvalResult:
     avg_rally_length: float
     avg_episode_length: float
     timestamp: str
+    # Composite metric in [0.0, 1.0] capturing both win frequency
+    # and margin of victory. See `compute_dominance_score`.
+    dominance_score: float = 0.0
+
+
+def compute_dominance_score(
+    win_rate: float, avg_score: float, avg_opponent_score: float
+) -> float:
+    """Composite dominance metric in [0.0, 1.0].
+
+    Blends win frequency (60%) with point share (40%) so that:
+      - 100% wins, 15-0 blowout       -> 1.00
+      - 100% wins, 15-14 close games  -> 0.81
+      -  50% wins, even point split   -> 0.50
+      -   0% wins, 0-15 sweep         -> 0.00
+
+    Point share = avg_score / (avg_score + avg_opponent_score).
+    Returns 0.0 when both scores are 0 (degenerate game).
+    """
+    total_points = avg_score + avg_opponent_score
+    if total_points <= 0.0:
+        score_share = 0.0
+    else:
+        score_share = avg_score / total_points
+    dominance = 0.6 * win_rate + 0.4 * score_share
+    return float(max(0.0, min(1.0, dominance)))
 
 
 class ModelEvaluator:
@@ -69,16 +95,21 @@ class ModelEvaluator:
 
         env.close()
 
+        win_rate = float(np.mean(wins))
+        avg_score = float(np.mean(scores))
+        avg_opp = float(np.mean(opponent_scores))
+
         return EvalResult(
             model_path=model_path,
             bot_level=bot_level,
             n_games=n_games,
-            win_rate=float(np.mean(wins)),
-            avg_score=float(np.mean(scores)),
-            avg_opponent_score=float(np.mean(opponent_scores)),
+            win_rate=win_rate,
+            avg_score=avg_score,
+            avg_opponent_score=avg_opp,
             avg_rally_length=float(np.mean(rally_lengths)),
             avg_episode_length=float(np.mean(episode_lengths)),
             timestamp=datetime.now(timezone.utc).isoformat(),
+            dominance_score=compute_dominance_score(win_rate, avg_score, avg_opp),
         )
 
     def evaluate_all_levels(
