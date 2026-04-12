@@ -1,0 +1,186 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  CheckpointList.css — 모델 체크포인트 선택 UI (FE-9)
+ * ═══════════════════════════════════════════════════════════
+ *  FE className 매핑:
+ *    .checkpoint-list, .checkpoint-list--empty,
+ *    .checkpoint-list-header, .checkpoint-list-count,
+ *    .checkpoint-list-items, .checkpoint-list-item-wrap,
+ *    .checkpoint-list-item, .is-selected,
+ *    .checkpoint-list-radio,
+ *    .checkpoint-list-main, .checkpoint-list-name,
+ *    .checkpoint-list-dir, .checkpoint-list-meta,
+ *    .checkpoint-list-step, .checkpoint-list-size,
+ *    .checkpoint-list-empty
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.checkpoint-list {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.checkpoint-list--empty {
+  padding: var(--space-4);
+}
+
+.checkpoint-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-1);
+}
+
+.checkpoint-list-count {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.checkpoint-list-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.checkpoint-list-item-wrap {
+  margin: 0;
+}
+
+/* ── Item card ────────────────────────────────────────── */
+.checkpoint-list-item {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+}
+
+.checkpoint-list-item:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.checkpoint-list-item.is-selected {
+  background: color-mix(in srgb, var(--color-blue) 12%, var(--color-bg-elevated));
+  border-color: var(--color-blue);
+  box-shadow: 0 0 0 1px var(--color-blue) inset;
+}
+
+.checkpoint-list-item:has(input:focus-visible) {
+  outline: 2px solid var(--color-accent, var(--color-blue));
+  outline-offset: 2px;
+}
+
+.checkpoint-list-item:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ── Native radio — visible, minimal ──────────────────── */
+.checkpoint-list-radio {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-blue);
+  cursor: pointer;
+}
+
+.checkpoint-list-radio:disabled {
+  cursor: not-allowed;
+}
+
+/* ── Text content ──────────────────────────────────────── */
+.checkpoint-list-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.checkpoint-list-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkpoint-list-dir {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Meta (step + size) ───────────────────────────────── */
+.checkpoint-list-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.checkpoint-list-step {
+  color: var(--color-accent, var(--color-blue));
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.checkpoint-list-size {
+  color: var(--color-text-muted);
+}
+
+/* ── Empty state ──────────────────────────────────────── */
+.checkpoint-list-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0;
+  padding: var(--space-4) 0;
+}
+
+/* ── Responsive ───────────────────────────────────────── */
+@media (max-width: 480px) {
+  .checkpoint-list-item {
+    grid-template-columns: 16px 1fr auto;
+    gap: var(--space-2);
+    padding: var(--space-2);
+  }
+
+  .checkpoint-list-meta {
+    font-size: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .checkpoint-list-item {
+    transition: none;
+  }
+}

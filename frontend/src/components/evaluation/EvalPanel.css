@@ -56,6 +56,10 @@
   font-weight: var(--weight-medium);
 }
 
+.eval-form-field {
+  margin-bottom: var(--space-3);
+}
+
 .eval-form-row {
   display: flex;
   gap: var(--space-3);
