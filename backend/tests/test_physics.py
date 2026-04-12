@@ -269,6 +269,84 @@ class TestNetCollisionSplit:
         assert new_state.ball.vx >= 0 or new_state.is_round_over
 
 
+class TestNetVxReversalHardened:
+    """QA-hotfix regression guard — pin exact sign-flip semantics.
+
+    Pins the behavior where a ball moving INTO the net from either side
+    gets its vx reversed. Uses explicit sign-flip assertions (not just
+    ``<= 0``) and multi-frame scenarios so that any future edit which
+    preserves "ball loses vx" but drops "ball bounces away" still fails.
+    """
+
+    def test_left_side_moving_right_into_net_gets_vx_flipped(self) -> None:
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.ball.x = NET_PILLAR_X - 10  # inside 25px net zone
+        game._state.ball.y = NET_PILLAR_TOP_BOTTOM_Y + 20  # side-of-pillar
+        game._state.ball.vx = 8  # moving INTO net
+        game._state.ball.vy = 0
+
+        new_state = game.step(NOOP, NOOP)
+        # Original JS: ball.xVelocity = -Math.abs(ball.xVelocity) on left side.
+        # So 8 must flip to -8 (magnitude preserved, direction reversed).
+        assert new_state.ball.vx == -8
+
+    def test_right_side_moving_left_into_net_gets_vx_flipped(self) -> None:
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.ball.x = NET_PILLAR_X + 10
+        game._state.ball.y = NET_PILLAR_TOP_BOTTOM_Y + 20
+        game._state.ball.vx = -8  # moving INTO net
+        game._state.ball.vy = 0
+
+        new_state = game.step(NOOP, NOOP)
+        # Original: ball.xVelocity = Math.abs(ball.xVelocity) on right side.
+        assert new_state.ball.vx == 8
+
+    def test_ball_actually_moves_away_after_net_contact(self) -> None:
+        """Multi-frame guard: after hitting net, the ball's x position must
+        travel AWAY from the net center on the next frame.
+
+        This catches a regression where vx is reset to 0 (no reversal) but the
+        ball simply stops — tests asserting `vx <= 0` would pass while play
+        physics still felt broken.
+        """
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.ball.x = NET_PILLAR_X - 10
+        game._state.ball.y = NET_PILLAR_TOP_BOTTOM_Y + 20
+        game._state.ball.vx = 6
+        game._state.ball.vy = 0
+
+        game.step(NOOP, NOOP)  # net contact — vx flipped to -6 this frame
+        x_after_contact = game._state.ball.x
+
+        game.step(NOOP, NOOP)  # next frame — ball should have moved LEFT
+        x_next = game._state.ball.x
+
+        assert x_next < x_after_contact, (
+            f"Ball must travel away from net after collision "
+            f"(x_after_contact={x_after_contact}, x_next={x_next})"
+        )
+
+    def test_net_collision_preserves_vx_magnitude(self) -> None:
+        """Original JS uses -Math.abs / +Math.abs, NOT a damped reflection.
+        So |vx| after collision must equal |vx| before (no energy loss).
+        """
+        for start_vx in (3, 7, 12, 15):
+            game = PikachuVolleyball()
+            game.reset()
+            game._state.ball.x = NET_PILLAR_X - 10
+            game._state.ball.y = NET_PILLAR_TOP_BOTTOM_Y + 20
+            game._state.ball.vx = start_vx
+            game._state.ball.vy = 0
+
+            game.step(NOOP, NOOP)
+            assert abs(game._state.ball.vx) == start_vx, (
+                f"|vx| changed on net collision: {start_vx} → {game._state.ball.vx}"
+            )
+
+
 # ─── Ceiling handling ─────────────────────────────────────────────────────────
 
 
