@@ -121,6 +121,495 @@
   image-rendering: crisp-edges;
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  공 바닥 충돌 이펙트 — punch_effect radial ring (D13)
+ * ═══════════════════════════════════════════════════════════
+ *  원본(view.js L502) 의 ball.punchEffectRadius 가 2px/frame 으로
+ *  감소하며 스프라이트를 축소하는 패턴을 DOM 오버레이로 재현.
+ *  FE 통합 가이드:
+ *    1) .game-canvas 내부에 <div class="punch-ring-layer"> 를 추가
+ *       (pointer-events 차단, 캔버스 상단 절대 배치).
+ *    2) 충돌 프레임마다 <div class="punch-ring"
+ *            style="--px:{x}px; --py:{y}px"></div> 스폰.
+ *    3) 자동으로 450ms 확산 애니메이션 후 opacity 0 —
+ *       FE 는 animationend 로 DOM 정리.
+ *
+ *  원본은 캔버스 432×304 좌표계를 사용하므로 FE 는 좌표를 캔버스
+ *  실제 렌더 크기(inline width/height px) 에 맞춰 비례 변환해야 한다.
+ * ═══════════════════════════════════════════════════════════
+ */
+.punch-ring-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  /* 캔버스 렌더 영역 위, 코너 브라켓(z:2) 아래 */
+  z-index: 3;
+}
+
+.punch-ring {
+  position: absolute;
+  left: var(--px, 50%);
+  top: var(--py, 50%);
+  /* 중심 정렬 + 크기 0 에서 시작 */
+  width: 0;
+  height: 0;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: punch-ring-expand 450ms var(--ease-out) forwards;
+  will-change: width, height, opacity;
+}
+
+@keyframes punch-ring-expand {
+  0% {
+    width: 4px;
+    height: 4px;
+    opacity: 0;
+    border: 0 solid rgba(255, 255, 255, 0);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  12% {
+    opacity: 1;
+    border: 3px solid rgba(255, 255, 255, 0.95);
+    box-shadow:
+      0 0 12px rgba(255, 215, 0, 0.9),
+      inset 0 0 4px rgba(255, 215, 0, 0.8);
+  }
+  100% {
+    width: 96px;
+    height: 96px;
+    opacity: 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+      0 0 18px rgba(255, 215, 0, 0),
+      inset 0 0 2px rgba(255, 215, 0, 0);
+  }
+}
+
+/* 2차 링 — FE 가 .punch-ring--secondary 로 스폰 시 늦게 시작 */
+.punch-ring.punch-ring--secondary {
+  animation: punch-ring-expand 600ms var(--ease-out) 80ms forwards;
+  opacity: 0;
+}
+
+.punch-ring.punch-ring--secondary {
+  /* secondary 는 더 크게 + 얇게 퍼짐 */
+  --_max-size: 140px;
+}
+@keyframes punch-ring-expand-secondary {
+  0%   { width: 4px; height: 4px; opacity: 0;
+         border: 0 solid rgba(255, 255, 255, 0); }
+  15%  { opacity: 0.6;
+         border: 2px solid rgba(255, 255, 255, 0.7); }
+  100% { width: 140px; height: 140px; opacity: 0;
+         border: 1px solid rgba(255, 255, 255, 0); }
+}
+.punch-ring.punch-ring--secondary {
+  animation-name: punch-ring-expand-secondary;
+}
+
+/* 바닥 임팩트 더스트 — 링과 함께 스폰 가능 (CSS-only dust puff) */
+.punch-dust {
+  position: absolute;
+  left: var(--px, 50%);
+  top: var(--py, 50%);
+  width: 24px;
+  height: 6px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(255, 235, 180, 0.8), rgba(255, 235, 180, 0));
+  filter: blur(1px);
+  animation: punch-dust-puff 380ms var(--ease-out) forwards;
+}
+
+@keyframes punch-dust-puff {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scaleX(0.4); }
+  25%  { opacity: 0.9; transform: translate(-50%, -50%) scaleX(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scaleX(1.8); }
+}
+
+/* 감소 모션 환경에서는 확산 억제 */
+@media (prefers-reduced-motion: reduce) {
+  .punch-ring,
+  .punch-ring.punch-ring--secondary,
+  .punch-dust {
+    animation-duration: 120ms !important;
+  }
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  슬라이딩(다이빙) 이펙트 — D11
+ * ═══════════════════════════════════════════════════════════
+ *  원본(view.js L469-482): player.state === 3/4 일 때 divingDirection
+ *  으로 sprite.scale.x 반전. 실제 다이빙 스프라이트는 frame 17+ 에서
+ *  별도 애니메이션. 본 CSS 는 다이빙 동안 캔버스 오버레이 레이어에
+ *  모션 트레일 + 착지 더스트를 얹어 타격감을 살린다.
+ *
+ *  FE 통합 가이드:
+ *    - .punch-ring-layer 와 동일한 오버레이 레이어를 재사용한다.
+ *    - 다이빙 프레임마다 (3~5 프레임 간격 권장):
+ *        <div class="dive-trail"
+ *             style="--px:{x}px; --py:{y}px;
+ *                    --dive-dir:{-1|1}"></div>
+ *      을 스폰. dive-dir=1 은 우측 진행(왼쪽으로 트레일 흐름),
+ *      dive-dir=-1 은 좌측 진행(오른쪽으로 트레일 흐름).
+ *    - 착지(state 4 → 0 전환) 프레임에 <div class="dive-landing-dust"
+ *      style="--px:{x}px; --py:{y}px"></div> 1회 스폰.
+ *    - 각 엘리먼트는 animationend 에서 제거.
+ *
+ *  원본 sprite 가 노란 피카추 계열이라 트레일 색상은 Pikachu yellow
+ *  (--color-accent / #ffd700) 의 낮은 알파. 과하지 않게.
+ * ═══════════════════════════════════════════════════════════
+ */
+.dive-trail {
+  position: absolute;
+  left: var(--px, 0);
+  top: var(--py, 0);
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scaleX(var(--dive-dir, 1));
+  transform-origin: center;
+  border-radius: 50%;
+  /* 잔상 — 피카추 실루엣 흉내내는 단순 blob */
+  background: radial-gradient(
+    ellipse at center,
+    rgba(255, 215, 0, 0.35) 0%,
+    rgba(255, 215, 0, 0.18) 45%,
+    rgba(255, 215, 0, 0) 75%
+  );
+  mix-blend-mode: screen;
+  animation: dive-trail-fade 320ms var(--ease-out) forwards;
+  will-change: opacity, transform;
+}
+
+@keyframes dive-trail-fade {
+  0%   {
+    opacity: 0.85;
+    filter: blur(0.5px);
+    transform: translate(-50%, -50%) scaleX(var(--dive-dir, 1)) scale(0.9);
+  }
+  50%  {
+    opacity: 0.45;
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 0;
+    filter: blur(5px);
+    transform: translate(-50%, -50%) scaleX(var(--dive-dir, 1)) scale(1.35);
+  }
+}
+
+/*
+ * 속도 스트릭 — 다이빙 방향 반대쪽으로 뻗는 짧은 수평 선.
+ * FE 가 .dive-streak 으로 스폰하면 자동 방향 반영.
+ */
+.dive-streak {
+  position: absolute;
+  left: var(--px, 0);
+  top: var(--py, 0);
+  width: 36px;
+  height: 2px;
+  pointer-events: none;
+  /* dive-dir=1 (오른쪽 진행) → streak 은 왼쪽으로 뻗음 */
+  transform: translate(
+    calc(-50% + var(--dive-dir, 1) * -18px),
+    -50%
+  ) scaleX(var(--dive-dir, 1));
+  background: linear-gradient(
+    to right,
+    rgba(255, 215, 0, 0) 0%,
+    rgba(255, 215, 0, 0.6) 60%,
+    rgba(255, 255, 255, 0.9) 100%
+  );
+  border-radius: 2px;
+  filter: blur(0.5px) drop-shadow(0 0 3px rgba(255, 215, 0, 0.5));
+  animation: dive-streak-sweep 240ms var(--ease-out) forwards;
+}
+
+@keyframes dive-streak-sweep {
+  0%   { opacity: 0; width: 8px; }
+  25%  { opacity: 1; width: 36px; }
+  100% { opacity: 0; width: 54px; filter: blur(2px); }
+}
+
+/*
+ * 착지 더스트 — 좌우로 퍼지는 흙먼지.
+ *  두 개의 ::before/::after 로 좌/우 분사.
+ */
+.dive-landing-dust {
+  position: absolute;
+  left: var(--px, 0);
+  top: var(--py, 0);
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.dive-landing-dust::before,
+.dive-landing-dust::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 20px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse,
+    rgba(240, 220, 170, 0.75) 0%,
+    rgba(240, 220, 170, 0) 70%
+  );
+  filter: blur(1.5px);
+  mix-blend-mode: screen;
+}
+
+.dive-landing-dust::before {
+  left: 0;
+  animation: dust-kick-left 520ms var(--ease-out) forwards;
+}
+
+.dive-landing-dust::after {
+  right: 0;
+  animation: dust-kick-right 520ms var(--ease-out) forwards;
+}
+
+@keyframes dust-kick-left {
+  0%   { opacity: 0; transform: translate(0, -50%) scale(0.4); }
+  20%  { opacity: 0.9; transform: translate(-6px, -60%) scale(1); }
+  100% { opacity: 0; transform: translate(-24px, -90%) scale(1.6); }
+}
+@keyframes dust-kick-right {
+  0%   { opacity: 0; transform: translate(0, -50%) scale(0.4); }
+  20%  { opacity: 0.9; transform: translate(6px, -60%) scale(1); }
+  100% { opacity: 0; transform: translate(24px, -90%) scale(1.6); }
+}
+
+/*
+ * 다이빙 플레이어 범용 오버레이 클래스 — FE 가 옵션으로 적용 가능.
+ * 예: <div class="player-diving-halo"
+ *          style="--px:..;--py:..;--dive-dir:..">  — 플레이어 주변
+ * 에 약한 노란 링으로 "다이빙 중" 힌트. reduced-motion 시 비활성.
+ */
+.player-diving-halo {
+  position: absolute;
+  left: var(--px, 0);
+  top: var(--py, 0);
+  width: 40px;
+  height: 40px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 215, 0, 0.4);
+  box-shadow:
+    0 0 8px rgba(255, 215, 0, 0.35),
+    inset 0 0 6px rgba(255, 215, 0, 0.2);
+  animation: diving-halo-pulse 500ms var(--ease-in-out) infinite alternate;
+}
+
+@keyframes diving-halo-pulse {
+  from { transform: translate(-50%, -50%) scale(0.95); opacity: 0.7; }
+  to   { transform: translate(-50%, -50%) scale(1.05); opacity: 0.95; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dive-trail,
+  .dive-streak,
+  .dive-landing-dust::before,
+  .dive-landing-dust::after {
+    animation-duration: 100ms !important;
+  }
+  .player-diving-halo {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  강타(power_hit) 번개/폭발 보강 — D12
+ * ═══════════════════════════════════════════════════════════
+ *  원본(view.js L513-524): ball.isPowerHit === true 일 때 ballHyper +
+ *  ballTrail 스프라이트가 공 이전 위치에 표시됨. 현재 FE 는 hyper/trail
+ *  스프라이트는 그대로 쓰되 보강 요청:
+ *    - 번개 / 폭발 느낌 추가
+ *    - 과하지 않게, 원본 감성 유지
+ *
+ *  PixiJS GlowFilter 는 FE/AI Engineer 영역(canvas 내부). Designer 는
+ *  DOM 오버레이로 다음을 제공:
+ *    1) .power-hit-flash  — 공 위치 중심에 번쩍 플래시
+ *    2) .power-hit-bolt   — 공 진행 방향 반대쪽으로 번개 줄기 2~3개
+ *    3) .power-hit-shock  — 전면 화이트 플래시(매우 짧음, 50ms)
+ *    4) 캔버스 전체 shake — .game-canvas--power-hit 토글 시 85ms 흔들기
+ *
+ *  FE 통합 가이드:
+ *    - isPowerHit 가 false→true 전환 프레임에 캔버스에
+ *      .game-canvas--power-hit 클래스 120ms 토글.
+ *    - 동시에 <div class="power-hit-flash" style="--px;--py"></div>
+ *      스폰. 추가 볼트는 .power-hit-bolt 로 2~3개.
+ *    - .power-hit-shock 은 득점 임팩트와 공유 — D15 에서도 재사용.
+ * ═══════════════════════════════════════════════════════════
+ */
+
+/* (1) 공 중심 번쩍 플래시 — 노란 방사형 + 흰색 중심 */
+.power-hit-flash {
+  position: absolute;
+  left: var(--px, 50%);
+  top: var(--py, 50%);
+  width: 40px;
+  height: 40px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 1) 0%,
+    rgba(255, 235, 130, 0.95) 15%,
+    rgba(255, 215, 0, 0.7) 40%,
+    rgba(255, 180, 0, 0.3) 70%,
+    rgba(255, 180, 0, 0) 100%
+  );
+  mix-blend-mode: screen;
+  filter: blur(0.5px);
+  animation: power-hit-flash-burst 280ms var(--ease-out) forwards;
+  z-index: 4;
+}
+
+@keyframes power-hit-flash-burst {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
+  20%  { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); }
+  60%  { opacity: 0.8; transform: translate(-50%, -50%) scale(1.3); filter: blur(1px); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.8); filter: blur(4px); }
+}
+
+/*
+ * (2) 번개 줄기 — 공 중심에서 뻗어나가는 전기 아크.
+ *    CSS clip-path polygon 으로 지그재그 번개 모양.
+ *    FE 는 --bolt-angle 로 회전각 지정 (0~360deg).
+ *    3개 정도 스폰 권장 (예: 0°, 120°, 240°).
+ */
+.power-hit-bolt {
+  position: absolute;
+  left: var(--px, 50%);
+  top: var(--py, 50%);
+  width: 36px;
+  height: 6px;
+  pointer-events: none;
+  transform:
+    translate(-50%, -50%)
+    rotate(var(--bolt-angle, 0deg))
+    translateX(20px);
+  transform-origin: calc(0% - 20px) 50%;
+  background: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 1) 0%,
+    rgba(255, 230, 100, 0.95) 40%,
+    rgba(255, 200, 0, 0.6) 80%,
+    rgba(255, 200, 0, 0) 100%
+  );
+  /* 번개 zigzag — clip-path 로 삼각 펄스 */
+  clip-path: polygon(
+    0% 50%,
+    15% 15%,
+    25% 60%,
+    40% 25%,
+    55% 70%,
+    70% 30%,
+    85% 60%,
+    100% 50%,
+    85% 55%,
+    70% 80%,
+    55% 45%,
+    40% 75%,
+    25% 35%,
+    15% 65%,
+    0% 50%
+  );
+  filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.9));
+  mix-blend-mode: screen;
+  animation: power-hit-bolt-flash 240ms var(--ease-out) forwards;
+  z-index: 4;
+}
+
+@keyframes power-hit-bolt-flash {
+  0%   { opacity: 0;
+         transform: translate(-50%, -50%) rotate(var(--bolt-angle, 0deg)) translateX(8px) scaleX(0.3); }
+  15%  { opacity: 1;
+         transform: translate(-50%, -50%) rotate(var(--bolt-angle, 0deg)) translateX(14px) scaleX(1); }
+  100% { opacity: 0;
+         transform: translate(-50%, -50%) rotate(var(--bolt-angle, 0deg)) translateX(28px) scaleX(1.4); }
+}
+
+/*
+ * (3) 초단시간 화이트 플래시 — 캔버스 전체 덮는 레이어.
+ *     FE 가 .power-hit-shock 를 캔버스 내부 오버레이에 추가 후 65ms
+ *     뒤 제거. D15 득점 임팩트에서도 재사용 가능.
+ */
+.power-hit-shock {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.35);
+  mix-blend-mode: screen;
+  animation: power-hit-shock-fade 65ms var(--ease-out) forwards;
+  z-index: 5;
+}
+
+@keyframes power-hit-shock-fade {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/*
+ * (4) 캔버스 shake — 강타 임팩트 순간 캔버스 자체가 가볍게 흔들림.
+ *     transform 만 사용해 compositor-friendly. 85ms 이내 종료.
+ */
+.game-canvas.game-canvas--power-hit {
+  animation: canvas-power-hit-shake 85ms steps(4, end);
+}
+
+@keyframes canvas-power-hit-shake {
+  0%   { transform: translate(0, 0); }
+  25%  { transform: translate(-2px, 1px); }
+  50%  { transform: translate(2px, -1px); }
+  75%  { transform: translate(-1px, -1px); }
+  100% { transform: translate(0, 0); }
+}
+
+/*
+ * 강타 진행 중 캔버스 테두리가 잠시 펄싱 — accent glow 증폭.
+ * FE 가 isPowerHit=true 지속 프레임 동안 .game-canvas--hyper 토글.
+ */
+.game-canvas.game-canvas--hyper {
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.4),
+    inset 0 0 80px rgba(255, 180, 0, 0.25),
+    0 0 28px rgba(255, 215, 0, 0.45),
+    0 0 64px rgba(255, 180, 0, 0.22),
+    0 12px 40px rgba(0, 0, 0, 0.55);
+  border-color: rgba(255, 215, 0, 0.8);
+  transition: box-shadow 40ms var(--ease-out),
+              border-color 40ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .power-hit-flash,
+  .power-hit-bolt,
+  .power-hit-shock,
+  .game-canvas.game-canvas--power-hit {
+    animation-duration: 40ms !important;
+  }
+  .game-canvas.game-canvas--hyper {
+    /* glow 만 유지, shake 없음 */
+    animation: none;
+  }
+}
+
 /* ── Responsive ────────────────────────────────────────── */
 @media (max-width: 768px) {
   .game-canvas {
