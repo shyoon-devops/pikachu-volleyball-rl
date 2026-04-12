@@ -9,7 +9,7 @@ function renderControls(overrides: {
   reconnectAttempt?: number
 } = {}) {
   const send = vi.fn()
-  const onStartWithParams = vi.fn()
+  const onStart = vi.fn()
 
   const status: TrainingStatus = {
     state: 'stopped',
@@ -24,11 +24,11 @@ function renderControls(overrides: {
       connectionState={overrides.connectionState ?? 'connected'}
       reconnectAttempt={overrides.reconnectAttempt}
       send={send}
-      onStartWithParams={onStartWithParams}
+      onStart={onStart}
     />,
   )
 
-  return { send, onStartWithParams }
+  return { send, onStart }
 }
 
 describe('TrainingControls', () => {
@@ -52,10 +52,32 @@ describe('TrainingControls', () => {
     expect(screen.getByText('Resume')).toBeInTheDocument()
   })
 
-  it('calls onStartWithParams when Start is clicked', () => {
-    const { onStartWithParams } = renderControls({ status: { state: 'stopped' } })
+  it('calls onStart when Start is clicked', () => {
+    const { onStart } = renderControls({ status: { state: 'stopped' } })
     fireEvent.click(screen.getByText('Start'))
-    expect(onStartWithParams).toHaveBeenCalledTimes(1)
+    expect(onStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders only one primary CTA button regardless of state', () => {
+    // Guards against the duplicate-Start-button regression: there must be
+    // exactly one Start/Stop/Resume button in TrainingControls at any time.
+    const states: Array<TrainingStatus['state']> = ['stopped', 'running', 'paused']
+    for (const state of states) {
+      const { unmount } = render(
+        <TrainingControls
+          status={{ state, currentStep: 0, currentEpisode: 0 }}
+          connectionState="connected"
+          send={vi.fn()}
+          onStart={vi.fn()}
+        />,
+      )
+      const labels = screen
+        .getAllByRole('button')
+        .map(b => b.textContent?.trim())
+        .filter(l => l === 'Start' || l === 'Stop' || l === 'Resume')
+      expect(labels).toHaveLength(1)
+      unmount()
+    }
   })
 
   it('calls send with training:stop when Stop is clicked', () => {
