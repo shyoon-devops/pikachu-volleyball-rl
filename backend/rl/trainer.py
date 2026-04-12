@@ -22,6 +22,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from backend.rl.callbacks import (
     CheckpointCallback,
     CurriculumCallback,
+    EarlyStoppingCallback,
     LiveFrameCallback,
     MetricsCallback,
 )
@@ -382,6 +383,16 @@ class TrainingManager:
                         min_episodes=curriculum_cfg.get("min_episodes", 20),
                         loop=loop,
                         queue=self.metrics_queue,
+                    )
+                )
+
+            early_stop_cfg = hp.get("early_stopping") or {}
+            if early_stop_cfg.get("enabled"):
+                callback_list.append(
+                    EarlyStoppingCallback(
+                        patience=early_stop_cfg.get("patience", 5),
+                        min_delta=early_stop_cfg.get("min_delta", 0.01),
+                        check_interval=early_stop_cfg.get("check_interval", 10_000),
                     )
                 )
 

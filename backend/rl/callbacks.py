@@ -368,6 +368,67 @@ class CurriculumCallback(BaseCallback):
         return True
 
 
+class EarlyStoppingCallback(BaseCallback):
+    """Stop training when mean reward plateaus for ``patience`` consecutive checks.
+
+    Evaluation happens every ``check_interval`` timesteps. If the latest
+    mean episode reward does not improve by at least ``min_delta`` over
+    the running best, the patience counter increments. Once the counter
+    reaches ``patience``, ``_on_step`` returns False, which SB3 interprets
+    as a stop signal.
+
+    Regressions (reward drops below best) also consume patience — they are
+    not treated as a fresh baseline, because setting a new, worse best would
+    let a model that has genuinely collapsed "earn back" patience.
+    """
+
+    def __init__(
+        self,
+        patience: int = 5,
+        min_delta: float = 0.01,
+        check_interval: int = 10_000,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.patience = patience
+        self.min_delta = min_delta
+        self.check_interval = check_interval
+        self._best_reward: float = float("-inf")
+        self._patience_counter: int = 0
+        self._episode_rewards: deque[float] = deque(maxlen=100)
+        self.should_stop: bool = False
+
+    def _evaluate_reward(self, mean_reward: float) -> None:
+        if mean_reward >= self._best_reward + self.min_delta:
+            self._best_reward = mean_reward
+            self._patience_counter = 0
+        else:
+            self._patience_counter += 1
+            if self._patience_counter >= self.patience:
+                self.should_stop = True
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        for info in infos:
+            if "episode" in info:
+                self._episode_rewards.append(info["episode"]["r"])
+
+        if self.num_timesteps % self.check_interval != 0:
+            return True
+        if not self._episode_rewards:
+            return True
+
+        mean_reward = float(np.mean(self._episode_rewards))
+        self._evaluate_reward(mean_reward)
+        if self.should_stop:
+            logger.info(
+                "Early stopping triggered at step=%d (best_reward=%.3f, patience=%d)",
+                self.num_timesteps, self._best_reward, self.patience,
+            )
+            return False
+        return True
+
+
 def _serialize_state(state: Any) -> dict[str, Any]:
     """Serialize a GameState to a plain dict for WS frames / replay storage."""
     return {
