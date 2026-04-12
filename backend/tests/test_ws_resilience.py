@@ -37,12 +37,36 @@ def ws_url(base_url: str) -> str:
 
 
 async def _stop(ws_url: str) -> None:
+    """Request training stop and wait for the server to confirm 'stopped'.
+
+    Without this confirmation the next test can open a WS before the
+    training push loops have quiesced, which saturates the event loop
+    and causes handshake timeouts. Drain until we see a stopped status
+    or a reasonable cap elapses.
+    """
     try:
         async with websockets.connect(ws_url, open_timeout=5) as ws:
             await ws.send(json.dumps({"type": "training:stop"}))
-            await asyncio.sleep(0.3)
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                try:
+                    raw = await asyncio.wait_for(
+                        ws.recv(), timeout=deadline - time.monotonic(),
+                    )
+                    msg = json.loads(raw)
+                    if (
+                        msg.get("type") == "training:status"
+                        and msg.get("payload", {}).get("state") == "stopped"
+                    ):
+                        return
+                except (asyncio.TimeoutError, ValueError):
+                    break
+                except websockets.exceptions.ConnectionClosedError:
+                    break
     except Exception:
         pass
+    # Belt-and-suspenders: give server a beat even if we didn't see confirmation
+    await asyncio.sleep(0.5)
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -77,10 +101,17 @@ class TestAbruptDisconnect:
     async def test_abrupt_close_does_not_crash_server(
         self, ws_url: str, base_url: str,
     ) -> None:
-        """Closing without WS close-frame must not crash the server."""
+        """Closing without WS close-frame must not crash the server.
+
+        Note: 1006 is a pseudo-code reserved for abnormal closure detection
+        and cannot be sent in a Close frame (RFC 6455 §7.4.1). To truly
+        simulate an abnormal closure we abort the underlying transport
+        instead of sending a close frame.
+        """
         for _ in range(5):
             ws = await websockets.connect(ws_url, open_timeout=10)
-            await ws.close(code=1006)  # 1006 = abnormal closure
+            # Abort underlying transport — no close frame, no code.
+            ws.transport.abort()
             await asyncio.sleep(0.1)
         # Give server time to reap dead connections
         await asyncio.sleep(1.0)
@@ -95,11 +126,16 @@ class TestAbruptDisconnect:
     async def test_abrupt_close_does_not_affect_sibling(
         self, ws_url: str,
     ) -> None:
-        """Sibling connection must survive when peer dies abruptly."""
+        """Sibling connection must survive when peer dies abruptly.
+
+        Aborts the underlying transport (no close frame) to simulate a real
+        abrupt TCP-level disconnect rather than a graceful close. Sending
+        code=1006 is forbidden by RFC 6455.
+        """
         survivor = await websockets.connect(ws_url, open_timeout=10)
         try:
             victim = await websockets.connect(ws_url, open_timeout=10)
-            await victim.close(code=1006)
+            victim.transport.abort()
             await asyncio.sleep(1.0)
             # Sibling still usable
             await survivor.send(json.dumps({"type": "training:stop"}))
