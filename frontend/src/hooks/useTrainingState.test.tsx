@@ -48,7 +48,11 @@ type RouteResponder = (url: string) => {
  * returns independently.
  */
 function installFetchRouter(responder: RouteResponder) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+  // Accept the optional `init` param to match `fetch`'s runtime signature.
+  // Declared as `unknown` + underscore so it's documented-as-ignored in
+  // one place instead of triggering no-unused-vars everywhere.
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, ..._init: [RequestInit?]) => {
+    void _init
     const url = typeof input === 'string' ? input : input.toString()
     const { ok, status, payload } = responder(url)
     return {
