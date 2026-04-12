@@ -14,8 +14,14 @@ dist/
 .env
 
 # Models & Replays (binary artifacts)
-models/*.zip
-replays/*.msgpack
+models/**/*.zip
+models/**/config.json
+models/interrupted.json
+replays/**/*.msgpack
+
+# Training run logs
+logs/training/
+models_backup_*/
 
 # TensorBoard event logs
 tensorboard_logs/
