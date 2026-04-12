@@ -1,10 +1,48 @@
 """REST API tests."""
 
+from unittest.mock import AsyncMock
 
-def test_health_check(client):
+
+def test_health_check_ok(client):
+    """Health reports ok when mongo pings and disk is below threshold."""
     resp = client.get("/api/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    body = resp.json()
+    assert body["status"] == "ok"
+    checks = body["checks"]
+    assert checks["mongo"]["ok"] is True
+    assert checks["disk"]["ok"] is True
+    assert checks["training"]["ok"] is True
+    assert checks["queues"]["ok"] is True
+
+
+def test_health_check_503_when_mongo_down(client, app_instance):
+    """Health returns 503 when MongoDB ping raises."""
+    # Swap in a failing ping for this test only.
+    app_instance.state.mongo_client.admin.command = AsyncMock(
+        side_effect=RuntimeError("connection refused")
+    )
+    resp = client.get("/api/health")
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["status"] == "unhealthy"
+    assert body["checks"]["mongo"]["ok"] is False
+    assert "connection refused" in body["checks"]["mongo"]["error"]
+
+
+def test_health_check_503_when_training_thread_dead(client, app_instance):
+    """Health reports unhealthy when training state=running but thread is dead."""
+    manager = app_instance.state.training_service.manager
+    manager.status = "running"
+    # Simulate a thread that claims to be dead.
+    from unittest.mock import MagicMock
+    dead_thread = MagicMock()
+    dead_thread.is_alive = MagicMock(return_value=False)
+    manager._thread = dead_thread
+
+    resp = client.get("/api/health")
+    assert resp.status_code == 503
+    assert resp.json()["checks"]["training"]["ok"] is False
 
 
 def test_games_empty(client):

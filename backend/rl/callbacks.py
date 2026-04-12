@@ -24,19 +24,40 @@ import logging
 _cb_logger = logging.getLogger(__name__)
 
 
+_DROP_COUNTERS: dict[int, int] = {}
+_DROP_LOG_EVERY = 100  # log every N drops per queue
+
+
 def _safe_enqueue(queue: asyncio.Queue, item: Any) -> None:
-    """put_nowait with drop-oldest on full queue (backpressure)."""
+    """put_nowait with drop-oldest on full queue (backpressure).
+
+    Logs a WARNING every _DROP_LOG_EVERY drops per queue to surface
+    sustained backpressure without spamming the log on transient bursts.
+    """
+    try:
+        queue.put_nowait(item)
+        return
+    except asyncio.QueueFull:
+        pass
+
+    # Backpressure: drop oldest and retry.
+    try:
+        queue.get_nowait()
+    except asyncio.QueueEmpty:
+        pass
     try:
         queue.put_nowait(item)
     except asyncio.QueueFull:
-        try:
-            queue.get_nowait()  # drop oldest
-        except asyncio.QueueEmpty:
-            pass
-        try:
-            queue.put_nowait(item)
-        except asyncio.QueueFull:
-            _cb_logger.debug("Queue still full after drop, discarding item")
+        pass
+
+    qid = id(queue)
+    count = _DROP_COUNTERS.get(qid, 0) + 1
+    _DROP_COUNTERS[qid] = count
+    if count == 1 or count % _DROP_LOG_EVERY == 0:
+        _cb_logger.warning(
+            "WS queue backpressure: dropped %d item(s) on queue id=%d (maxsize=%d)",
+            count, qid, queue.maxsize,
+        )
 
 
 class MetricsCallback(BaseCallback):
