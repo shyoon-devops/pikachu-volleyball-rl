@@ -146,6 +146,26 @@ def client(app_instance):
 
 
 @pytest.fixture(autouse=True)
+def _reset_route_caches():
+    """Clear TTL caches attached to route handlers before each test.
+
+    The ``@cache_ttl`` decorator exposes the underlying ``AsyncTTLCache`` via
+    ``wrapper.cache``; without this reset, a successful response in one test
+    would satisfy later tests whose fixtures swap the service for a mock.
+    """
+    try:
+        from backend.app.api import routes as routes_mod
+
+        for obj in vars(routes_mod).values():
+            cache = getattr(obj, "cache", None)
+            if cache is not None and hasattr(cache, "clear"):
+                cache.clear()
+    except Exception:  # noqa: BLE001 — best-effort test hygiene
+        pass
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_rate_limit_buckets():
     """Clear in-memory rate-limit buckets before each test.
 

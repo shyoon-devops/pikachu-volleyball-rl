@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class GameRecord(BaseModel):
@@ -54,12 +54,24 @@ class EvaluationRecord(BaseModel):
 
 
 class PaginatedResponse(BaseModel):
-    """Envelope for paginated list endpoints."""
+    """Unified envelope for paginated list endpoints.
+
+    ``has_more`` is derived from (page, limit, total) rather than stored
+    directly, so callers cannot supply an inconsistent value. Emitted as a
+    regular field via ``computed_field`` so OpenAPI reflects it.
+    """
 
     data: list
     total: int
     page: int
     limit: int
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def has_more(self) -> bool:
+        if self.limit <= 0:
+            return False
+        return self.page * self.limit < self.total
 
 
 # --- WebSocket message schemas ---

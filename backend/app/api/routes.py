@@ -18,6 +18,8 @@ from backend.app.metrics import (
     MONGO_PING_OK,
     sample_runtime_metrics,
 )
+from backend.app.models.schemas import PaginatedResponse
+from backend.app.util.ttl_cache import cache_ttl
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -235,6 +237,7 @@ async def training_status(request: Request):
 
 @router.get("/games")
 @endpoint_guard("list_games")
+@cache_ttl(seconds=5, max_entries=64, include=("page", "limit"))
 async def list_games(
     request: Request,
     page: int = Query(1, ge=1),
@@ -263,20 +266,32 @@ async def get_game(request: Request, game_id: str):
 
 @router.get("/replays")
 @endpoint_guard("list_replays")
+@cache_ttl(seconds=5, max_entries=64, include=("page", "limit"))
 async def list_replays(
     request: Request,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
+    """List available replays with unified pagination envelope.
+
+    The response carries the standard ``{data, total, page, limit, has_more}``
+    shape. ``replays`` is retained as an alias of ``data`` so existing
+    frontend callers (see frontend/src/lib/api.ts) keep working until they
+    migrate to the new envelope.
+    """
     replay_service = getattr(request.app.state, "replay_service", None)
     if replay_service is None:
         logger.info("list_replays called before replay_service init; returning empty")
-        return {"replays": [], "total": 0, "page": page, "limit": limit}
+        envelope = PaginatedResponse(data=[], total=0, page=page, limit=limit).model_dump()
+        envelope["replays"] = []
+        return envelope
     all_replays = await replay_service.list_replays()
     total = len(all_replays)
     start = (page - 1) * limit
     sliced = all_replays[start : start + limit]
-    return {"replays": sliced, "total": total, "page": page, "limit": limit}
+    envelope = PaginatedResponse(data=sliced, total=total, page=page, limit=limit).model_dump()
+    envelope["replays"] = sliced  # backward-compat alias for the frontend
+    return envelope
 
 
 @router.get("/replays/{game_id}")
@@ -306,6 +321,7 @@ async def get_replay(request: Request, game_id: str):
 
 @router.get("/models")
 @endpoint_guard("list_models")
+@cache_ttl(seconds=10, max_entries=1)
 async def list_models():
     model_dir = Path(os.getenv("MODEL_DIR", "./models")).resolve()
     if not model_dir.exists():
