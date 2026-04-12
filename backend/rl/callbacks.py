@@ -190,7 +190,15 @@ class LiveFrameCallback(BaseCallback):
         prev_ball_x = float(state.ball.x)
         prev_ball_y = float(state.ball.y)
 
-        while state.score1 < MAX_SCORE and state.score2 < MAX_SCORE:
+        # Keep emitting frames while the match is live OR while the engine
+        # is still holding a post-score freeze frame. Without the freeze
+        # clause, the final 14→15 scoring frame would be visible only for
+        # one frame (and any earlier scoring frame would be skipped entirely
+        # because the engine now holds the grounded state before resetting
+        # to the next serve).
+        while (
+            state.score1 < MAX_SCORE and state.score2 < MAX_SCORE
+        ) or state.post_score_freeze_frames > 0:
             frame_data = _serialize_state(state)
             frames.append(frame_data)
             # No "type" key — handlers.frames_push_loop wraps the payload.
@@ -318,4 +326,13 @@ def _serialize_state(state: Any) -> dict[str, Any]:
         "score1": state.score1,
         "score2": state.score2,
         "frame": state.frame,
+        # Signals for the FE to render a scoring overlay / freeze treatment.
+        # Defensive getattr so older replays (pickled before these fields
+        # existed) still decode without KeyError. `is_round_over` stays True
+        # for the entire post-score freeze window; `post_score_freeze_frames`
+        # lets the FE drive progress-based effects (fade, slow-motion).
+        "is_round_over": bool(getattr(state, "is_round_over", False)),
+        "post_score_freeze_frames": int(
+            getattr(state, "post_score_freeze_frames", 0)
+        ),
     }

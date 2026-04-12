@@ -95,6 +95,13 @@ class GameState:
     # The concede is awarded to the side currently holding the ball. Consumers
     # can distinguish timeout concedes from normal concedes via this flag.
     round_ended_by_timeout: bool = False
+    # Countdown of remaining "freeze" frames after a scoring event. While
+    # this is > 0 the engine holds the grounded-ball state unchanged so that
+    # viewers (and replay FE) get to see the final scoring moment. Expires
+    # into a fresh serving state, or stays at 0 when the match has ended.
+    # Mirrors the original game's slow-motion + fade-out pause after each
+    # round (pikavolley.js: SLOW_MOTION_FRAMES_NUM + afterEndOfRound).
+    post_score_freeze_frames: int = 0
 
 
 class PlayerInput(NamedTuple):
@@ -114,7 +121,25 @@ class PikachuVolleyball:
     # headless bot-vs-bot) has no user available to forfeit the round.
     RALLY_MAX_FRAMES: int = 600
 
-    def __init__(self) -> None:
+    # Freeze-frame duration after a scoring event. The grounded ball state
+    # is held for this many frames so viewers can see the scoring moment
+    # (the user-reported "14→15 득점 순간 안 보이는" bug). ~0.33s at 60fps,
+    # roughly matches the original game's SLOW_MOTION_FRAMES_NUM (6 slow
+    # frames ≈ 14 real frames) + afterEndOfRound (5 frames) combined pause.
+    POST_SCORE_FREEZE_FRAMES: int = 20
+
+    def __init__(self, *, post_score_freeze: bool = True) -> None:
+        """Create a new engine instance.
+
+        post_score_freeze: when True (default), every scoring event triggers
+            a POST_SCORE_FREEZE_FRAMES-long hold of the grounded-ball state
+            before the next serve. Disable for RL training where the agent
+            shouldn't waste steps on no-op frames; the training env uses
+            `post_score_freeze=False` to keep legacy immediate-reset
+            behavior. Headless replay rendering, human/bot playback, and
+            the diagnostic script leave it enabled.
+        """
+        self._post_score_freeze: bool = post_score_freeze
         self._state: GameState = self._create_initial_state()
         self._prev_ball_x: float = float(self._state.ball.x)
 
@@ -153,8 +178,48 @@ class PikachuVolleyball:
           4. Rally-timeout safety valve (not in original). If the ball has
              not crossed the net for RALLY_MAX_FRAMES frames, force-end the
              round; the side currently holding the ball concedes the point.
+
+        Post-score freeze (when enabled): if the previous frame ended the
+        round, subsequent calls tick down `post_score_freeze_frames` without
+        advancing physics. When the counter reaches zero the engine either
+        swaps in a fresh serving state (match ongoing) or holds the final
+        state forever (match ended — score already at MAX_SCORE).
         """
         state = self._state
+
+        # Match-over guard. Once either player has reached MAX_SCORE the
+        # engine refuses to advance physics — this preserves the final
+        # grounded-ball scene for the replay viewer and makes repeated
+        # step() calls after termination a no-op (same contract the
+        # original game enforces via its `gameEnd` state).
+        if state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE:
+            state.is_round_over = True
+            return state
+
+        # Freeze-frame pass-through. Runs BEFORE the per-frame clearing of
+        # round-over flags so viewers see `is_round_over=True` for the whole
+        # freeze window. Physics / inputs are intentionally ignored; the
+        # grounded ball position stays pinned until the hold ends.
+        if state.post_score_freeze_frames > 0:
+            state.post_score_freeze_frames -= 1
+            state.frame += 1
+            if (
+                state.post_score_freeze_frames == 0
+                and state.score1 < MAX_SCORE
+                and state.score2 < MAX_SCORE
+            ):
+                serving = state.serving_player
+                s1, s2, frame = state.score1, state.score2, state.frame
+                new = self._create_initial_state(serving_player=serving)
+                new.score1 = s1
+                new.score2 = s2
+                new.frame = frame
+                # new.is_round_over / round_ended_by_timeout default to False.
+                self._state = new
+                self._prev_ball_x = float(new.ball.x)
+                return new
+            return state
+
         state.is_round_over = False
         state.round_ended_by_timeout = False
         state.frame += 1
@@ -399,6 +464,16 @@ class PikachuVolleyball:
             state.score1 += 1
             state.serving_player = 1
 
+        if self._post_score_freeze:
+            # Freeze-frame path: hold the grounded-ball state for
+            # POST_SCORE_FREEZE_FRAMES. The next-serve swap happens in
+            # step() when the counter expires (or never, if the match
+            # just ended). Do NOT swap _state here.
+            state.post_score_freeze_frames = self.POST_SCORE_FREEZE_FRAMES
+            return
+
+        # Legacy immediate-reset path (RL training env opts out of freeze
+        # so the agent isn't forced to no-op during the hold).
         if state.score1 < MAX_SCORE and state.score2 < MAX_SCORE:
             serving = state.serving_player
             s1, s2, frame = state.score1, state.score2, state.frame
@@ -426,6 +501,13 @@ class PikachuVolleyball:
         else:
             state.score1 += 1
             state.serving_player = 1
+
+        if self._post_score_freeze:
+            # See _handle_scoring for rationale. The freeze pass-through
+            # in step() will preserve `round_ended_by_timeout=True` for the
+            # whole hold, then swap in a fresh serving state on expiry.
+            state.post_score_freeze_frames = self.POST_SCORE_FREEZE_FRAMES
+            return
 
         if state.score1 < MAX_SCORE and state.score2 < MAX_SCORE:
             serving = state.serving_player

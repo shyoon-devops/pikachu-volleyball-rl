@@ -283,3 +283,119 @@ class TestRallyTimeout:
         state = game.step(NOOP, NOOP)
         assert state.is_round_over is True
         assert state.round_ended_by_timeout is False
+
+
+class TestPostScoreFreeze:
+    """Freeze-frame hold after scoring so viewers see the final moment.
+
+    Addresses the user-reported bug: "14→15 득점 순간 안 보이는" — the
+    engine used to immediately swap in the next serving state on the
+    scoring frame, hiding the grounded-ball moment from replay viewers.
+    """
+
+    def _force_ground_on_p2_side(self, game: PikachuVolleyball) -> None:
+        game._state.ball.x = NET_PILLAR_X + 100
+        game._state.ball.y = BALL_GROUND_Y - 1
+        game._state.ball.vy = 10
+
+    def test_scoring_sets_freeze_counter(self) -> None:
+        game = PikachuVolleyball()
+        game.reset()
+        self._force_ground_on_p2_side(game)
+
+        state = game.step(NOOP, NOOP)
+        assert state.is_round_over is True
+        assert state.score1 == 1
+        assert state.post_score_freeze_frames == game.POST_SCORE_FREEZE_FRAMES
+
+    def test_ball_stays_grounded_during_freeze(self) -> None:
+        """Ball position, score, and is_round_over all hold through freeze."""
+        game = PikachuVolleyball()
+        game.reset()
+        self._force_ground_on_p2_side(game)
+
+        state = game.step(NOOP, NOOP)
+        grounded_x = state.ball.x
+        grounded_y = state.ball.y
+        score_at_ground = state.score1
+
+        # Step through the full freeze window (but NOT past it).
+        for _ in range(game.POST_SCORE_FREEZE_FRAMES - 1):
+            state = game.step(NOOP, NOOP)
+            assert state.ball.x == grounded_x
+            assert state.ball.y == grounded_y
+            assert state.score1 == score_at_ground
+            assert state.is_round_over is True
+            assert state.post_score_freeze_frames > 0
+
+    def test_freeze_expires_into_fresh_serving_state(self) -> None:
+        """When freeze reaches 0, engine swaps to a new serving state."""
+        game = PikachuVolleyball()
+        game.reset()
+        self._force_ground_on_p2_side(game)
+
+        # First step triggers scoring + freeze=POST_SCORE_FREEZE_FRAMES.
+        game.step(NOOP, NOOP)
+        # Run out the rest of the freeze.
+        for _ in range(game.POST_SCORE_FREEZE_FRAMES):
+            state = game.step(NOOP, NOOP)
+
+        # Freeze has expired; engine reset to serving state for round 2.
+        assert state.post_score_freeze_frames == 0
+        assert state.is_round_over is False
+        assert state.ball.y < BALL_GROUND_Y  # ball no longer grounded
+
+    def test_final_point_holds_grounded_state_forever(self) -> None:
+        """Last point (score == MAX_SCORE) must NOT reset to serve state."""
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.score1 = MAX_SCORE - 1
+        self._force_ground_on_p2_side(game)
+
+        state = game.step(NOOP, NOOP)
+        assert state.score1 == MAX_SCORE
+        grounded_y = state.ball.y
+
+        # Run through freeze + a handful of extra frames — ball must stay
+        # on the ground because the match is over.
+        for _ in range(game.POST_SCORE_FREEZE_FRAMES + 10):
+            state = game.step(NOOP, NOOP)
+            assert state.score1 == MAX_SCORE
+            assert state.is_round_over is True
+            assert state.ball.y == grounded_y
+
+    def test_timeout_flag_persists_through_freeze(self) -> None:
+        """round_ended_by_timeout must stay True for the whole hold."""
+        game = PikachuVolleyball()
+        game.reset()
+        # Seed a pending timeout by pinning the ball on p1 side with no
+        # horizontal motion so no net crossing ever happens.
+        game._state.frames_since_net_crossing = game.RALLY_MAX_FRAMES - 1
+        game._state.ball.x = NET_PILLAR_X - 50
+        game._state.ball.y = BALL_GROUND_Y - 60
+        game._state.ball.vx = 0
+        game._state.ball.vy = 0
+        game._prev_ball_x = float(game._state.ball.x)
+
+        state = game.step(NOOP, NOOP)
+        assert state.round_ended_by_timeout is True
+        assert state.post_score_freeze_frames > 0
+
+        # Next freeze frame must still report the timeout flag.
+        state = game.step(NOOP, NOOP)
+        assert state.round_ended_by_timeout is True
+        assert state.is_round_over is True
+
+    def test_rl_env_default_disables_freeze(self) -> None:
+        """Env path opts out — scoring swaps immediately (no freeze frames)."""
+        game = PikachuVolleyball(post_score_freeze=False)
+        game.reset()
+        self._force_ground_on_p2_side(game)
+
+        state = game.step(NOOP, NOOP)
+        assert state.score1 == 1
+        assert state.post_score_freeze_frames == 0
+        # With freeze disabled, the engine immediately swapped to a fresh
+        # serving state, so the ball is back at serve position — not on the
+        # ground.
+        assert state.ball.y < BALL_GROUND_Y
