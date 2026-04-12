@@ -90,6 +90,90 @@
 }
 
 /*
+ * ── Tooltip 레이아웃 & 타이포그래피 (D7) ─────────────────
+ *   Recharts 기본 tooltip 은 좌측 label, 우측 series 값 구조.
+ *   여기서 label(step) 을 accent 색으로 강조하고
+ *   item 값은 tabular-nums 로 자리 정렬.
+ */
+.metrics-chart .recharts-tooltip-wrapper {
+  /* Recharts 는 position: absolute 로 이동시키므로 transition 추가 */
+  transition: transform var(--duration-fast) var(--ease-out) !important;
+  z-index: 10 !important;
+  outline: none !important;
+}
+
+.metrics-chart .recharts-default-tooltip {
+  padding: var(--space-2) var(--space-3) !important;
+  backdrop-filter: blur(8px);
+}
+
+.metrics-chart .recharts-tooltip-label {
+  color: var(--color-accent) !important;
+  font-family: var(--font-mono) !important;
+  font-size: var(--text-xs) !important;
+  font-weight: var(--weight-semibold) !important;
+  margin-bottom: 4px !important;
+  padding-bottom: 4px !important;
+  border-bottom: 1px solid var(--color-border) !important;
+  letter-spacing: 0.03em !important;
+}
+
+.metrics-chart .recharts-tooltip-item-list {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.metrics-chart .recharts-tooltip-item-name,
+.metrics-chart .recharts-tooltip-item-separator {
+  color: var(--color-text-muted) !important;
+}
+
+.metrics-chart .recharts-tooltip-item-value {
+  font-variant-numeric: tabular-nums !important;
+  font-weight: var(--weight-semibold) !important;
+}
+
+/*
+ * ── Crosshair (cursor) ───────────────────────────────────
+ *   Recharts 의 기본 cursor 는 짧은 수직 회색 선.
+ *   네온 accent 색상으로 선명하게, dashed 패턴으로 정확성 강조.
+ *   stroke-dasharray 를 inline 으로 덮는 props 가 없으므로
+ *   !important 로 CSS 강제.
+ */
+.metrics-chart .recharts-tooltip-cursor {
+  stroke: var(--color-accent) !important;
+  stroke-width: 1 !important;
+  stroke-dasharray: 3 4 !important;
+  stroke-opacity: 0.7 !important;
+}
+
+/*
+ * ── Active dot (hover 시 각 라인의 점) ───────────────────
+ *   Recharts 의 <Line> 기본 activeDot 은 흰색 링.
+ *   호버 시 glow 추가.
+ */
+.metrics-chart .recharts-active-dot circle {
+  filter: drop-shadow(0 0 4px currentColor);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.metrics-chart .recharts-layer.recharts-active-dot {
+  pointer-events: none;
+}
+
+/*
+ * ── Drag-to-zoom selection rectangle ─────────────────────
+ *   TSX 에서 ReferenceArea 로 fill={color} fillOpacity={0.1} 지정.
+ *   그 위에 점선 테두리로 선택 영역을 더 명확히.
+ */
+.metrics-chart .recharts-reference-area rect {
+  stroke: var(--color-accent) !important;
+  stroke-width: 1 !important;
+  stroke-dasharray: 2 3 !important;
+  stroke-opacity: 0.6 !important;
+}
+
+/*
  * ═══════════════════════════════════════════════════════════
  *  Semantic chart variants
  * ═══════════════════════════════════════════════════════════

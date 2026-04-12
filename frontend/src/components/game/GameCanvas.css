@@ -54,15 +54,23 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
+  /*
+   * 3px 주기(2 transparent + 1 dark) 로 섬세한 스캔라인.
+   *  - 원본 스프라이트(피카추 32x32, 공 20x20) 가시성 보존 위해
+   *    다크 스트라이프 alpha 를 0.05 까지 낮추고 opacity 도 0.35 로 감쇠.
+   *  - mix-blend-mode: multiply 로 밝기만 약간 어둡게(색상 유지).
+   *  - 이전 0.6 opacity + overlay 는 스프라이트를 RGB 노이즈처럼
+   *    왜곡했던 dev 감사 결과 반영해 완화.
+   */
   background: repeating-linear-gradient(
     to bottom,
     transparent 0,
     transparent 2px,
-    rgba(0, 0, 0, 0.08) 2px,
-    rgba(0, 0, 0, 0.08) 3px
+    rgba(0, 0, 0, 0.05) 2px,
+    rgba(0, 0, 0, 0.05) 3px
   );
-  mix-blend-mode: overlay;
-  opacity: 0.6;
+  mix-blend-mode: multiply;
+  opacity: 0.35;
   z-index: 1;
   border-radius: calc(var(--radius-lg) - 3px);
 }
