@@ -199,6 +199,56 @@ class MetricsService:
 
         return await with_mongo_retry(_run, op_name="metrics_aggregate")
 
+    async def recent_points(
+        self,
+        *,
+        field: str,
+        limit: int = 100,
+        experiment_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the most recent ``limit`` raw (step, value) pairs for ``field``.
+
+        Feeds the ``/api/training/timeseries`` endpoint that repaints the
+        dashboard chart on page refresh: the frontend wants the N newest
+        points so the live WS stream can extend the line to the right. We
+        fetch newest-first from Mongo (the index covers this) and reverse
+        to newest-last so the client doesn't have to sort.
+
+        ``field`` MUST be one of ``_NUMERIC_FIELDS`` — the REST layer maps
+        friendly aliases (``"reward"`` etc.) to these canonical names, so an
+        arbitrary string here is a programming error we want to surface
+        loudly rather than silently miss in the projection.
+        """
+        if field not in _NUMERIC_FIELDS:
+            raise ValueError(
+                f"unknown metric field {field!r}; allowed: {sorted(_NUMERIC_FIELDS)}"
+            )
+
+        match: dict[str, Any] = {}
+        if experiment_id is not None:
+            match["experiment_id"] = experiment_id
+        # Only include docs that actually carry the field — otherwise the
+        # projection would emit ``None`` entries that crash the chart.
+        match[field] = {"$exists": True}
+
+        projection = {"_id": 0, "step": 1, field: 1}
+
+        async def _run() -> list[dict[str, Any]]:
+            cursor = (
+                self._col.find(match, projection)
+                .sort("timestamp", -1)
+                .limit(limit)
+            )
+            docs = await cursor.to_list(length=limit)
+            # Return newest-last so the FE can simply ``push`` new WS frames.
+            docs.reverse()
+            return [
+                {"step": d.get("step", 0), "value": d.get(field, 0.0)}
+                for d in docs
+            ]
+
+        return await with_mongo_retry(_run, op_name="metrics_recent_points")
+
 
 def allowed_buckets() -> tuple[str, ...]:
     """Public list of accepted bucket tokens — handy for validators/docs."""

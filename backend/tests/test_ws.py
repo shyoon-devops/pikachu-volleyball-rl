@@ -1,6 +1,5 @@
 """WebSocket tests."""
 
-import pytest
 
 
 def test_ws_connect_disconnect(client):

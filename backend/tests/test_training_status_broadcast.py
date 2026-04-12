@@ -72,19 +72,61 @@ def _register(mgr: ConnectionManager, ws: _FakeWebSocket) -> None:
     mgr._connections[ws] = None  # type: ignore[assignment]
 
 
-def _make_training_service(state: str = "stopped", bot_level: int = 1) -> AsyncMock:
-    """Build a training_service double that matches TrainingServiceWrapper.
+class _FakeTrainingService:
+    """Stateful training_service double.
 
-    Only the methods _dispatch touches are stubbed; the shape of ``status()``
-    mirrors the real wrapper's return.
+    The hotfix changed _dispatch to re-read ``status()`` *after* each
+    control action so broadcasts always reflect the manager's truth, not a
+    hardcoded label. A dumb AsyncMock that returns a constant status dict
+    would therefore lie about transitions. This fake flips its internal
+    state on start/stop/pause/resume so tests exercise the read-back path.
     """
-    svc = AsyncMock()
-    svc.status = lambda: {"state": state, "bot_level": bot_level, "current_step": 0}
-    svc.start = AsyncMock(return_value="exp-hotfix-1")
-    svc.stop = AsyncMock(return_value=None)
-    svc.resume = AsyncMock(return_value=None)
-    svc.set_bot_level = lambda level: None
-    return svc
+
+    def __init__(self, state: str = "stopped", bot_level: int = 1) -> None:
+        self._state = state
+        self._bot_level = bot_level
+        self._experiment_id: str | None = None
+        # Call counters — let tests assert that e.g. stop was invoked
+        # without bringing in the MagicMock assert_called machinery.
+        self.calls: list[tuple[str, dict]] = []
+
+    def status(self) -> dict:
+        return {
+            "state": self._state,
+            "current_step": 0,
+            "current_episode": 0,
+            "bot_level": self._bot_level,
+            "experiment_id": self._experiment_id,
+        }
+
+    async def start(self, **kwargs) -> str:
+        self.calls.append(("start", kwargs))
+        self._experiment_id = "exp-hotfix-1"
+        self._state = "running"
+        return self._experiment_id
+
+    async def stop(self, *, force: bool = True) -> dict:
+        self.calls.append(("stop", {"force": force}))
+        self._state = "stopped"
+        return {"stopped": True, "reason": "stopped"}
+
+    async def pause(self) -> dict:
+        self.calls.append(("pause", {}))
+        self._state = "paused"
+        return {"paused": True, "reason": "paused"}
+
+    async def resume(self) -> dict:
+        self.calls.append(("resume", {}))
+        self._state = "running"
+        return {"resumed": True, "reason": "unpaused"}
+
+    def set_bot_level(self, level: int) -> None:
+        self.calls.append(("set_bot_level", {"level": level}))
+        self._bot_level = level
+
+
+def _make_training_service(state: str = "stopped", bot_level: int = 1) -> _FakeTrainingService:
+    return _FakeTrainingService(state=state, bot_level=bot_level)
 
 
 def _statuses(ws: _FakeWebSocket) -> list[dict]:
@@ -243,10 +285,65 @@ async def test_already_running_error_is_not_broadcast():
     # Passive clients saw neither the rejection nor a phantom status flip.
     assert passive.received_messages == []
     # The duplicate-start guard must also skip calling start().
-    svc.start.assert_not_called()
+    assert not any(name == "start" for name, _ in svc.calls)
 
 
 # --- Backwards-compat: dispatcher still works without a manager -------------
+
+
+@pytest.mark.asyncio
+async def test_training_pause_status_reaches_all_clients():
+    """FE-8's Pause button path — backend must also broadcast the transition.
+
+    Before this hotfix there was no training:pause schema at all, so the WS
+    message was rejected with unknown_type and the dashboard silently stayed
+    in ``running``. Now the handler promotes pause to a session-wide status
+    broadcast so every tab's state machine advances.
+    """
+    mgr = ConnectionManager()
+    initiator = _FakeWebSocket()
+    passive = _FakeWebSocket()
+    _register(mgr, initiator)
+    _register(mgr, passive)
+
+    svc = _make_training_service(state="running")
+    msg = ParsedMessage(type="training:pause", payload=WsEmptyPayload())
+
+    await handlers_mod._dispatch(initiator, msg, svc, replay_service=AsyncMock(), manager=mgr)
+
+    for client in (initiator, passive):
+        statuses = _statuses(client)
+        assert len(statuses) == 1
+        assert statuses[0]["payload"]["state"] == "paused"
+
+    # The fake reached the underlying pause() — not a no-op.
+    assert any(name == "pause" for name, _ in svc.calls)
+
+
+@pytest.mark.asyncio
+async def test_training_stop_forces_by_default():
+    """UI Stop = force=True. Protection only kicks in for non-UI callers.
+
+    Regression net for QA's top complaint: before the hotfix, the wrapper
+    dropped the manager's {"stopped": False, "reason": "protected"} return,
+    so long-running sessions ignored Stop clicks silently. The service-layer
+    wrapper now defaults force=True, and the WS handler passes force=True
+    explicitly — this test pins both.
+    """
+    mgr = ConnectionManager()
+    initiator = _FakeWebSocket()
+    _register(mgr, initiator)
+
+    svc = _make_training_service(state="running")
+    msg = ParsedMessage(type="training:stop", payload=WsEmptyPayload())
+
+    await handlers_mod._dispatch(initiator, msg, svc, replay_service=AsyncMock(), manager=mgr)
+
+    stop_calls = [kwargs for name, kwargs in svc.calls if name == "stop"]
+    assert stop_calls == [{"force": True}], (
+        "WS Stop must carry force=True — otherwise STOP_PROTECTION_THRESHOLD "
+        "silently rejects the user's deliberate click."
+    )
 
 
 @pytest.mark.asyncio

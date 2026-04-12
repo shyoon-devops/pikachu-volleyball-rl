@@ -137,19 +137,55 @@ async def _dispatch(
         })
 
     elif msg.type == "training:stop":
-        await training_service.stop()
-        logger.info("Training stopped")
+        # User-initiated Stop: pass force=True (see
+        # TrainingServiceWrapper.stop docstring). Inspect the result so we
+        # don't broadcast a false "stopped" when the manager declined — the
+        # previous wrapper dropped this value, which is exactly how QA's
+        # "Stop 버튼 클릭해도 학습 안 멈춤" regression leaked to dev.
+        result = await training_service.stop(force=True)
+        actual_state = training_service.status()["state"]
+        logger.info(
+            "Training stop requested: stopped=%s reason=%s actual_state=%s",
+            result.get("stopped"), result.get("reason"), actual_state,
+        )
         await _emit_status(ws, manager, {
             "type": "training:status",
-            "payload": {"state": "stopped"},
+            "payload": {"state": actual_state},
+        })
+
+    elif msg.type == "training:pause":
+        result = await training_service.pause()
+        actual_state = training_service.status()["state"]
+        logger.info(
+            "Training pause requested: paused=%s reason=%s actual_state=%s",
+            result.get("paused"), result.get("reason"), actual_state,
+        )
+        await _emit_status(ws, manager, {
+            "type": "training:status",
+            "payload": {"state": actual_state},
         })
 
     elif msg.type == "training:resume":
-        await training_service.resume()
-        logger.info("Training resumed")
+        # resume() is overloaded: unpause from paused, or reload checkpoint
+        # from stopped. Report the resulting state so every client lands in
+        # sync rather than assuming "running" on success.
+        try:
+            result = await training_service.resume()
+        except FileNotFoundError as e:
+            logger.info("Resume rejected: no checkpoint available")
+            await ws.send_json({
+                "type": "training:error",
+                "payload": {"message": str(e)},
+            })
+            return
+        actual_state = training_service.status()["state"]
+        logger.info(
+            "Training resume requested: reason=%s actual_state=%s",
+            result.get("reason"), actual_state,
+        )
         await _emit_status(ws, manager, {
             "type": "training:status",
-            "payload": {"state": "running"},
+            "payload": {"state": actual_state},
         })
 
     elif msg.type == "training:set_level":
