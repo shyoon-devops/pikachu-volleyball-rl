@@ -144,28 +144,68 @@ main:focus {
   }
 }
 
+/*
+ * ── <480px: Bottom Tab Bar Drawer ─────────────────────────
+ * App.tsx 가 토글 버튼이 없는 단순 구조이므로 CSS-only 로
+ * .app-nav 를 하단 고정 탭 바로 전환한다.
+ *   - header 는 타이틀 전용 얇은 바로 축소.
+ *   - nav 는 viewport 하단 고정, safe-area-inset 지원.
+ *   - 콘텐츠가 nav 에 가려지지 않도록 body 에 padding-bottom 예약.
+ */
 @media (max-width: 480px) {
   .app-header {
     padding: 0 var(--space-3);
     gap: var(--space-2);
-    height: auto;
-    min-height: var(--navbar-height);
-    flex-wrap: wrap;
-    padding-top: var(--space-2);
-    padding-bottom: var(--space-2);
+    height: var(--navbar-height);
+    justify-content: center;
   }
 
   .app-title {
     font-size: var(--text-sm);
     white-space: nowrap;
+    margin: 0 auto;
   }
 
+  /* Nav 를 하단 고정 탭 바로 */
   .app-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    display: flex;
     gap: 0;
+    padding: var(--space-2) var(--space-2) calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+    background: rgba(15, 17, 23, 0.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-top: 1px solid var(--color-border-strong);
+    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.45);
   }
 
   .app-nav-link {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-2) var(--space-1);
     font-size: var(--text-xs);
-    padding: var(--space-1) var(--space-2);
+    text-align: center;
+    border-radius: var(--radius-md);
+    min-height: 44px; /* 접근성: 터치 타겟 최소 44px */
+  }
+
+  /* 하단 탭 바에서는 accent underline 위치 조정 (상단으로) */
+  .app-nav-link.active::after {
+    top: -1px;
+    bottom: auto;
+    left: 25%;
+    right: 25%;
+    height: 2px;
+  }
+
+  /* nav 에 가려지지 않도록 페이지 하단 여백 확보 */
+  body {
+    padding-bottom: calc(var(--navbar-height) + env(safe-area-inset-bottom, 0px));
   }
 }

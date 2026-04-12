@@ -1,9 +1,16 @@
 /*
  * ═══════════════════════════════════════════════════════════
- *  GameOverlay.css — 게임 점수판 오버레이
+ *  GameOverlay.css — 게임 오버레이 (상태 메시지)
  * ═══════════════════════════════════════════════════════════
  *  FE className 매핑:
  *    .game-overlay, .game-overlay-score, .game-overlay-status
+ *
+ *  ── 설계 결정 ──
+ *  스프라이트 렌더링 도입 이후(Sprint 1 / PR #8) 점수는
+ *  GameCanvas 내부에서 number_0~9 스프라이트로 원본 위치(P1 x=14,
+ *  P2 x=368, y=10) 에 그려진다. HTML 오버레이 점수는 시각적으로
+ *  중복되므로 숨기고, 오버레이는 statusText(상태 메시지) 전용으로
+ *  유지한다.
  * ═══════════════════════════════════════════════════════════
  */
 
@@ -11,6 +18,7 @@
   position: absolute;
   top: 0;
   left: 0;
+  right: 0;
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -19,21 +27,12 @@
   z-index: 2;
 }
 
+/*
+ * 점수는 캔버스의 number 스프라이트가 표시한다.
+ * HTML 중복 렌더링 방지를 위해 숨긴다 — 마크업은 유지(.tsx 수정 금지).
+ */
 .game-overlay-score {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(4px);
-  padding: var(--space-1) var(--space-4);
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  font-family: var(--font-mono);
-  font-size: var(--text-2xl);
-  font-weight: var(--weight-bold);
-  letter-spacing: 0.15em;
-  color: var(--color-text-primary);
-  text-shadow: 0 0 10px currentColor;
+  display: none;
 }
 
 .game-overlay-status {
@@ -41,16 +40,19 @@
   font-size: var(--text-xs);
   color: var(--color-accent);
   text-shadow: 0 0 8px var(--color-accent);
-  margin-top: var(--space-1);
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* ── Responsive ────────────────────────────────────────── */
 @media (max-width: 480px) {
-  .game-overlay-score {
-    font-size: var(--text-lg);
-    padding: var(--space-1) var(--space-2);
-    gap: var(--space-1);
+  .game-overlay-status {
+    font-size: 0.6875rem;
+    padding: 2px var(--space-2);
   }
 }

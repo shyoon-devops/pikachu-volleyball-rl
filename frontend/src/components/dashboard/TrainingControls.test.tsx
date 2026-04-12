@@ -58,9 +58,10 @@ describe('TrainingControls', () => {
     expect(onStart).toHaveBeenCalledTimes(1)
   })
 
-  it('renders only one primary CTA button regardless of state', () => {
-    // Guards against the duplicate-Start-button regression: there must be
-    // exactly one Start/Stop/Resume button in TrainingControls at any time.
+  it('renders exactly one Start-training button per state (duplicate-CTA guard)', () => {
+    // Guards against the duplicate-Start-button regression. "Start" is
+    // the distinguishing label; Pause/Resume coexist with Stop as a
+    // secondary toggle and are NOT primary CTAs.
     const states: Array<TrainingStatus['state']> = ['stopped', 'running', 'paused']
     for (const state of states) {
       const { unmount } = render(
@@ -71,13 +72,46 @@ describe('TrainingControls', () => {
           onStart={vi.fn()}
         />,
       )
-      const labels = screen
+      const startButtons = screen
         .getAllByRole('button')
-        .map(b => b.textContent?.trim())
-        .filter(l => l === 'Start' || l === 'Stop' || l === 'Resume')
-      expect(labels).toHaveLength(1)
+        .filter(b => b.textContent?.trim() === 'Start')
+      expect(startButtons).toHaveLength(state === 'stopped' ? 1 : 0)
       unmount()
     }
+  })
+
+  it('shows Pause button when training is running', () => {
+    renderControls({ status: { state: 'running' } })
+    expect(screen.getByText('Pause')).toBeInTheDocument()
+  })
+
+  it('shows Resume (not Pause) when paused', () => {
+    renderControls({ status: { state: 'paused' } })
+    expect(screen.getByText('Resume')).toBeInTheDocument()
+    expect(screen.queryByText('Pause')).not.toBeInTheDocument()
+  })
+
+  it('does not show Pause or Resume when stopped', () => {
+    renderControls({ status: { state: 'stopped' } })
+    expect(screen.queryByText('Pause')).not.toBeInTheDocument()
+    expect(screen.queryByText('Resume')).not.toBeInTheDocument()
+  })
+
+  it('shows Stop alongside Pause/Resume while training is underway', () => {
+    renderControls({ status: { state: 'running' } })
+    expect(screen.getByText('Stop')).toBeInTheDocument()
+    expect(screen.getByText('Pause')).toBeInTheDocument()
+  })
+
+  it('calls send with training:pause when Pause is clicked', () => {
+    const { send } = renderControls({ status: { state: 'running' } })
+    fireEvent.click(screen.getByText('Pause'))
+    expect(send).toHaveBeenCalledWith('training:pause')
+  })
+
+  it('Pause button exposes accessible label', () => {
+    renderControls({ status: { state: 'running' } })
+    expect(screen.getByLabelText('Pause training')).toBeInTheDocument()
   })
 
   it('calls send with training:stop when Stop is clicked', () => {
