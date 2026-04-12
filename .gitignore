@@ -17,6 +17,9 @@ dist/
 models/*.zip
 replays/*.msgpack
 
+# TensorBoard event logs
+tensorboard_logs/
+
 # Docker
 mongo_data/
 

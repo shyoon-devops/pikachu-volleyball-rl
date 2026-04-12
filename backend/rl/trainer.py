@@ -57,9 +57,12 @@ class TrainingManager:
         self,
         model_dir: str = "models",
         replay_dir: str = "replays",
+        tensorboard_dir: str | None = "tensorboard_logs",
     ) -> None:
         self.model_dir = model_dir
         self.replay_dir = replay_dir
+        # None disables TB logging entirely; the empty string is treated the same.
+        self.tensorboard_dir: str | None = tensorboard_dir or None
         self.status: str = "stopped"
         self.current_step: int = 0
         self.current_episode: int = 0
@@ -117,6 +120,12 @@ class TrainingManager:
 
         return self._experiment_id
 
+    def _tensorboard_run_dir(self) -> str | None:
+        """Return the per-experiment TB log directory, or None if disabled."""
+        if not self.tensorboard_dir:
+            return None
+        return str(Path(self.tensorboard_dir) / self._experiment_id)
+
     def _write_run_config(self) -> None:
         """Persist a config.json describing this run for reproducibility."""
         checkpoint_dir = Path(self.model_dir) / self._experiment_id
@@ -134,6 +143,7 @@ class TrainingManager:
             "net_arch": DEFAULT_NET_ARCH,
             "started_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
             "git_commit": _get_git_commit(),
+            "tensorboard_log": self._tensorboard_run_dir(),
         }
         (checkpoint_dir / "config.json").write_text(json.dumps(config, indent=2))
 
@@ -328,11 +338,15 @@ class TrainingManager:
             hp = self._hyperparams
             if self._seed is not None:
                 env.seed(self._seed)
+            tb_log = self._tensorboard_run_dir()
+            if tb_log:
+                Path(tb_log).mkdir(parents=True, exist_ok=True)
             if checkpoint_path:
                 self._model = PPO.load(
                     checkpoint_path,
                     env=env,
                     learning_rate=hp.get("learning_rate", 3e-4),
+                    tensorboard_log=tb_log,
                 )
             else:
                 self._model = PPO(
@@ -349,6 +363,7 @@ class TrainingManager:
                     seed=self._seed,
                     verbose=0,
                     policy_kwargs={"net_arch": DEFAULT_NET_ARCH},
+                    tensorboard_log=tb_log,
                 )
 
             callback_list: list[BaseCallback] = [
