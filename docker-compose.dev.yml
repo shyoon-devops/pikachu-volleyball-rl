@@ -14,6 +14,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   backend:
     build:
@@ -46,6 +51,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   # Frontend runs on yoonbian-2 (192.168.0.248:3000) via nginx
   # Deploy with: bash scripts/deploy-frontend.sh dev

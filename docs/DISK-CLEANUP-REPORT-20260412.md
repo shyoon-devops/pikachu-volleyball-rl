@@ -45,12 +45,62 @@ v0.2.4 재배포(dev/qa/prod) 완료 직후 실행한 디스크/이미지 정리
 
 ## Follow-up (non-blocking, queued)
 
-1. **dev/qa 컨테이너 logging driver 에 rotation 추가**
-   - 현재 `HostConfig.LogConfig.Config = {}` (unbounded)
-   - 권장: `max-size: 10m, max-file: 5` (prod와 동일)
-   - 적용 위치: `docker-compose.dev.yml`, `docker-compose.qa.yml` 각 서비스
+1. ~~**dev/qa 컨테이너 logging driver 에 rotation 추가**~~ — **DONE (Round 2 below)**
 2. **yoonbian-2 의 nginx access log rotation** — SSH 액세스 없어서 이번 작업 범위 제외
 3. **crontab 등록**: `0 5 * * * /home/yoon/.../scripts/disk-cleanup.sh >> /var/log/pikachu-disk-cleanup.log 2>&1`
+
+---
+
+## Round 2 — Housekeeping Sprint (20:50 KST)
+
+v0.2.4 배포 완료 + 하우스키핑 스프린트 중 재실행. v0.2.4 rebuild 사이클로
+build cache가 다시 9.76 GB 까지 차오른 것이 확인되어 재정리.
+
+### Before (Round 2)
+
+| 항목 | 값 |
+|------|-----|
+| `/` 파티션 | 95G used / 1007G (**10%**) |
+| Docker images | **18.65 GB** (v0.2.4 최종 빌드) |
+| Build cache | **9.76 GB** (v0.2.4 build 사이클 재누적) |
+| Volumes | ~2.67 GB |
+
+### Actions (Round 2)
+
+1. `docker builder prune -af` — **9.76 GB 회수** (build cache 0B)
+2. `docker image prune -af` — 0B (dangling image 없음; 현재 4개 images 모두 active)
+3. **dev/qa 컨테이너 logging driver rotation 적용** — 위 follow-up 해소:
+   - `docker-compose.dev.yml` / `docker-compose.qa.yml` 양쪽에 mongodb + backend logging 블록 추가
+   - mongodb: `max-size: 10m, max-file: 3` (prod mongodb와 동일)
+   - backend:  `max-size: 10m, max-file: 5` (prod backend와 동일)
+   - `docker compose up -d --force-recreate` 양쪽 환경 실행 → 6 컨테이너 모두 `HostConfig.LogConfig.Config` 비어있던 것 → rotation 값 주입
+   - 검증: 6 컨테이너 전부 `healthy` + log config 값 확인됨
+   - 이미지 SHA 불변 (recreate-only, no rebuild) — VERSIONS.yml image digest 유효
+
+### After (Round 2)
+
+| 항목 | 값 | Delta (Round 2) |
+|------|-----|-------|
+| Docker images | **13.26 GB** | **−5.39 GB** (image dedup 효과) |
+| Build cache | **0 B** | **−9.76 GB** |
+| Volumes | **2.68 GB** | +0.01 GB (신규 log 파일) |
+| 총 회수 | **−15.15 GB** | |
+
+### Log rotation 검증 (Round 2 후)
+
+```
+pikachu-rl-dev-backend-1    log={"max-file":"5","max-size":"10m"}  healthy
+pikachu-rl-qa-backend-1     log={"max-file":"5","max-size":"10m"}  healthy
+pikachu-rl-prod-backend-1   log={"max-file":"5","max-size":"10m"}  healthy  (기존)
+pikachu-rl-dev-mongodb-1    log={"max-file":"3","max-size":"10m"}  healthy
+pikachu-rl-qa-mongodb-1     log={"max-file":"3","max-size":"10m"}  healthy
+pikachu-rl-prod-mongodb-1   log={"max-file":"3","max-size":"10m"}  healthy  (기존)
+```
+
+전 6 컨테이너 통일 완료. 이제 컨테이너 당 최대 로그 보유량:
+- backend: 10m × 5 = 50 MB (6 컨테이너 × 50 MB = 300 MB 상한)
+- mongodb: 10m × 3 = 30 MB (6 × 30 = 180 MB 상한)
+- 3-env 합계 상한: **~480 MB** (이전 unbounded 대비 명확한 경계 확보)
 
 ## Host vs Volume 정리 구분 메모
 
