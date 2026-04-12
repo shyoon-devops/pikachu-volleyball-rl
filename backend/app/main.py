@@ -3,16 +3,24 @@
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.app.logging_config import configure_logging
+
+# Install JSON logging before anything else emits a record so we don't miss
+# startup messages under the legacy format.
+configure_logging()
+
 logger = logging.getLogger(__name__)
 
 from backend.app.api.routes import router
 from backend.app.metrics import setup_instrumentator
+from backend.app.middleware.correlation import CorrelationIdMiddleware
 from backend.app.middleware.rate_limit import RateLimitMiddleware
 from backend.app.services.db_utils import build_mongo_client
 from backend.app.services.eval_service import EvalServiceWrapper
@@ -34,6 +42,11 @@ async def lifespan(app: FastAPI):
     model_dir = os.getenv("MODEL_DIR", "./models")
     replay_dir = os.getenv("REPLAY_DIR", "./replays")
     max_replays = int(os.getenv("MAX_REPLAYS", "1000"))
+
+    # Track both wall-clock and monotonic uptime — the liveness probe reports
+    # monotonic seconds (immune to clock skew) while humans prefer ISO start.
+    app.state.started_at_monotonic = time.monotonic()
+    app.state.started_at_wall = time.time()
 
     client = build_mongo_client(mongodb_url)
     db = client.get_default_database()
@@ -80,7 +93,8 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
 )
 
 app.add_middleware(
@@ -88,6 +102,10 @@ app.add_middleware(
     requests_per_minute=int(os.getenv("RATE_LIMIT_RPM", "60")),
     burst=int(os.getenv("RATE_LIMIT_BURST", "20")),
 )
+
+# Correlation ID middleware is added last so it runs first in the Starlette
+# stack — every log line from downstream middleware/handlers picks it up.
+app.add_middleware(CorrelationIdMiddleware)
 
 app.include_router(router, prefix="/api")
 

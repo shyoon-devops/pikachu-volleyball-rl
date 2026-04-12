@@ -12,11 +12,14 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
+from backend.app.logging_config import process_uptime_seconds
 from backend.app.metrics import (
     MONGO_PING_LATENCY,
     MONGO_PING_OK,
     sample_runtime_metrics,
 )
+from backend.app.models.schemas import PaginatedResponse
+from backend.app.util.ttl_cache import cache_ttl
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -141,12 +144,22 @@ def _check_queues(request: Request) -> dict:
     return {"ok": not saturated, "queues": depths}
 
 
-@router.get("/health")
-async def health_check(request: Request):
-    """Report live health of core subsystems.
+def _uptime_seconds(request: Request) -> float:
+    started = getattr(request.app.state, "started_at_monotonic", None)
+    return round(process_uptime_seconds(started), 3)
 
-    Returns 200 when all checks pass, 503 if any critical check fails.
+
+@router.get("/health/live")
+async def health_live(request: Request):
+    """Liveness probe — the process is up and event loop is responsive.
+
+    Used by k8s ``livenessProbe``: if this fails the pod gets restarted, so
+    we deliberately avoid any external I/O here. Answering is evidence enough.
     """
+    return {"status": "live", "uptime_seconds": _uptime_seconds(request)}
+
+
+async def _readiness_payload(request: Request) -> tuple[dict, bool]:
     mongo = await _check_mongo(request)
     disk = _check_disk()
     training = _check_training(request)
@@ -156,6 +169,7 @@ async def health_check(request: Request):
     healthy = mongo["ok"] and disk["ok"] and training["ok"] and queues["ok"]
     payload = {
         "status": "ok" if healthy else "unhealthy",
+        "uptime_seconds": _uptime_seconds(request),
         "checks": {
             "mongo": mongo,
             "disk": disk,
@@ -163,6 +177,31 @@ async def health_check(request: Request):
             "queues": queues,
         },
     }
+    return payload, healthy
+
+
+@router.get("/health/ready")
+async def health_ready(request: Request):
+    """Readiness probe — all critical dependencies are usable.
+
+    Used by k8s ``readinessProbe``: if this fails the pod stays alive but is
+    removed from the service mesh until it recovers.
+    """
+    payload, healthy = await _readiness_payload(request)
+    if not healthy:
+        logger.warning("Readiness check failed: %s", payload)
+        return JSONResponse(status_code=503, content=payload)
+    return payload
+
+
+@router.get("/health")
+async def health_check(request: Request):
+    """Backward-compatible health check — delegates to readiness.
+
+    Returns 200 when all checks pass, 503 if any critical check fails. Prefer
+    ``/api/health/live`` and ``/api/health/ready`` for probe configurations.
+    """
+    payload, healthy = await _readiness_payload(request)
     if not healthy:
         logger.warning("Health check failed: %s", payload)
         return JSONResponse(status_code=503, content=payload)
@@ -198,6 +237,7 @@ async def training_status(request: Request):
 
 @router.get("/games")
 @endpoint_guard("list_games")
+@cache_ttl(seconds=5, max_entries=64, include=("page", "limit"))
 async def list_games(
     request: Request,
     page: int = Query(1, ge=1),
@@ -226,20 +266,32 @@ async def get_game(request: Request, game_id: str):
 
 @router.get("/replays")
 @endpoint_guard("list_replays")
+@cache_ttl(seconds=5, max_entries=64, include=("page", "limit"))
 async def list_replays(
     request: Request,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
+    """List available replays with unified pagination envelope.
+
+    The response carries the standard ``{data, total, page, limit, has_more}``
+    shape. ``replays`` is retained as an alias of ``data`` so existing
+    frontend callers (see frontend/src/lib/api.ts) keep working until they
+    migrate to the new envelope.
+    """
     replay_service = getattr(request.app.state, "replay_service", None)
     if replay_service is None:
         logger.info("list_replays called before replay_service init; returning empty")
-        return {"replays": [], "total": 0, "page": page, "limit": limit}
+        envelope = PaginatedResponse(data=[], total=0, page=page, limit=limit).model_dump()
+        envelope["replays"] = []
+        return envelope
     all_replays = await replay_service.list_replays()
     total = len(all_replays)
     start = (page - 1) * limit
     sliced = all_replays[start : start + limit]
-    return {"replays": sliced, "total": total, "page": page, "limit": limit}
+    envelope = PaginatedResponse(data=sliced, total=total, page=page, limit=limit).model_dump()
+    envelope["replays"] = sliced  # backward-compat alias for the frontend
+    return envelope
 
 
 @router.get("/replays/{game_id}")
@@ -269,6 +321,7 @@ async def get_replay(request: Request, game_id: str):
 
 @router.get("/models")
 @endpoint_guard("list_models")
+@cache_ttl(seconds=10, max_entries=1)
 async def list_models():
     model_dir = Path(os.getenv("MODEL_DIR", "./models")).resolve()
     if not model_dir.exists():
