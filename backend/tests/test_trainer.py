@@ -4,13 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
 
-from backend.rl.callbacks import CheckpointCallback, MetricsCallback
 from backend.rl.trainer import (
     STOP_PROTECTION_THRESHOLD,
     TrainingManager,
@@ -122,6 +119,188 @@ class TestTrainingManagerStop:
         result = await manager.stop(force=True)
         assert result["stopped"] is True
         assert result["reason"] == "stopped"
+        assert manager.status == "stopped"
+
+
+class TestStopAndCountersHotfix:
+    """Regressions QA flagged on dev: Stop not stopping, counters pinned 0/0.
+
+    These tests exercise the live thread — not mocks — because the bug was
+    that the wrapper silently swallowed the manager's rejection dict. Only a
+    real training thread can prove that ``stop`` *actually joins* and that
+    ``current_step`` / ``current_episode`` advance while training runs.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stop_endpoint_actually_stops_the_training_thread(
+        self, manager: TrainingManager
+    ) -> None:
+        """Real join: after stop, the OS thread must no longer be alive.
+
+        The dev-environment symptom was "Stop 버튼 클릭해도 학습 안 멈춤".
+        This guards the deepest layer: ``stop`` must set the event, join
+        the background thread, and leave behind no ghost that keeps
+        stepping.
+        """
+        await manager.start(
+            bot_level=1, total_timesteps=100_000, n_envs=2,
+            hyperparams={"n_steps": 128},
+        )
+        # Give learn() time to enter its loop so the callback is live.
+        await asyncio.sleep(1)
+        assert manager._thread is not None
+        assert manager._thread.is_alive()
+
+        result = await manager.stop(force=True)
+        assert result["stopped"] is True
+        # join() must have returned — not just the status flag.
+        assert not manager._thread.is_alive(), (
+            "training thread kept running after stop() — "
+            "join() did not complete within timeout"
+        )
+        assert manager.status == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_wrapper_stop_defaults_to_force_true(
+        self, manager: TrainingManager, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """WS Stop path must not be rejected by STOP_PROTECTION_THRESHOLD.
+
+        Pre-hotfix flow: wrapper.stop() → manager.stop(force=False) →
+        rejected past threshold → wrapper returns None → handler broadcasts
+        false "stopped". Now the wrapper defaults force=True so UI clicks
+        always take effect.
+        """
+        from backend.app.services.training_service import TrainingServiceWrapper
+
+        wrapper = TrainingServiceWrapper.__new__(TrainingServiceWrapper)
+        wrapper.manager = manager
+
+        await manager.start(
+            bot_level=1, total_timesteps=100_000, n_envs=2,
+            hyperparams={"n_steps": 128},
+        )
+        await asyncio.sleep(1)
+        # Simulate a long-running session well past the protection threshold.
+        manager.current_step = STOP_PROTECTION_THRESHOLD + 1
+
+        result = await wrapper.stop()  # default force=True
+        assert result["stopped"] is True
+        assert manager.status == "stopped"
+
+    @pytest.mark.asyncio
+    async def test_step_and_episode_counter_updates_during_training(
+        self, manager: TrainingManager
+    ) -> None:
+        """Counters must tick past 0 while training is live.
+
+        QA's second complaint: "Step/Episode 카운터 0/0 고정". Root cause
+        had two legs — the wrapper's status() hardcoded 0, and
+        current_episode was never written anywhere. The wrapper change is
+        covered separately; this test proves the manager-level counter
+        write actually happens on the training thread's callback ticks.
+        """
+        await manager.start(
+            bot_level=1, total_timesteps=2048, n_envs=2,
+            hyperparams={"n_steps": 128, "metrics_interval": 64},
+        )
+
+        # Poll for counter movement rather than a fixed sleep — slow CI
+        # hosts take longer to spin up SB3's first rollout.
+        deadline = asyncio.get_event_loop().time() + 20
+        while asyncio.get_event_loop().time() < deadline:
+            if manager.current_step > 0:
+                break
+            await asyncio.sleep(0.2)
+
+        assert manager.current_step > 0, (
+            "current_step stayed at 0 — _StopEventCallback did not "
+            "propagate num_timesteps onto the manager"
+        )
+        # Wait out the run so the fixture tears down cleanly.
+        while manager.status == "running":
+            await asyncio.sleep(0.2)
+
+    @pytest.mark.asyncio
+    async def test_status_wrapper_surfaces_live_counters(
+        self, manager: TrainingManager
+    ) -> None:
+        """TrainingServiceWrapper.status() must mirror the manager, not 0/0.
+
+        This is the exact path the GET /api/training/status endpoint uses;
+        a regression here is what left FE-8's counters frozen on the
+        dashboard.
+        """
+        from backend.app.services.training_service import TrainingServiceWrapper
+
+        wrapper = TrainingServiceWrapper.__new__(TrainingServiceWrapper)
+        wrapper.manager = manager
+
+        # Simulate live counters — avoids waiting on a real SB3 tick loop.
+        manager.status = "running"
+        manager.current_step = 1234
+        manager.current_episode = 7
+        manager._experiment_id = "exp-status-check"
+
+        got = wrapper.status()
+        assert got["state"] == "running"
+        assert got["current_step"] == 1234
+        assert got["current_episode"] == 7
+        assert got["experiment_id"] == "exp-status-check"
+
+
+class TestPauseResumeHotfix:
+    """Pause/Resume state machine (FE-8 backend landing)."""
+
+    @pytest.mark.asyncio
+    async def test_pause_flips_state_without_stopping_thread(
+        self, manager: TrainingManager
+    ) -> None:
+        """Pause must keep the SB3 learn() call alive — no checkpoint reload."""
+        await manager.start(
+            bot_level=1, total_timesteps=100_000, n_envs=2,
+            hyperparams={"n_steps": 128},
+        )
+        await asyncio.sleep(1)
+        thread_before = manager._thread
+
+        result = await manager.pause()
+        assert result["paused"] is True
+        assert manager.status == "paused"
+        # Same thread object — learn() wasn't torn down.
+        assert manager._thread is thread_before
+        assert manager._thread is not None and manager._thread.is_alive()
+
+        # Cleanup.
+        await manager.stop(force=True)
+
+    @pytest.mark.asyncio
+    async def test_resume_from_paused_is_idempotent_and_does_not_reload_checkpoint(
+        self, manager: TrainingManager
+    ) -> None:
+        """Resume-from-paused clears the pause event; it must NOT raise on
+        missing checkpoint (unlike resume-from-stopped)."""
+        await manager.start(
+            bot_level=1, total_timesteps=100_000, n_envs=2,
+            hyperparams={"n_steps": 128},
+        )
+        await asyncio.sleep(1)
+        await manager.pause()
+        assert manager.status == "paused"
+
+        result = await manager.resume()
+        assert result["resumed"] is True
+        assert result["reason"] == "unpaused"
+        assert manager.status == "running"
+
+        await manager.stop(force=True)
+
+    @pytest.mark.asyncio
+    async def test_pause_is_noop_when_not_running(
+        self, manager: TrainingManager
+    ) -> None:
+        result = await manager.pause()
+        assert result == {"paused": False, "reason": "not_running"}
         assert manager.status == "stopped"
 
 

@@ -156,7 +156,14 @@ class CheckpointCallback(BaseCallback):
 
 
 class LiveFrameCallback(BaseCallback):
-    """Runs a demo game every M steps and pushes frames + result to queues."""
+    """Runs a demo game every M steps and pushes frames + result to queues.
+
+    A reference back to ``TrainingManager`` is optional: when supplied, each
+    serialized frame is also cached on ``manager.last_frame`` so the
+    ``GET /api/training/current_frame`` endpoint can repaint the game canvas
+    instantly on a page refresh, before any WebSocket frame arrives. The
+    callback still works in isolation (tests construct it without a manager).
+    """
 
     def __init__(
         self,
@@ -168,6 +175,7 @@ class LiveFrameCallback(BaseCallback):
         replay_dir: str = "replays",
         max_replays: int = 1000,
         verbose: int = 0,
+        manager: Any | None = None,
     ) -> None:
         super().__init__(verbose)
         self.frames_queue = frames_queue
@@ -178,6 +186,9 @@ class LiveFrameCallback(BaseCallback):
         self.replay_dir = Path(replay_dir)
         self.max_replays = max_replays
         self.replay_dir.mkdir(parents=True, exist_ok=True)
+        # ``Any`` rather than TrainingManager to avoid a circular import —
+        # trainer.py already imports this module at construction time.
+        self._manager = manager
 
     def _on_step(self) -> bool:
         if self.num_timesteps % self.play_interval != 0:
@@ -195,6 +206,12 @@ class LiveFrameCallback(BaseCallback):
             frames.append(frame_data)
             # No "type" key — handlers.frames_push_loop wraps the payload.
             _safe_enqueue(self.loop, self.frames_queue, frame_data)
+            if self._manager is not None:
+                # Overwrite (not append) — the REST endpoint only wants the
+                # newest frame. Assignment of a reference is atomic in
+                # CPython so cross-thread reads observe either the old or
+                # the new frame, never a partially-written dict.
+                self._manager.last_frame = frame_data
 
             obs = self._get_obs(state, prev_ball_x, prev_ball_y)
             action, _ = self.model.predict(obs, deterministic=True)
@@ -206,8 +223,13 @@ class LiveFrameCallback(BaseCallback):
             p2_input = bot.get_action(state, is_player2=True)
             state = game.step(p1_input, p2_input)
 
-        # Final frame
-        frames.append(_serialize_state(state))
+        # Final frame — also cache so /current_frame reports the terminal
+        # state (winner's score, not a stale in-play frame) until the next
+        # demo game starts.
+        final_frame = _serialize_state(state)
+        frames.append(final_frame)
+        if self._manager is not None:
+            self._manager.last_frame = final_frame
 
         game_id = str(uuid.uuid4())
         # No "type" key — handlers.results_push_loop wraps the payload.
