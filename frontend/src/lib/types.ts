@@ -35,6 +35,19 @@ export interface BallState {
   previousY?: number
   previousPreviousX?: number
   previousPreviousY?: number
+  /**
+   * Bottom-hit (punch) radial-effect anchor, emitted by BE on the frame
+   * a punch lands so the FE can render an expanding ring centered at
+   * the impact point. `punchEffectRadius` grows tick-by-tick on the
+   * engine side; FE reads the authoritative value each frame rather
+   * than animating locally. All three fields are optional until the
+   * engine WS payload ships them (AI Engineer track, 2026-04-12). Wire
+   * name is snake_case (`punch_effect_x/y/radius`) — snakeToCamel in
+   * useTrainingState.handleFrame produces these camelCase keys.
+   */
+  punchEffectX?: number
+  punchEffectY?: number
+  punchEffectRadius?: number
 }
 
 export interface GameState {
@@ -63,12 +76,35 @@ export interface TrainingStatus {
    *  status broadcast carries it; server emits `bot_level` after
    *  `training:set_level` and on explicit status queries. */
   botLevel?: number
+  /** Active training-run identifier. Optional because `training:status`
+   *  WS broadcasts omit it (they carry only the delta); populated by
+   *  REST `/api/training/status`. Used by the chart hydration path to
+   *  scope `/api/training/timeseries` queries to the current run so a
+   *  refresh doesn't mix last session's points into this one. */
+  experimentId?: string | null
+}
+
+/** Raw (step, value) point from GET /api/training/timeseries. Timestamps
+ *  are ISO-8601 UTC strings or null if the backing doc lacked one. */
+export interface TimeseriesPoint {
+  step: number
+  value: number
+  timestamp: string | null
 }
 
 export interface GameRecord {
   id: string
   timestamp: string
-  botLevel: number
+  /** Bot difficulty (1-5). Optional because the WS `game:result`
+   *  broadcast currently omits `bot_level` — the BE enqueues a result
+   *  dict without it (backend/rl/callbacks.py:236-242) and the
+   *  dispatcher broadcasts that raw dict unchanged
+   *  (backend/app/ws/handlers.py:357). REST `/api/games` validates the
+   *  field via Pydantic so hydration from REST always has it. Until
+   *  BE fixes the enqueue path, live rows from WS can lack this —
+   *  consumers must treat it as optional and fall back to "?". See
+   *  docs/NOTICE-BE-GAMERESULT-MISSING-FIELDS.md. */
+  botLevel?: number
   score1: number
   score2: number
   winner: number

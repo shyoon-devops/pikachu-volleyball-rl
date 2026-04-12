@@ -23,6 +23,17 @@ interface MetricsChartProps {
   xKey?: keyof TrainingMetrics
   color: string
   label: string
+  /**
+   * Authoritative live training step from `status.currentStep`. Used
+   * only for the "N data points over M steps" cadence label — the
+   * chart itself plots `xKey` (= data[i].step). We pass it through so
+   * the label reflects the *current* step, not the step of the most
+   * recent sampled point, which lags by up to `MetricsCallback.
+   * log_interval` (=100) frames. Without this the label would read
+   * "10 points over 900 steps" while the header counter shows 1000,
+   * which looks like a bug rather than expected sampling cadence.
+   */
+  currentStep?: number
 }
 
 function ema(data: number[], alpha: number): number[] {
@@ -51,7 +62,7 @@ function usePrefersReducedMotion(): boolean {
   return reduced
 }
 
-export function MetricsChart({ data, dataKey, xKey = 'step', color, label }: MetricsChartProps) {
+export function MetricsChart({ data, dataKey, xKey = 'step', color, label, currentStep }: MetricsChartProps) {
   const [smoothing, setSmoothing] = useState(0)
   const [zoomLeft, setZoomLeft] = useState<number | null>(null)
   const [zoomRight, setZoomRight] = useState<number | null>(null)
@@ -119,10 +130,51 @@ export function MetricsChart({ data, dataKey, xKey = 'step', color, label }: Met
   const isZoomed = zoomLeft !== null && zoomRight !== null
   const smoothedKey = `${String(dataKey)}Smoothed`
 
+  // Sampling-cadence label (user-reported 2026-04-12, PM Phase 2 #4):
+  // step counter shows 1000 but the chart has ~10 points, making it
+  // look like data is being dropped. It isn't — MetricsCallback writes
+  // one snapshot every log_interval training steps (=100 at the time
+  // of writing). Surface the ratio in the header so the count is
+  // self-explanatory; tooltip shows the derived per-sample interval.
+  //
+  // `currentStep` wins over data[last].step for the denominator: the
+  // authoritative step advances every frame while the chart only gets
+  // a point every log_interval frames, so the denominator should track
+  // the *live* step — otherwise the label would freeze between
+  // sample-writes and look stuck. Falls back to the last sample's step
+  // when the prop is absent so charts that don't pass it still work.
+  const sampleSummary = useMemo(() => {
+    if (data.length === 0) return null
+    const lastSampleStep = data[data.length - 1].step
+    const firstSampleStep = data[0].step
+    const denominator = currentStep ?? lastSampleStep
+    const intervalPerSample =
+      data.length > 1
+        ? Math.max(1, Math.round((lastSampleStep - firstSampleStep) / (data.length - 1)))
+        : null
+    return {
+      count: data.length,
+      currentStep: denominator,
+      intervalPerSample,
+    }
+  }, [data, currentStep])
+
   return (
     <div className="metrics-chart card">
       <div className="metrics-chart-header">
         <h3 className="metrics-chart-title">{label}</h3>
+        {sampleSummary && (
+          <span
+            className="metrics-chart-sample-summary"
+            title={
+              sampleSummary.intervalPerSample
+                ? `~1 sample per ${sampleSummary.intervalPerSample} training steps`
+                : undefined
+            }
+          >
+            {sampleSummary.count} pts · {sampleSummary.currentStep} steps
+          </span>
+        )}
         <div className="metrics-chart-controls">
           {isZoomed && (
             <button

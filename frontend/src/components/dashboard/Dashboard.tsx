@@ -8,6 +8,7 @@ import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { Hyperparams } from '../../lib/types'
+import { formatBotLevel } from '../../lib/formatGame'
 import './Dashboard.css'
 
 export function Dashboard() {
@@ -81,10 +82,10 @@ export function Dashboard() {
 
       <section className="dashboard-right" aria-labelledby="dashboard-metrics-heading">
         <h2 id="dashboard-metrics-heading" className="sr-only">Training Metrics</h2>
-        <MetricsChart data={metrics} dataKey="meanReward" color="#22c55e" label="Reward" />
-        <MetricsChart data={metrics} dataKey="winRate" color="#3b82f6" label="Win Rate" />
-        <MetricsChart data={metrics} dataKey="policyLoss" color="#ef4444" label="Policy Loss" />
-        <MetricsChart data={metrics} dataKey="valueLoss" color="#f97316" label="Value Loss" />
+        <MetricsChart data={metrics} dataKey="meanReward" color="#22c55e" label="Reward" currentStep={status.currentStep} />
+        <MetricsChart data={metrics} dataKey="winRate" color="#3b82f6" label="Win Rate" currentStep={status.currentStep} />
+        <MetricsChart data={metrics} dataKey="policyLoss" color="#ef4444" label="Policy Loss" currentStep={status.currentStep} />
+        <MetricsChart data={metrics} dataKey="valueLoss" color="#f97316" label="Value Loss" currentStep={status.currentStep} />
       </section>
 
       <section className="dashboard-bottom" aria-labelledby="recent-games-heading">
@@ -106,7 +107,7 @@ export function Dashboard() {
                   {recentGames.slice(0, 20).map((g, i) => (
                     <tr key={g.id}>
                       <td className="text-muted">{i + 1}</td>
-                      <td>L{g.botLevel}</td>
+                      <td>{formatBotLevel(g.botLevel)}</td>
                       <td>
                         <span className="score-p1">{g.score1}</span>
                         {' : '}

@@ -15,6 +15,7 @@ import {
   computePowerHitTrail,
   type BallHistoryPoint,
 } from './powerHitTrail'
+import { inferPlayerFrame } from './playerFrame'
 import './GameCanvas.css'
 
 // Pixel-art rendering: force NEAREST filter globally so texture atlas tiles do
@@ -99,33 +100,6 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
     score2: next.score2,
     frame: next.frame,
   }
-}
-
-// ── Player animation frame mapping (matches original getFrameNumberForPlayerAnimatedSprite) ──
-// States: 0=idle(5fr), 1=jump(5fr), 2=power_hit(5fr), 3=dive(2fr), 4=lying(1fr), 5=win(5fr), 6=lose(5fr)
-// Total: 28 frames
-// NOTE: getPlayerFrameFromState is the accurate mapping used by the original game.
-// It requires (state, frameNumber) from the backend. Currently unused because our backend
-// only sends velocity data, so we use inferPlayerFrame below as a heuristic.
-// When backend adds state/frameNumber fields, switch to this function.
-// function getPlayerFrameFromState(state: number, frameNumber: number): number {
-//   if (state < 4) return 5 * state + frameNumber
-//   if (state === 4) return 17 + frameNumber
-//   return 18 + 5 * (state - 5) + frameNumber
-// }
-
-/** Infer pikachu animation frame index from velocity (backend doesn't send state/frameNumber). */
-function inferPlayerFrame(vx: number, vy: number, frameCounter: number): number {
-  if (vy !== 0) {
-    // Jump: state=1, 5 frames (indices 5-9)
-    return 5 + (frameCounter % 5)
-  }
-  if (Math.abs(vx) > 0) {
-    // Walk-like motion: use state=0 arm swing
-    return frameCounter % 5
-  }
-  // Idle: state=0
-  return frameCounter % 5
 }
 
 /** Build the ordered texture array for pikachu AnimatedSprite (28 frames total). */
@@ -234,6 +208,11 @@ interface SpriteObjects {
   waveContainer: Container
   player1: AnimatedSprite
   player2: AnimatedSprite
+  // Per-player motion-blur trail — a second AnimatedSprite mirroring the
+  // current pose offset behind the player along its velocity vector.
+  // Rendered below the player sprite, made visible only while diving.
+  afterimageP1: AnimatedSprite
+  afterimageP2: AnimatedSprite
   ball: AnimatedSprite
   ballHyper: Sprite
   ballTrail: Sprite
@@ -382,6 +361,17 @@ function buildSpriteScene(
 
   // ── Players ──
   const playerTextures = buildPlayerTextures(textures)
+  // Motion-blur afterimages are added *first* so they render beneath
+  // the player sprite (Pixi draws children in insertion order). Both
+  // start hidden — updateDiveAfterimage flips visibility per frame.
+  const afterimageP1 = new AnimatedSprite(playerTextures)
+  afterimageP1.anchor.set(0.5)
+  afterimageP1.visible = false
+  const afterimageP2 = new AnimatedSprite(playerTextures)
+  afterimageP2.anchor.set(0.5)
+  afterimageP2.visible = false
+  stage.addChild(afterimageP1, afterimageP2)
+
   const player1 = new AnimatedSprite(playerTextures)
   player1.anchor.set(0.5)
   const player2 = new AnimatedSprite(playerTextures)
@@ -422,6 +412,8 @@ function buildSpriteScene(
     waveContainer,
     player1,
     player2,
+    afterimageP1,
+    afterimageP2,
     ball,
     ballHyper,
     ballTrail,
@@ -464,14 +456,20 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
         width: COURT_WIDTH,
         height: COURT_HEIGHT,
         background: 0x1a1a2e,
-        // Pixel-art game — smoothing produces sub-pixel texel bleed which
-        // manifested as RGB vertical stripes on the tiled sky.
+        // Pixel-art sprites (16×16 sky tiles, 64×64 pikachu, 40×40 ball):
+        //   antialias:false  — canvas edge antialias adds no value to
+        //     integer-grid pixel art and can introduce 1px fringing at
+        //     the stage border.
+        //   roundPixels:true — RL physics sends fractional player/ball
+        //     positions (e.g. x=123.7); without rounding the GPU samples
+        //     at sub-pixel offsets and bleeds adjacent texels. Belt-and-
+        //     suspenders with the module-level
+        //     `TextureSource.defaultOptions.scaleMode = 'nearest'`
+        //     assignment above.
         antialias: false,
+        roundPixels: true,
         resolution: window.devicePixelRatio || 1,
         autoDensity: true,
-        // Snap sprite positions to integer pixels to further prevent
-        // sub-pixel sampling of atlas edge texels.
-        roundPixels: true,
       })
 
       if (destroyed) {
@@ -495,6 +493,12 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
 
         const textures = sheet.textures
         if (textures && Object.keys(textures).length > 0) {
+          // Nearest-neighbor sampling is inherited from the module-level
+          // `TextureSource.defaultOptions.scaleMode = 'nearest'` set at
+          // the top of this file — Assets.load() honours defaultOptions
+          // on the texture source it constructs, so no per-source
+          // assignment is needed here. See designer report 2026-04-12
+          // (RGB sky stripes) + docs/NOTICE-CANVAS-SKY-STRIPES.md.
           spritesRef.current = buildSpriteScene(textures, app.stage)
           // Initialize clouds
           const clouds: CloudModel[] = []
@@ -577,17 +581,23 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
     sprites.player1.x = state.player1.x
     sprites.player1.y = state.player1.y
     sprites.player1.scale.x = 1
-    const p1Frame = inferPlayerFrame(state.player1.vx, state.player1.vy, fc)
+    const p1Frame = inferPlayerFrame(state.player1, fc)
     sprites.player1.gotoAndStop(Math.min(p1Frame, sprites.player1.totalFrames - 1))
     sprites.shadowP1.x = state.player1.x
+    // Dive afterimage: second sprite copy trailing behind player along
+    // velocity vector, reduced alpha. Mirrors view.js's motion-blur look
+    // for a slide without shipping a dedicated dust asset. Hidden when
+    // not diving so idle/jump frames stay crisp.
+    updateDiveAfterimage(sprites.afterimageP1, state.player1, p1Frame, 1)
 
     // ── Player 2 ──
     sprites.player2.x = state.player2.x
     sprites.player2.y = state.player2.y
     sprites.player2.scale.x = -1
-    const p2Frame = inferPlayerFrame(state.player2.vx, state.player2.vy, fc)
+    const p2Frame = inferPlayerFrame(state.player2, fc)
     sprites.player2.gotoAndStop(Math.min(p2Frame, sprites.player2.totalFrames - 1))
     sprites.shadowP2.x = state.player2.x
+    updateDiveAfterimage(sprites.afterimageP2, state.player2, p2Frame, -1)
 
     // ── Ball ──
     sprites.ball.x = state.ball.x
@@ -705,6 +715,47 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
 }
 
 // ── Helpers ──
+
+/**
+ * Motion-blur afterimage used for the dive/slide pose. Placed a few
+ * pixels behind the player along its velocity vector so the slide
+ * reads as lateral motion, not a duplicate sprite.
+ *
+ * The offset distance is intentionally modest (half a body width).
+ * Larger offsets separate the two sprites enough that the afterimage
+ * reads as a separate character instead of a blur; we only need a
+ * ghost, not a second pikachu. Alpha is low so the main sprite stays
+ * visually dominant.
+ *
+ * `scaleX` matches the owning player's facing direction (+1 for P1,
+ * -1 for P2) so the afterimage mirrors the same pose orientation.
+ */
+const DIVE_AFTERIMAGE_OFFSET_PX = 16
+const DIVE_AFTERIMAGE_ALPHA = 0.4
+
+function updateDiveAfterimage(
+  sprite: AnimatedSprite,
+  player: { x: number; y: number; vx: number; vy: number; isDiving: boolean },
+  frame: number,
+  scaleX: 1 | -1,
+): void {
+  if (!player.isDiving) {
+    sprite.visible = false
+    return
+  }
+  const speed = Math.hypot(player.vx, player.vy)
+  // Avoid divide-by-zero on the exact frame a dive begins (vx=vy=0 is
+  // unusual but possible between ticks). Fall back to a facing-aligned
+  // offset so the afterimage still renders behind the player.
+  const dirX = speed > 0 ? -player.vx / speed : -scaleX
+  const dirY = speed > 0 ? -player.vy / speed : 0
+  sprite.visible = true
+  sprite.x = player.x + dirX * DIVE_AFTERIMAGE_OFFSET_PX
+  sprite.y = player.y + dirY * DIVE_AFTERIMAGE_OFFSET_PX
+  sprite.scale.x = scaleX
+  sprite.alpha = DIVE_AFTERIMAGE_ALPHA
+  sprite.gotoAndStop(Math.min(frame, sprite.totalFrames - 1))
+}
 
 function updateScoreBoard(board: Container, score: number): void {
   const units = board.children[0] as AnimatedSprite
