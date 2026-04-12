@@ -1,54 +1,79 @@
 #!/usr/bin/env python3
-"""One-shot migration: backfill games.bot_level / games.experiment_id.
+"""One-shot migration/cleanup for the games collection.
 
-Context
--------
-Prior to commit a532bdc4 (fix(ws): route missing bot_level/experiment_id
+Two modes
+---------
+``--mode=shape`` (default)
+    Backfill ``bot_level`` / ``experiment_id`` on rows missing the fields
+    or with out-of-range values. Ensures FE never reads ``undefined``.
+    See the "shape" section below for rationale.
+
+``--mode=purge-pre-fix``
+    Delete every ``games`` row whose ``timestamp`` predates the fix
+    commit (05ffd073 on 2026-04-12T12:00:48Z UTC). Product decision: the
+    silent-L1 taint on pre-fix rows can't be recovered, and showing it
+    as "L1 history" to end users is worse than dropping it. Emits a
+    JSON sidecar with the deleted ``game_id`` list so replay files
+    (``replays/{game_id}.msgpack``) can be cleaned up separately.
+
+Shape-mode context (historical)
+-------------------------------
+Prior to commit 05ffd073 (fix(ws): route missing bot_level/experiment_id
 to dead-letter, not silent L1), ``LiveFrameCallback._on_step`` omitted
 both ``bot_level`` and ``experiment_id`` from the results dict. The WS
-handler silently coerced a missing bot_level to 1. Result: every row in
-the ``games`` collection shows bot_level=1 regardless of the user's
+handler silently coerced a missing bot_level to 1. Result: every row
+written during that window shows bot_level=1 regardless of the user's
 actual training level, and experiment_id is the empty string.
 
-Those legacy rows can't be recovered — the information was never
-captured. This migration only ensures the *shape* is consistent:
-rows that are missing the field entirely get it added (with the same
-silent-L1 value the handler used to write), so FE code reading
-``game.bot_level`` never sees ``undefined``.
+For rows that already carry a bad *value* (not a missing field), shape
+mode can't help — use purge-pre-fix instead.
 
 Usage
 -----
-    # Dry run — report what would change, no writes.
-    python -m backend.scripts.migrate-games-bot-level
+    # Dry-run, shape mode.
+    MONGODB_URL=mongodb://host:27018/pikachu_rl_dev \\
+        python3 backend/scripts/migrate-games-bot-level.py
 
-    # Apply.
-    python -m backend.scripts.migrate-games-bot-level --commit
+    # Apply shape backfill.
+    MONGODB_URL=... python3 backend/scripts/migrate-games-bot-level.py --commit
 
-    # Override connection.
-    MONGODB_URL=mongodb://host/db python -m backend.scripts.migrate-games-bot-level --commit
+    # Dry-run, purge mode (reports count + sample + total row impact).
+    MONGODB_URL=... python3 backend/scripts/migrate-games-bot-level.py \\
+        --mode=purge-pre-fix
+
+    # Apply purge. Emits deleted-game-ids sidecar next to the script.
+    MONGODB_URL=... python3 backend/scripts/migrate-games-bot-level.py \\
+        --mode=purge-pre-fix --commit
+
+    # Override cutoff (defaults to the fix commit time).
+    ... --mode=purge-pre-fix --cutoff 2026-04-10T00:00:00Z
 
 Idempotency
 -----------
-A rerun after --commit is a no-op: the filters only match rows where the
-field is *absent* or invalid. Rows written by the post-fix code path are
-already valid and will never match.
+Rerunning after --commit is a no-op in both modes:
+* shape mode filters only match rows where the field is absent or invalid.
+* purge mode filters on ``timestamp < cutoff``; once purged, surviving
+  rows are all post-cutoff and never match again.
 
 Why this is a separate script
 -----------------------------
 * It's a one-time operation, not part of normal request flow.
-* It reads every game doc — must not run inside the event loop that
-  serves user traffic.
-* Dry-run-first protects against accidentally writing the wrong default
-  to a production DB before we've had a chance to inspect the diff.
+* It reads/writes every game doc — must not run inside the event loop
+  that serves user traffic.
+* Dry-run-first protects against accidentally destroying production data
+  before the diff has been inspected.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -61,6 +86,13 @@ logger = logging.getLogger("migrate-games-bot-level")
 DEFAULT_BOT_LEVEL = 1
 DEFAULT_EXPERIMENT_ID = ""
 VALID_LEVEL_RANGE = (1, 5)
+
+# Commit time of 05ffd073 "fix(ws): route missing bot_level/experiment_id
+# to dead-letter, not silent L1" in UTC. Every row saved BEFORE this
+# moment was produced by handler code that silently defaulted bot_level
+# to 1 (see handlers.py history). "전량 삭제" policy treats anything with
+# timestamp < this as unrecoverably tainted, regardless of stored value.
+FIX_COMMIT_UTC = "2026-04-12T12:00:48Z"
 
 
 def _build_client() -> tuple[AsyncIOMotorClient, str]:
@@ -95,6 +127,133 @@ async def _count_and_preview(col, filt: dict, label: str, preview_n: int = 5) ->
         " ..." if total > preview_n else "",
     )
     return total
+
+
+def _parse_cutoff(raw: str) -> datetime:
+    """Parse an ISO-8601 cutoff into an aware UTC datetime.
+
+    Accepts both ``...Z`` and ``...+00:00``. Fails loud on naive inputs
+    rather than silently treating them as UTC — operators should be
+    explicit about TZ when wiping production data.
+    """
+    s = raw.replace("Z", "+00:00") if raw.endswith("Z") else raw
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        raise ValueError(f"cutoff must be timezone-aware, got naive: {raw!r}")
+    return dt.astimezone(timezone.utc)
+
+
+async def _purge_pre_fix(commit: bool, cutoff_raw: str) -> int:
+    """Delete games whose timestamp predates the fix commit.
+
+    Product decision ("Option B, 전량 삭제"): pre-fix rows are
+    unrecoverably tainted — every automated demo game was saved as L1
+    regardless of the user's actual training level. Dropping them beats
+    showing misleading history.
+
+    Writes a ``deleted_game_ids.json`` sidecar next to this script so
+    replay files (``replays/{game_id}.msgpack``) can be cleaned up in a
+    separate step without re-querying the DB.
+    """
+    cutoff = _parse_cutoff(cutoff_raw)
+    client, db_name = _build_client()
+    try:
+        db = client.get_default_database()
+        col = db["games"]
+
+        logger.info(
+            "Connected to MongoDB database %r (purge mode, cutoff=%s).",
+            db_name, cutoff.isoformat(),
+        )
+
+        filt = {"timestamp": {"$lt": cutoff}}
+        total = await col.count_documents(filt)
+        post_fix = await col.count_documents({"timestamp": {"$gte": cutoff}})
+        with_gid = await col.count_documents(
+            {"timestamp": {"$lt": cutoff}, "game_id": {"$exists": True}},
+        )
+        without_gid = total - with_gid
+
+        logger.info(
+            "Pre-fix rows to purge: %d  |  Post-fix rows preserved: %d",
+            total, post_fix,
+        )
+        logger.info(
+            "  with game_id (mappable to replay file): %d", with_gid,
+        )
+        logger.info(
+            "  without game_id (legacy schema, replay not mappable): %d",
+            without_gid,
+        )
+
+        if total == 0:
+            logger.info("Nothing to purge — no rows older than cutoff.")
+            return 0
+
+        # Preview up to 5 docs so the operator can spot-check before commit.
+        cursor = col.find(
+            filt, {"game_id": 1, "_id": 1, "timestamp": 1, "bot_level": 1},
+        ).sort("timestamp", 1).limit(5)
+        sample = [doc async for doc in cursor]
+        logger.info("Oldest 5 pre-fix sample:")
+        for doc in sample:
+            logger.info(
+                "  _id=%s game_id=%s ts=%s bot_level=%s",
+                doc.get("_id"), doc.get("game_id", "<none>"),
+                doc.get("timestamp"), doc.get("bot_level"),
+            )
+
+        if not commit:
+            logger.warning(
+                "DRY RUN — pass --commit to delete %d document(s). "
+                "No sidecar written in dry-run mode.", total,
+            )
+            return 0
+
+        # Collect game_ids BEFORE the delete — the sidecar drives the
+        # separate replay-file cleanup step, so it must survive the drop.
+        sidecar_path = Path(__file__).parent / "deleted_game_ids.json"
+        game_ids_cursor = col.find(
+            {"timestamp": {"$lt": cutoff}, "game_id": {"$exists": True}},
+            {"game_id": 1, "_id": 0},
+        )
+        game_ids = [doc["game_id"] async for doc in game_ids_cursor]
+        payload = {
+            "db_name": db_name,
+            "cutoff": cutoff.isoformat(),
+            "total_deleted": total,
+            "with_game_id": len(game_ids),
+            "without_game_id": without_gid,
+            "game_ids": game_ids,
+        }
+        # Append-style: if the operator runs across multiple envs, each
+        # run creates a per-db sidecar so replays can be cleaned per env.
+        per_env_path = sidecar_path.with_name(
+            f"deleted_game_ids.{db_name}.json",
+        )
+        per_env_path.write_text(json.dumps(payload, indent=2))
+        logger.info(
+            "Wrote sidecar %s (%d game_ids for replay cleanup).",
+            per_env_path, len(game_ids),
+        )
+
+        res = await col.delete_many(filt)
+        logger.info(
+            "Purge complete — deleted %d doc(s) from %r.games.",
+            res.deleted_count, db_name,
+        )
+        if res.deleted_count != total:
+            logger.warning(
+                "Deleted count (%d) differs from pre-count (%d) — "
+                "new rows may have been inserted during the run.",
+                res.deleted_count, total,
+            )
+        return 0
+    except Exception:
+        logger.exception("Purge failed")
+        return 1
+    finally:
+        client.close()
 
 
 async def _migrate(commit: bool) -> int:
@@ -195,6 +354,21 @@ async def _migrate(commit: bool) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--mode", choices=("shape", "purge-pre-fix"), default="shape",
+        help=(
+            "shape (default): backfill missing/out-of-range fields. "
+            "purge-pre-fix: delete rows saved before the fix commit."
+        ),
+    )
+    parser.add_argument(
+        "--cutoff", default=FIX_COMMIT_UTC,
+        help=(
+            "ISO-8601 UTC cutoff for purge mode. Rows with timestamp < "
+            "this are deleted. Default: %(default)s (fix commit time). "
+            "Must be timezone-aware (ends with 'Z' or '+00:00')."
+        ),
+    )
+    parser.add_argument(
         "--commit", action="store_true",
         help="Actually write changes. Without this flag, dry-run only.",
     )
@@ -208,7 +382,17 @@ def main() -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    return asyncio.run(_migrate(commit=args.commit))
+
+    if args.mode == "shape":
+        return asyncio.run(_migrate(commit=args.commit))
+    if args.mode == "purge-pre-fix":
+        return asyncio.run(
+            _purge_pre_fix(commit=args.commit, cutoff_raw=args.cutoff),
+        )
+    # argparse `choices` already guards this; kept as a belt-and-braces
+    # guard so a future mode addition doesn't silently no-op.
+    logger.error("Unknown mode: %s", args.mode)
+    return 2
 
 
 if __name__ == "__main__":

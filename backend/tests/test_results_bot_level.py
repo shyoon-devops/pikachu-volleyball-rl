@@ -172,3 +172,63 @@ def test_result_handles_none_experiment_id(
     result = _run_one_demo(monkeypatch, manager, tmp_path=tmp_path)
     assert result["experiment_id"] == ""
     assert result["bot_level"] == 2
+
+
+# --- /api/training/current_frame warm-up seed --------------------------------
+
+
+def test_on_training_start_seeds_last_frame(tmp_path: Path) -> None:
+    """``_on_training_start`` must populate ``manager.last_frame``.
+
+    Before this seed, ``/api/training/current_frame`` returned 404 for
+    the entire warm-up window (``play_interval`` = 5000 steps) because
+    ``manager.last_frame`` stayed None until the first demo tick.
+    Designers saw a blank canvas during the very phase they most need
+    visual feedback. The seed gives the endpoint a canonical reset
+    snapshot the instant training begins.
+    """
+    manager = _FakeManager(bot_level=1, experiment_id="exp-warmup")
+    assert manager.last_frame is None  # pre-condition
+
+    loop = asyncio.new_event_loop()
+    try:
+        cb = LiveFrameCallback(
+            frames_queue=asyncio.Queue(),
+            results_queue=asyncio.Queue(),
+            loop=loop,
+            bot_level=1,
+            play_interval=5000,  # far-out; we're not driving _on_step here
+            replay_dir=str(tmp_path),
+            manager=manager,
+        )
+        cb._on_training_start()
+    finally:
+        loop.close()
+
+    assert manager.last_frame is not None, (
+        "_on_training_start failed to seed manager.last_frame"
+    )
+    # Sanity-check the serialized shape — same contract as /current_frame.
+    frame = manager.last_frame
+    assert "player1" in frame and "player2" in frame and "ball" in frame
+    assert {"x", "y", "vx", "vy"}.issubset(frame["player1"].keys())
+    assert {"x", "y", "vx", "vy", "rotation"}.issubset(frame["ball"].keys())
+    assert frame["score1"] == 0 and frame["score2"] == 0
+
+
+def test_on_training_start_without_manager_is_noop(tmp_path: Path) -> None:
+    """Callback constructed without a manager (unit-test usage) must not crash."""
+    loop = asyncio.new_event_loop()
+    try:
+        cb = LiveFrameCallback(
+            frames_queue=asyncio.Queue(),
+            results_queue=asyncio.Queue(),
+            loop=loop,
+            bot_level=1,
+            play_interval=5000,
+            replay_dir=str(tmp_path),
+            manager=None,
+        )
+        cb._on_training_start()  # must not raise
+    finally:
+        loop.close()

@@ -196,6 +196,21 @@ class LiveFrameCallback(BaseCallback):
         # trainer.py already imports this module at construction time.
         self._manager = manager
 
+    def _on_training_start(self) -> None:
+        """Seed ``manager.last_frame`` so ``/current_frame`` returns 200 immediately.
+
+        Without this, the endpoint returns 404 for the full warm-up window
+        (``play_interval`` steps, default 5000). Designers hitting refresh
+        during that window saw a blank canvas even though training was
+        running. Seeding a canonical reset snapshot lets the FE paint
+        something the instant training begins; later demo ticks overwrite
+        it with live play frames.
+        """
+        if self._manager is None:
+            return
+        initial_state = PikachuVolleyball().reset()
+        self._manager.last_frame = _serialize_state(initial_state)
+
     def _on_step(self) -> bool:
         if self.num_timesteps % self.play_interval != 0:
             return True
@@ -219,7 +234,15 @@ class LiveFrameCallback(BaseCallback):
         prev_ball_x = float(state.ball.x)
         prev_ball_y = float(state.ball.y)
 
-        while state.score1 < MAX_SCORE and state.score2 < MAX_SCORE:
+        # Keep emitting frames while the match is live OR while the engine
+        # is still holding a post-score freeze frame. Without the freeze
+        # clause, the final 14→15 scoring frame would be visible only for
+        # one frame (and any earlier scoring frame would be skipped entirely
+        # because the engine now holds the grounded state before resetting
+        # to the next serve).
+        while (
+            state.score1 < MAX_SCORE and state.score2 < MAX_SCORE
+        ) or state.post_score_freeze_frames > 0:
             frame_data = _serialize_state(state)
             frames.append(frame_data)
             # No "type" key — handlers.frames_push_loop wraps the payload.
@@ -360,8 +383,27 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             # Defensive getattr so replays pickled before this field was
             # added still decode; missing → treat as not a power hit.
             "is_power_hit": bool(getattr(state.ball, "is_power_hit", False)),
+            # Punch-effect markers for the white radial ring drawn when
+            # the ball slams the ground or a power hit connects
+            # (original view.js:502-507). Radius starts at BALL_RADIUS and
+            # decays by 2 per frame in the engine. punch_effect_x/y locate
+            # the centre; FE draws a 2*radius-sized sprite.
+            "punch_effect_x": int(getattr(state.ball, "punch_effect_x", 0)),
+            "punch_effect_y": int(getattr(state.ball, "punch_effect_y", 0)),
+            "punch_effect_radius": int(
+                getattr(state.ball, "punch_effect_radius", 0)
+            ),
         },
         "score1": state.score1,
         "score2": state.score2,
         "frame": state.frame,
+        # Signals for the FE to render a scoring overlay / freeze treatment.
+        # Defensive getattr so older replays (pickled before these fields
+        # existed) still decode without KeyError. `is_round_over` stays True
+        # for the entire post-score freeze window; `post_score_freeze_frames`
+        # lets the FE drive progress-based effects (fade, slow-motion).
+        "is_round_over": bool(getattr(state, "is_round_over", False)),
+        "post_score_freeze_frames": int(
+            getattr(state, "post_score_freeze_frames", 0)
+        ),
     }
