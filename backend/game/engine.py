@@ -78,6 +78,15 @@ class GameState:
     serving_player: int = 1
     is_round_over: bool = False
     frame: int = 0
+    # Frames since the ball last crossed the net. Used as a safety valve
+    # against infinite self-toss rallies — see `PikachuVolleyball.step`.
+    # Resets to 0 on net crossing and at round start.
+    frames_since_net_crossing: int = 0
+    # True when this round ended because `frames_since_net_crossing` exceeded
+    # `PikachuVolleyball.RALLY_MAX_FRAMES` (and NOT because the ball grounded).
+    # The concede is awarded to the side currently holding the ball. Consumers
+    # can distinguish timeout concedes from normal concedes via this flag.
+    round_ended_by_timeout: bool = False
 
 
 class PlayerInput(NamedTuple):
@@ -89,8 +98,17 @@ class PlayerInput(NamedTuple):
 class PikachuVolleyball:
     """Deterministic Pikachu Volleyball engine, port of original physics.js."""
 
+    # Safety valve: force-end the round if the ball hasn't crossed the net
+    # for this many consecutive frames. Prevents infinite self-toss loops
+    # from wedging the match (e.g., a weak RL policy bouncing the ball to
+    # itself forever on its own court). NOT present in the original game —
+    # added here because non-interactive play (RL training, replays,
+    # headless bot-vs-bot) has no user available to forfeit the round.
+    RALLY_MAX_FRAMES: int = 600
+
     def __init__(self) -> None:
         self._state: GameState = self._create_initial_state()
+        self._prev_ball_x: float = float(self._state.ball.x)
 
     def _create_initial_state(self, serving_player: int = 1) -> GameState:
         # Original: player1.x = 36, player2.x = GROUND_WIDTH - 36 (= 396)
@@ -110,6 +128,7 @@ class PikachuVolleyball:
 
     def reset(self) -> GameState:
         self._state = self._create_initial_state()
+        self._prev_ball_x = float(self._state.ball.x)
         return self._state
 
     def step(self, p1_input: PlayerInput, p2_input: PlayerInput) -> GameState:
@@ -121,15 +140,24 @@ class PikachuVolleyball:
           2. processPlayerMovementAndSetPlayerPosition for both players (FUN_00401fc0).
           3. isCollisionBetweenBallAndPlayerHappened + processCollisionBetweenBallAndPlayer
              — detect and set ball velocity for next frame.
+
+        After the original-faithful update, one extension runs:
+          4. Rally-timeout safety valve (not in original). If the ball has
+             not crossed the net for RALLY_MAX_FRAMES frames, force-end the
+             round; the side currently holding the ball concedes the point.
         """
         state = self._state
         state.is_round_over = False
+        state.round_ended_by_timeout = False
         state.frame += 1
+        prev_ball_x = self._prev_ball_x
 
         grounded = self._update_ball_and_world(state.ball)
         if grounded:
             self._handle_scoring(state)
-            return state
+            # GameState may have been replaced by a fresh serving state.
+            self._prev_ball_x = float(self._state.ball.x)
+            return self._state
 
         self._update_player(state.player1, p1_input, is_player2=False)
         self._update_player(state.player2, p2_input, is_player2=True)
@@ -140,6 +168,24 @@ class PikachuVolleyball:
         # Rotation (graphic) — original uses fineRotation; we approximate with degrees
         state.ball.rotation = (state.ball.rotation + state.ball.vx) % 360
 
+        # Net-crossing counter (extension — safety valve, not in original).
+        now_ball_x = float(state.ball.x)
+        crossed = (
+            (prev_ball_x <= NET_PILLAR_X < now_ball_x)
+            or (prev_ball_x >= NET_PILLAR_X > now_ball_x)
+        )
+        if crossed:
+            state.frames_since_net_crossing = 0
+        else:
+            state.frames_since_net_crossing += 1
+
+        if state.frames_since_net_crossing >= self.RALLY_MAX_FRAMES:
+            self._handle_rally_timeout(state)
+            # _handle_rally_timeout may swap in a fresh serving state.
+            self._prev_ball_x = float(self._state.ball.x)
+            return self._state
+
+        self._prev_ball_x = now_ball_x
         return state
 
     # ------------------------------------------------------------------
@@ -346,4 +392,33 @@ class PikachuVolleyball:
             new.score2 = s2
             new.frame = frame
             new.is_round_over = True
+            self._state = new
+
+    def _handle_rally_timeout(self, state: GameState) -> None:
+        """Force-end the round when the rally stalls past RALLY_MAX_FRAMES.
+
+        Concede goes to the side currently holding the ball (ball.x side).
+        Matches `_handle_scoring` semantics so downstream consumers treat a
+        timeout like a grounded-ball concede, except `round_ended_by_timeout`
+        is set so RL / UI layers can distinguish the two.
+        """
+        ball = state.ball
+        state.is_round_over = True
+        state.round_ended_by_timeout = True
+        if ball.x < NET_PILLAR_X:
+            state.score2 += 1
+            state.serving_player = 2
+        else:
+            state.score1 += 1
+            state.serving_player = 1
+
+        if state.score1 < MAX_SCORE and state.score2 < MAX_SCORE:
+            serving = state.serving_player
+            s1, s2, frame = state.score1, state.score2, state.frame
+            new = self._create_initial_state(serving_player=serving)
+            new.score1 = s1
+            new.score2 = s2
+            new.frame = frame
+            new.is_round_over = True
+            new.round_ended_by_timeout = True
             self._state = new

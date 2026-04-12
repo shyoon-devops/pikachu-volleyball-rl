@@ -6,7 +6,6 @@ from backend.game.constants import (
     BALL_GROUND_Y,
     GRAVITY,
     MAX_SCORE,
-    NET_PILLAR_TOP_Y,
     NET_PILLAR_X,
     PLAYER_GROUND_Y,
     PLAYER_HALF_LENGTH,
@@ -200,3 +199,86 @@ class TestGameCompletion:
             if state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE:
                 break
         assert state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE
+
+
+class TestRallyTimeout:
+    """Safety-valve: force-end the round after RALLY_MAX_FRAMES without a net crossing.
+
+    Prevents infinite self-toss loops where the ball stays on one side of
+    the court indefinitely — a failure mode observed with weak RL policies
+    that can't send the ball over the net.
+    """
+
+    def test_round_ends_when_rally_exceeds_max_frames(
+        self, game: PikachuVolleyball
+    ) -> None:
+        game.reset()
+        # Pin ball on p1 side with zero horizontal velocity so it never
+        # crosses the net — the counter should monotonically increase.
+        game._state.ball.x = NET_PILLAR_X - 50
+        game._state.ball.y = BALL_GROUND_Y - 60
+        game._state.ball.vx = 0
+        game._state.ball.vy = 0
+        game._prev_ball_x = float(game._state.ball.x)
+
+        # Step one under the threshold. Bypass normal physics by re-pinning
+        # the ball between frames — we only care about the counter logic.
+        timed_out = False
+        for _ in range(game.RALLY_MAX_FRAMES + 5):
+            game._state.ball.x = NET_PILLAR_X - 50
+            game._state.ball.y = BALL_GROUND_Y - 60
+            game._state.ball.vx = 0
+            game._state.ball.vy = 0
+            state = game.step(NOOP, NOOP)
+            if state.round_ended_by_timeout:
+                timed_out = True
+                break
+
+        assert timed_out, "Rally timeout never fired past RALLY_MAX_FRAMES"
+        assert state.is_round_over is True
+        # Ball was on p1 side → p2 is awarded the point.
+        assert state.score2 == 1
+        assert state.score1 == 0
+
+    def test_net_crossing_resets_counter(self, game: PikachuVolleyball) -> None:
+        """Any net crossing (either direction) must zero the counter."""
+        game.reset()
+        # Seed the counter so we can see it drop.
+        game._state.frames_since_net_crossing = 400
+        game._prev_ball_x = float(NET_PILLAR_X - 5)
+        # Place the ball post-crossing on the p2 side.
+        game._state.ball.x = NET_PILLAR_X + 10
+        game._state.ball.y = 100
+        game._state.ball.vx = 5
+        game._state.ball.vy = 0
+
+        state = game.step(NOOP, NOOP)
+        assert state.frames_since_net_crossing == 0
+        assert state.round_ended_by_timeout is False
+
+    def test_counter_increments_on_non_crossing_frame(
+        self, game: PikachuVolleyball
+    ) -> None:
+        game.reset()
+        state = game.step(NOOP, NOOP)
+        assert state.frames_since_net_crossing >= 1
+
+    def test_reset_clears_counter(self, game: PikachuVolleyball) -> None:
+        game.reset()
+        game._state.frames_since_net_crossing = 999
+        state = game.reset()
+        assert state.frames_since_net_crossing == 0
+        assert state.round_ended_by_timeout is False
+
+    def test_grounded_round_is_not_flagged_as_timeout(
+        self, game: PikachuVolleyball
+    ) -> None:
+        """Normal concede (ball grounds) must NOT set round_ended_by_timeout."""
+        game.reset()
+        game._state.ball.x = NET_PILLAR_X - 50
+        game._state.ball.y = BALL_GROUND_Y - 1
+        game._state.ball.vy = 10
+
+        state = game.step(NOOP, NOOP)
+        assert state.is_round_over is True
+        assert state.round_ended_by_timeout is False

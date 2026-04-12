@@ -9,6 +9,7 @@ import signal
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,12 @@ class TrainingManager:
         self.status: str = "stopped"
         self.current_step: int = 0
         self.current_episode: int = 0
+        # Latest live-demo frame — updated by LiveFrameCallback each demo tick
+        # and served via GET /api/training/current_frame so a page refresh can
+        # repaint the canvas without waiting for the next WS broadcast.
+        # Kept as a plain dict (serialized GameState), not a queue: readers
+        # want the newest value, not a history.
+        self.last_frame: dict[str, Any] | None = None
         self.metrics_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.frames_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.results_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
@@ -66,10 +73,19 @@ class TrainingManager:
         self._model: PPO | None = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        # Pause is a distinct signal from stop: the training thread keeps its
+        # model + vec env + RNG state but blocks on each callback tick. That
+        # lets the user flip Pause/Resume on the dashboard (FE-8) without
+        # tearing down and re-loading an SB3 checkpoint.
+        self._pause_event = threading.Event()
         self._experiment_id: str = ""
         self._bot_level: int = 1
         self._hyperparams: dict[str, Any] = {}
         self._started_at: float = 0.0
+        # ISO-8601 start timestamp surfaced by /api/training/status; None
+        # until the first start() call. Kept separate from ``_started_at``
+        # which is a ``monotonic()`` value useful only for duration math.
+        self._started_at_wall: datetime | None = None
 
         self._install_signal_handler()
 
@@ -88,9 +104,17 @@ class TrainingManager:
         self._bot_level = bot_level
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         self._stop_event.clear()
+        self._pause_event.clear()
         self.current_step = 0
         self.current_episode = 0
+        # Drop any frame left over from a previous experiment so the
+        # /current_frame endpoint never surfaces a stale session.
+        self.last_frame = None
         self._started_at = time.monotonic()
+        # Wall-clock start time for GET /api/training/status. ``_started_at``
+        # (above) uses monotonic for duration math — wall clock is the one the
+        # dashboard displays.
+        self._started_at_wall = datetime.now(timezone.utc)
 
         loop = asyncio.get_running_loop()
 
@@ -129,25 +153,62 @@ class TrainingManager:
             }
 
         self._stop_event.set()
+        # A paused thread is parked on _pause_event.wait(); clearing it lets
+        # _on_step fall through to the stop-event check and return False so
+        # learn() unwinds cleanly instead of hanging on join().
+        self._pause_event.clear()
         if self._thread is not None:
             self._thread.join(timeout=30)
         self.status = "stopped"
         return {"stopped": True, "reason": "stopped"}
 
+    async def pause(self) -> dict[str, Any]:
+        """Pause a running training thread in place.
+
+        No-op if not running. If already paused, returns idempotently so the
+        WS handler can broadcast the current state without special-casing.
+        """
+        if self.status == "paused":
+            return {"paused": True, "reason": "already_paused"}
+        if self.status != "running":
+            return {"paused": False, "reason": "not_running"}
+        self._pause_event.set()
+        self.status = "paused"
+        return {"paused": True, "reason": "paused"}
+
     async def resume(
         self,
         total_timesteps: int = 1_000_000,
         n_envs: int = 8,
-    ) -> None:
-        """Resume training from the latest checkpoint."""
+    ) -> dict[str, Any]:
+        """Resume training.
+
+        Two distinct resume paths share this method — the caller doesn't have
+        to know which one applies:
+
+        * **From paused**: the training thread is still alive, just parked on
+          ``_pause_event``. Clear the event and flip state back to running.
+          No checkpoint reload, no new vec_env — the exact same learn() call
+          continues from its last tick.
+        * **From stopped**: spawn a fresh training thread loaded from the
+          latest checkpoint on disk. This is what the pre-pause wrapper did.
+        """
+        if self.status == "paused":
+            self._pause_event.clear()
+            self.status = "running"
+            return {"resumed": True, "reason": "unpaused"}
+
         if self.status == "running":
-            raise RuntimeError("Training is already running")
+            # Idempotent: avoid raising into the WS handler for a redundant
+            # resume click while training is already active.
+            return {"resumed": True, "reason": "already_running"}
 
         checkpoint_path = self._find_latest_checkpoint()
         if checkpoint_path is None:
             raise FileNotFoundError("No checkpoint found to resume from")
 
         self._stop_event.clear()
+        self._pause_event.clear()
         loop = asyncio.get_running_loop()
 
         self._thread = threading.Thread(
@@ -157,6 +218,7 @@ class TrainingManager:
         )
         self.status = "running"
         self._thread.start()
+        return {"resumed": True, "reason": "from_checkpoint"}
 
     def set_bot_level(self, level: int) -> None:
         """Change bot difficulty for curriculum learning."""
@@ -333,8 +395,9 @@ class TrainingManager:
                     bot_level=bot_level,
                     play_interval=hp.get("live_frame_interval", 5000),
                     replay_dir=self.replay_dir,
+                    manager=self,
                 ),
-                _StopEventCallback(self._stop_event, self),
+                _StopEventCallback(self._stop_event, self._pause_event, self),
             ])
 
             self._model.learn(
@@ -379,17 +442,55 @@ class TrainingManager:
 
 
 class _StopEventCallback(BaseCallback):
-    """Stops training when the threading.Event is set and reports step counts."""
+    """Signals SB3 to stop/pause and keeps the manager counters live.
+
+    Three responsibilities ride on a single callback because SB3 fires
+    ``_on_step`` once per environment step per env and we don't want to pay
+    the per-tick overhead of walking multiple callbacks for bookkeeping:
+
+    * Propagate the stop signal back to ``model.learn()`` by returning False
+      when ``stop_event`` is set.
+    * Block (in place, without exiting learn()) while ``pause_event`` is
+      set — so the vec env, model weights, and RNG state remain intact
+      through a Pause/Resume cycle. A stop during a pause still aborts.
+    * Keep ``manager.current_step`` / ``manager.current_episode`` in sync
+      for ``/api/training/status``. The dashboard counters were pinned to
+      0/0 before this was wired.
+    """
+
+    # Wake cadence while paused. Short enough to feel instant when the user
+    # hits Resume; long enough that a paused training session doesn't eat a
+    # full core spinning on an is_set() check.
+    _PAUSE_POLL_INTERVAL_S = 0.05
 
     def __init__(
         self,
         stop_event: threading.Event,
+        pause_event: threading.Event,
         manager: TrainingManager,
     ) -> None:
         super().__init__(verbose=0)
         self._stop_event = stop_event
+        self._pause_event = pause_event
         self._manager = manager
 
     def _on_step(self) -> bool:
         self._manager.current_step = self.num_timesteps
+
+        # Count episode completions from VecEnv monitor infos. Each env
+        # emits an ``"episode"`` key on the tick that ends an episode, so
+        # the increment is exactly the number of completions this step —
+        # not bounded by the reward deque's maxlen (which is only used for
+        # moving-average computation in MetricsCallback).
+        for info in self.locals.get("infos", []) or []:
+            if "episode" in info:
+                self._manager.current_episode += 1
+
+        # Pause: park here until the user resumes, or a stop request
+        # arrives. We intentionally return True from this branch so
+        # learn() keeps its call stack and the vec env doesn't get torn
+        # down; a real stop drops through to the return below.
+        while self._pause_event.is_set() and not self._stop_event.is_set():
+            time.sleep(self._PAUSE_POLL_INTERVAL_S)
+
         return not self._stop_event.is_set()

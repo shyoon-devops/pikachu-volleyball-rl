@@ -48,7 +48,7 @@ type RouteResponder = (url: string) => {
  * returns independently.
  */
 function installFetchRouter(responder: RouteResponder) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString()
     const { ok, status, payload } = responder(url)
     return {
