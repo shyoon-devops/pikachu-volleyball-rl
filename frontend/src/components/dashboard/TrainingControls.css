@@ -6,7 +6,7 @@
  *    .training-controls, .training-controls-header,
  *    .training-controls-title, .training-controls-status,
  *    .training-controls-actions, .training-controls-btn,
- *    .training-controls-btn--start/--stop/--resume,
+ *    .training-controls-btn--start/--stop/--pause/--resume,
  *    .training-controls-level, .training-controls-level-label,
  *    .training-controls-level-buttons, .training-controls-level-btn,
  *    .training-controls-counters, .training-controls-counter-value
@@ -162,6 +162,17 @@
 }
 .training-controls-btn--resume:hover:not(:disabled) {
   box-shadow: var(--shadow-glow-blue);
+}
+
+/* Pause is a secondary toggle shown alongside Stop while training is
+   running. Use the warning (amber) palette so it's visually distinct
+   from both Stop (danger/red) and Start (success/green). */
+.training-controls-btn--pause {
+  background: var(--color-warning);
+  color: var(--color-text-inverse);
+}
+.training-controls-btn--pause:hover:not(:disabled) {
+  filter: brightness(1.1);
 }
 
 .training-controls-level {
