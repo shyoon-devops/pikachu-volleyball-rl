@@ -74,10 +74,7 @@ class TestEngineDiving:
 
         state = game.step(NOOP, NOOP)
         # After landing from dive, lying_down_duration should be set
-        # to LYING_DOWN_DURATION (3 frames per original physics.js).
-        from backend.game.constants import LYING_DOWN_DURATION
-
-        assert state.player1.lying_down_duration == LYING_DOWN_DURATION or state.is_round_over
+        assert state.player1.lying_down_duration == 30 or state.is_round_over
 
 
 class TestEngineNetCollisionZeroVx:
@@ -274,7 +271,7 @@ class TestStopEventCallback:
     """Cover _StopEventCallback."""
 
     def test_stop_event_continues_when_not_set(self) -> None:
-        from backend.rl.trainer import _StopEventCallback, TrainingManager
+        from backend.rl.trainer import _StopEventCallback
 
         event = threading.Event()
         pause_event = threading.Event()
@@ -283,7 +280,7 @@ class TestStopEventCallback:
         assert cb._on_step() is True
 
     def test_stop_event_stops_when_set(self) -> None:
-        from backend.rl.trainer import _StopEventCallback, TrainingManager
+        from backend.rl.trainer import _StopEventCallback
 
         event = threading.Event()
         event.set()

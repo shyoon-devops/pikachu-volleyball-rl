@@ -7,7 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-v0.2.5 이후 scope. Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) + Evaluator PR #44 (E1-E10 baseline comparator / batch eval / history / timeseries / Elo tracker) 후속 릴리스 후보.
+v0.2.5 이후 scope — PR #44 evaluator + PR #42 trainer 번들 dev 에 머지 완료 (v0.2.6 candidate). 배포 전 smoke test + 회귀 스위트 GREEN 확인 필요.
+
+### Added — Evaluator system E1-E10 (PR #44, merge `f9ffdd2d`)
+
+- **`backend/rl/elo.py`** — EloRatingSystem (L1=1200/L3=1500/L5=1800 seed, k-factor=32, leaderboard + to_dict)
+- **`backend/rl/baseline_comparator.py`** — prod-vs-candidate per-level deltas (IMPROVED/REGRESSED/NEUTRAL with deadbands) + regression 교차 검증
+- **`backend/rl/batch_evaluate.py`** — `python -m backend.rl.batch_evaluate models/ --levels 1 3 5` ProcessPoolExecutor 병렬 실행 + BatchFailure 기록
+- **`backend/rl/best_model_selector.py`** — verdict-tier ranking (PASS > CONDITIONAL > FAIL > CRITICAL) + regression_report veto
+- **`backend/rl/comparison_chart.py`** — matplotlib 2×2 비교 그리드 + single-level progression (PNG, markdown 삽입용)
+- **`backend/rl/report_generator.py`** — self-contained markdown 리포트 (verdict + charts + Elo leaderboard + threshold appendix)
+- **`backend/app/api/evaluations.py`** — POST/GET `/evaluations`, GET `/evaluations/{id}`, GET `/evaluations/checkpoints`
+- **`backend/app/services/evaluation_repository.py`** — Motor protocol-backed, tests 에서 `FakeCollection` 대체
+- **`backend/app/services/evaluation_timeseries.py`** — `/evaluations/timeseries` — (model_path, bot_level) 별 training_step + checkpoint_label 포함
+- **`backend/app/services/elo_tracker.py`** — asyncio 백그라운드 tick, timestamp cursor 로 재시작 dedup
+- **`EvalResult.dominance_score`** — win_rate(60%) + point_share(40%) 합성 메트릭
+
+### Added — Trainer Task B (PR #42, merge `be4001eb`)
+
+- **`backend/rl/callbacks.py::CurriculumCallback`** — sliding win-rate window, threshold 초과 시 자동 promote. `env.set_bot_level()` 로 다음 reset 때 적용. `training:curriculum` WS 이벤트 발행
+- **`backend/rl/sweep.py`** — `HyperparamSweep` + `expand_grid()` 카테시안 product, `SweepResult` persist (`summary.json`), `best_run()`
+- **`backend/rl/callbacks.py::EarlyStoppingCallback`** — patience + min_delta + check_interval 기반 plateau 종료. regression 은 stagnation 으로 카운트
+- **Training reproducibility** — `trainer.start(seed=...)` 가 PPO + VecEnv 에 시드 전파, `config.json` 자동 기록 (bot_level + seed + hyperparams + obs/action space + net_arch + git_commit + started_at)
+- **TensorBoard integration** — `PPO(tensorboard_log=<tb_dir>/<experiment_id>)` per-experiment 로그. `hyperparams.tensorboard_dir=None` 이면 비활성
+- **`backend/rl/run_training.py`** — headless 러너 (asyncio queue 오버헤드 없는 500K 베이스라인용)
+- **`docs/tasks/B-reward-rebalance.md`** — reward shaping 재리뷰 요청 + 500K 베이스라인 증거
+
+### Notes
+
+- AI Engineer 의 reward rebalance (`0f32235e`) 는 이미 dev 에 있으며 PR #42 내부 merge 는 no-op (동일 컨텐츠). Phase 2 engine 추가 (rally-timeout, is_power_hit, punch_effect_radius, is_diving, freeze tick, bot L1-L5 aggression/net_bias) 모두 3-way merge 후 보존 확인
+- Trainer 팀 일시 중단(중단 지시) 상태이나 PR 코드는 완성되어 있어 병합. 실제 새 훈련 실행은 별도 지시 필요
+- v0.2.5 태그(`cd1e6a39`) 보다 후행 커밋. v0.2.5 범위에 포함되지 않음 — **v0.2.6 릴리스 후보**
+
+## [0.2.5] - 2026-04-12 (Phase 2 bug bundle — gameplay feel + metrics fidelity + match-end freeze / dev HEAD cd1e6a39)
 
 ## [0.2.5] - 2026-04-12 (Phase 2 bug bundle — gameplay feel + metrics fidelity + match-end freeze / dev HEAD cd1e6a39)
 

@@ -1,51 +1,29 @@
-"""Game constants for Pikachu Volleyball.
+"""Game constants for Pikachu Volleyball."""
 
-Values are matched against the original game source
-(gorisanson/pikachu-volleyball: src/resources/js/physics.js).
-Any divergence from the original must be intentional and documented.
-"""
-
-# Court dimensions — original: GROUND_WIDTH=432, GROUND_HEIGHT=304
+# Court dimensions
 GROUND_WIDTH: int = 432
 GROUND_HEIGHT: int = 304
 
-# Net — original: NET_PILLAR_HALF_WIDTH=25, NET_PILLAR_TOP_TOP/BOTTOM=176/192
-# NET_PILLAR_X equals GROUND_HALF_WIDTH=(GROUND_WIDTH/2)|0=216 in original.
+# Net
 NET_PILLAR_X: int = 216
 NET_PILLAR_HALF_WIDTH: int = 25
-NET_PILLAR_TOP_Y: int = 176  # original: NET_PILLAR_TOP_TOP_Y_COORD
-NET_PILLAR_TOP_BOTTOM_Y: int = 192  # original: NET_PILLAR_TOP_BOTTOM_Y_COORD
+NET_PILLAR_TOP_Y: int = 176
 
-# Player — original: PLAYER_LENGTH=64 (half=32), PLAYER_TOUCHING_GROUND_Y=244
+# Player
 PLAYER_HALF_LENGTH: int = 32
 PLAYER_GROUND_Y: int = 244
-PLAYER_SPEED: int = 6  # original: xDirection * 6
-PLAYER_DIVE_SPEED: int = 8  # original: divingDirection * 8
-PLAYER_JUMP_VELOCITY: int = -16  # original: -16 on jump
-PLAYER_DIVE_VELOCITY: int = -5  # original: yVelocity = -5 on dive start
-PLAYER_INIT_X_P1: int = 36  # original: player1.x = 36
-PLAYER_INIT_X_P2: int = GROUND_WIDTH - 36  # original: 396
+PLAYER_SPEED: int = 6
+PLAYER_DIVE_SPEED: int = 8
+PLAYER_JUMP_VELOCITY: int = -16
+PLAYER_DIVE_VELOCITY: int = -5
 
-# Lying-down after dive landing — original: lyingDownDurationLeft = 3
-LYING_DOWN_DURATION: int = 3
-
-# Ball — original: BALL_RADIUS=20, BALL_TOUCHING_GROUND_Y=252
+# Ball
 BALL_RADIUS: int = 20
 BALL_GROUND_Y: int = 252
-BALL_INIT_Y_VELOCITY: int = 1  # original: ball.yVelocity = 1 at serve
-BALL_SERVE_X_P1: int = 56  # original: ball.x = 56 on player1 serve
-BALL_SERVE_X_P2: int = GROUND_WIDTH - 56  # original: 376 on player2 serve
-BALL_SERVE_Y: int = 0  # original: ball.y = 0 at serve
+BALL_INIT_Y_VELOCITY: int = 1
 
-# Physics — per-frame gravity step (yVelocity += 1)
+# Physics
 GRAVITY: int = 1
-
-# Collision thresholds derived from original physics
-# Ball-player collision: |ball.x - player.x| <= 32 AND |ball.y - player.y| <= 32
-# (original uses PLAYER_HALF_LENGTH, NOT PLAYER_HALF_LENGTH + BALL_RADIUS)
-BALL_PLAYER_COLLISION_DIST: int = PLAYER_HALF_LENGTH
-# Minimum reflected-vy magnitude after a non-power-hit collision
-BALL_MIN_REFLECT_VY_ABS: int = 15
 
 # Game rules
 MAX_SCORE: int = 15

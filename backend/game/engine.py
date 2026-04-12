@@ -1,9 +1,4 @@
-"""Pikachu Volleyball game engine — pure Python, no I/O.
-
-Physics ported from the original game source
-(gorisanson/pikachu-volleyball: src/resources/js/physics.js).
-Function-level comments reference the original JS function name.
-"""
+"""Pikachu Volleyball game engine — pure Python, no I/O."""
 
 from __future__ import annotations
 
@@ -13,28 +8,17 @@ from typing import NamedTuple
 from backend.game.constants import (
     BALL_GROUND_Y,
     BALL_INIT_Y_VELOCITY,
-    BALL_MIN_REFLECT_VY_ABS,
-    BALL_PLAYER_COLLISION_DIST,
     BALL_RADIUS,
-    BALL_SERVE_X_P1,
-    BALL_SERVE_X_P2,
-    BALL_SERVE_Y,
     GRAVITY,
     GROUND_WIDTH,
-    LYING_DOWN_DURATION,
-    MAX_SCORE,
     NET_PILLAR_HALF_WIDTH,
-    NET_PILLAR_TOP_BOTTOM_Y,
     NET_PILLAR_TOP_Y,
     NET_PILLAR_X,
-    PLAYER_DIVE_SPEED,
-    PLAYER_DIVE_VELOCITY,
     PLAYER_GROUND_Y,
     PLAYER_HALF_LENGTH,
-    PLAYER_INIT_X_P1,
-    PLAYER_INIT_X_P2,
     PLAYER_JUMP_VELOCITY,
     PLAYER_SPEED,
+    MAX_SCORE,
 )
 
 
@@ -48,11 +32,6 @@ class PlayerState:
     is_diving: bool = False
     is_power_hitting: bool = False
     lying_down_duration: int = 0
-    diving_direction: int = 0  # -1 left, 0 none, 1 right
-    # Per original physics.js (Player.isCollisionWithBallHappened, 0xBC):
-    # Prevents collision from re-firing while the ball is still within the
-    # 32px box across frames. Cleared when the ball leaves the box.
-    is_collision_with_ball_happened: bool = False
 
 
 @dataclass
@@ -117,7 +96,7 @@ class PlayerInput(NamedTuple):
 
 
 class PikachuVolleyball:
-    """Deterministic Pikachu Volleyball engine, port of original physics.js."""
+    """Deterministic Pikachu Volleyball game engine."""
 
     # Safety valve: force-end the round if the ball hasn't crossed the net
     # for this many consecutive frames. Prevents infinite self-toss loops
@@ -150,14 +129,12 @@ class PikachuVolleyball:
         self._prev_ball_x: float = float(self._state.ball.x)
 
     def _create_initial_state(self, serving_player: int = 1) -> GameState:
-        # Original: player1.x = 36, player2.x = GROUND_WIDTH - 36 (= 396)
-        p1 = PlayerState(x=PLAYER_INIT_X_P1, y=PLAYER_GROUND_Y)
-        p2 = PlayerState(x=PLAYER_INIT_X_P2, y=PLAYER_GROUND_Y)
-        # Original: ball.x = 56 (p1 serve) or GROUND_WIDTH - 56 = 376, y = 0, vy = 1
+        p1 = PlayerState(x=108, y=PLAYER_GROUND_Y)
+        p2 = PlayerState(x=324, y=PLAYER_GROUND_Y)
         if serving_player == 1:
-            ball = BallState(x=BALL_SERVE_X_P1, y=BALL_SERVE_Y, vy=BALL_INIT_Y_VELOCITY)
+            ball = BallState(x=108, y=100, vy=BALL_INIT_Y_VELOCITY)
         else:
-            ball = BallState(x=BALL_SERVE_X_P2, y=BALL_SERVE_Y, vy=BALL_INIT_Y_VELOCITY)
+            ball = BallState(x=324, y=100, vy=BALL_INIT_Y_VELOCITY)
         return GameState(
             player1=p1,
             player2=p2,
@@ -264,12 +241,15 @@ class PikachuVolleyball:
 
         self._update_player(state.player1, p1_input, is_player2=False)
         self._update_player(state.player2, p2_input, is_player2=True)
+        self._update_ball(state)
+
+        # Check scoring before collisions — if ball hit ground, round is over
+        if self._check_scoring(state):
+            return state
 
         self._check_ball_player_collision(state.ball, state.player1, p1_input)
         self._check_ball_player_collision(state.ball, state.player2, p2_input)
-
-        # Rotation (graphic) — original uses fineRotation; we approximate with degrees
-        state.ball.rotation = (state.ball.rotation + state.ball.vx) % 360
+        self._check_ball_net_collision(state.ball)
 
         # Net-crossing counter (extension — safety valve, not in original).
         now_ball_x = float(state.ball.x)
@@ -352,122 +332,111 @@ class PikachuVolleyball:
     def _update_player(
         self, player: PlayerState, inp: PlayerInput, *, is_player2: bool
     ) -> None:
-        # Lying down after dive — frozen for LYING_DOWN_DURATION frames.
         if player.lying_down_duration > 0:
             player.lying_down_duration -= 1
             if player.lying_down_duration <= 0:
                 player.lying_down_duration = 0
             return
 
-        # Horizontal velocity
-        if player.is_diving:
-            vel_x = player.diving_direction * PLAYER_DIVE_SPEED
-        else:
-            vel_x = inp.x_dir * PLAYER_SPEED
-        player.vx = vel_x
-        player.x += vel_x
+        # Horizontal movement
+        if not player.is_jumping and not player.is_diving:
+            player.vx = inp.x_dir * PLAYER_SPEED
+        player.x += player.vx
 
-        # Clamp to court half — original allows up to GROUND_HALF_WIDTH ± PLAYER_HALF_LENGTH.
+        # Clamp to court half
         if is_player2:
-            left_bound = NET_PILLAR_X + PLAYER_HALF_LENGTH
+            left_bound = NET_PILLAR_X + NET_PILLAR_HALF_WIDTH + PLAYER_HALF_LENGTH
             right_bound = GROUND_WIDTH - PLAYER_HALF_LENGTH
+            player.x = max(left_bound, min(player.x, right_bound))
         else:
             left_bound = PLAYER_HALF_LENGTH
-            right_bound = NET_PILLAR_X - PLAYER_HALF_LENGTH
-        player.x = max(left_bound, min(player.x, right_bound))
+            right_bound = NET_PILLAR_X - NET_PILLAR_HALF_WIDTH - PLAYER_HALF_LENGTH
+            player.x = max(left_bound, min(player.x, right_bound))
 
-        # Jump — only when grounded and not diving.
-        if (
-            not player.is_jumping
-            and not player.is_diving
-            and inp.y_dir == -1
-            and player.y == PLAYER_GROUND_Y
-        ):
+        # Jump
+        if not player.is_jumping and not player.is_diving and inp.y_dir == -1:
             player.vy = PLAYER_JUMP_VELOCITY
             player.is_jumping = True
 
-        # Gravity + landing
+        # Apply gravity when airborne
         if player.is_jumping or player.is_diving:
+            player.vy += GRAVITY
             player.y += player.vy
-            if player.y < PLAYER_GROUND_Y:
-                player.vy += GRAVITY
-            elif player.y >= PLAYER_GROUND_Y:
+            if player.y >= PLAYER_GROUND_Y:
                 player.y = PLAYER_GROUND_Y
                 player.vy = 0
+                player.vx = 0
+                player.is_jumping = False
                 if player.is_diving:
                     player.is_diving = False
-                    player.diving_direction = 0
-                    player.lying_down_duration = LYING_DOWN_DURATION
-                player.is_jumping = False
+                    player.lying_down_duration = 30
 
-        # Dive trigger — power hit while grounded + xDir != 0 starts a dive.
-        if (
-            inp.power_hit
-            and not player.is_jumping
-            and not player.is_diving
-            and player.y == PLAYER_GROUND_Y
-            and inp.x_dir != 0
-        ):
-            player.is_diving = True
-            player.diving_direction = inp.x_dir
-            player.vy = PLAYER_DIVE_VELOCITY
-
-        # Power-hit flag (true when jumping + power_hit pressed).
+        # Power hit state
         player.is_power_hitting = inp.power_hit and player.is_jumping
 
-    # ------------------------------------------------------------------
-    # Ball-player collision — port of
-    # isCollisionBetweenBallAndPlayerHappened + processCollisionBetweenBallAndPlayer
-    # ------------------------------------------------------------------
+    def _update_ball(self, state: GameState) -> None:
+        ball = state.ball
+        ball.vy += GRAVITY
+        ball.x += ball.vx + ball.punch_effect_x
+        ball.y += ball.vy + ball.punch_effect_y
+
+        # Decay punch effect
+        if ball.punch_effect_x != 0:
+            ball.punch_effect_x = int(ball.punch_effect_x * 0.7)
+        if ball.punch_effect_y != 0:
+            ball.punch_effect_y = int(ball.punch_effect_y * 0.7)
+
+        # Horizontal boundary
+        if ball.x <= BALL_RADIUS:
+            ball.x = BALL_RADIUS
+            ball.vx = abs(ball.vx)
+        elif ball.x >= GROUND_WIDTH - BALL_RADIUS:
+            ball.x = GROUND_WIDTH - BALL_RADIUS
+            ball.vx = -abs(ball.vx)
+
+        ball.rotation = (ball.rotation + ball.vx) % 360
+
     def _check_ball_player_collision(
         self, ball: BallState, player: PlayerState, inp: PlayerInput
     ) -> None:
-        """Detect collision and set ball velocity for next frame.
+        dx = abs(ball.x - player.x)
+        dy = abs(ball.y - player.y)
 
-        Detection distance matches original exactly: PLAYER_HALF_LENGTH (32px)
-        on both x and y axes. Collision does NOT move the ball; it only updates
-        (vx, vy) which take effect on the next _update_ball_and_world call.
+        collision_dist = PLAYER_HALF_LENGTH + BALL_RADIUS
+        if dx <= collision_dist and dy <= collision_dist:
+            # Direction from player to ball
+            dir_x = 1 if ball.x >= player.x else -1
 
-        Per original (physicsEngine, FUN_00403dd0): if the ball stays within
-        the 32px box across multiple frames, the collision is only processed
-        on the FIRST frame. The flag resets when the ball exits the box.
-        Without this gate, a slowly moving / tangential ball would retrigger
-        the velocity reflection every frame and produce chaotic physics.
-        """
-        dx_signed = ball.x - player.x
-        dy_signed = ball.y - player.y
-        in_box = (
-            abs(dx_signed) <= BALL_PLAYER_COLLISION_DIST
-            and abs(dy_signed) <= BALL_PLAYER_COLLISION_DIST
-        )
-        if not in_box:
-            player.is_collision_with_ball_happened = False
-            return
-        if player.is_collision_with_ball_happened:
-            # Still in the box from a prior collision — don't re-fire.
-            return
-        player.is_collision_with_ball_happened = True
+            # Base collision response
+            ball.vx = (dx // 3) * dir_x if dx > 0 else dir_x * 2
+            ball.vy = min(ball.vy, -15)
 
-        # Base horizontal velocity — signed integer division by 3.
-        if dx_signed < 0:
-            ball.vx = -(abs(dx_signed) // 3)
-        elif dx_signed > 0:
-            ball.vx = abs(dx_signed) // 3
-        else:
-            # Original picks rand() % 3 - 1 (= -1/0/1); we pick 0 for determinism.
-            ball.vx = 0
+            # Power hit
+            if player.is_power_hitting or inp.power_hit:
+                x_component = abs(inp.x_dir) + 1
+                ball.vx = x_component * 10 * dir_x
+                ball.vy = max(abs(ball.vy), 15) * (inp.y_dir if inp.y_dir != 0 else -1) * 2
+                ball.punch_effect_x = ball.vx // 2
+                ball.punch_effect_y = ball.vy // 4
 
-        # Base vertical velocity — reflect and clamp magnitude to 15.
-        # Original: vy = -|vy|; if |vy| < 15 then vy = -15.
-        abs_vy = abs(ball.vy)
-        ball.vy = -abs_vy if abs_vy >= BALL_MIN_REFLECT_VY_ABS else -BALL_MIN_REFLECT_VY_ABS
+            # Push ball out of player
+            if dy <= collision_dist:
+                ball.y = player.y - collision_dist - 1
 
-        # Power hit — overrides vx/vy. Direction determined by which half of
-        # the court the ball is in, NOT by player side.
-        if inp.power_hit and player.is_jumping:
-            x_magnitude = (abs(inp.x_dir) + 1) * 10
-            if ball.x < NET_PILLAR_X:
-                ball.vx = x_magnitude
+    def _check_ball_net_collision(self, ball: BallState) -> None:
+        if (
+            abs(ball.x - NET_PILLAR_X) < NET_PILLAR_HALF_WIDTH + BALL_RADIUS
+            and ball.y > NET_PILLAR_TOP_Y - BALL_RADIUS
+        ):
+            # Determine bounce direction based on velocity (moving into net)
+            if ball.vx > 0:
+                # Moving right → bounce left
+                ball.x = NET_PILLAR_X - NET_PILLAR_HALF_WIDTH - BALL_RADIUS
+                ball.vx = -abs(ball.vx)
+            elif ball.vx < 0:
+                # Moving left → bounce right
+                ball.x = NET_PILLAR_X + NET_PILLAR_HALF_WIDTH + BALL_RADIUS
+                ball.vx = abs(ball.vx)
             else:
                 ball.vx = -x_magnitude
             # Original: vy = |vy| * yDirection * 2. If yDir == 0 this zeros vy.
@@ -486,19 +455,21 @@ class PikachuVolleyball:
             # (original physics.js:727).
             ball.is_power_hit = False
 
-    # ------------------------------------------------------------------
-    # Scoring — not in original engine (it returns isBallTouchingGround
-    # and caller handles scoring). Preserved from our earlier implementation.
-    # ------------------------------------------------------------------
-    def _handle_scoring(self, state: GameState) -> None:
+            # Top collision
+            if ball.y < NET_PILLAR_TOP_Y:
+                ball.y = NET_PILLAR_TOP_Y - BALL_RADIUS
+                ball.vy = -abs(ball.vy)
+
+    def _check_scoring(self, state: GameState) -> bool:
         ball = state.ball
-        state.is_round_over = True
-        if ball.x < NET_PILLAR_X:
-            state.score2 += 1
-            state.serving_player = 2
-        else:
-            state.score1 += 1
-            state.serving_player = 1
+        if ball.y >= BALL_GROUND_Y:
+            state.is_round_over = True
+            if ball.x < NET_PILLAR_X:
+                state.score2 += 1
+                state.serving_player = 2
+            else:
+                state.score1 += 1
+                state.serving_player = 1
 
         if self._post_score_freeze:
             # Freeze-frame path: hold the grounded-ball state for

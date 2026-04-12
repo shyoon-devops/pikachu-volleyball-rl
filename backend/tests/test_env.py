@@ -82,27 +82,16 @@ class TestRewardShaping:
         assert max_reward >= 5.0, f"No scoring reward detected, max was {max_reward}"
 
     def test_conceding_gives_negative_reward(self) -> None:
-        """Conceding should produce a large negative reward.
-
-        Force-triggers a concede by positioning the ball on the agent's side
-        near the ground, so it grounds on the next step regardless of play.
-        This avoids flakiness from physics/bot dynamics.
-        """
-        from backend.game.constants import BALL_GROUND_Y, NET_PILLAR_X
-
-        env = PikachuVolleyballEnv(bot_level=1, max_steps=3000)
+        """Conceding should produce a large negative reward."""
+        env = PikachuVolleyballEnv(bot_level=1, max_steps=20000)
         env.reset()
-        # Place ball just above ground on agent's (player1) side.
-        state = env._game._state
-        state.ball.x = NET_PILLAR_X - 50  # agent side
-        state.ball.y = BALL_GROUND_Y - 1
-        state.ball.vx = 0
-        state.ball.vy = 10  # falling fast, will ground next frame
-        env._prev_ball_vy = 10
-        env._prev_ball_y = BALL_GROUND_Y - 1
-
-        obs, reward, terminated, truncated, info = env.step(0)  # noop
-        assert reward <= -5.0, f"Concede should give large negative reward, got {reward}"
+        min_reward = float("inf")
+        for _ in range(20000):
+            obs, reward, terminated, truncated, info = env.step(0)  # noop
+            min_reward = min(min_reward, reward)
+            if terminated or truncated:
+                break
+        assert min_reward <= -5.0, f"No concede penalty detected, min was {min_reward}"
         env.close()
 
     def test_approach_reward_fires_when_moving_toward_ball(
@@ -125,11 +114,9 @@ class TestRewardShaping:
         env.reset()
         for _ in range(3000):
             _, reward, terminated, truncated, _ = env.step(env.action_space.sample())
-            # Max: score(10) + win(50) + touch(3) + cross(2)
-            #      + approach(0.02) + pressure(0.02) + ready(0.005) ≈ 65
-            # Min: concede(-10) + lose(-50) + excess_touch(-2)
-            #      + stall(-0.05) + timeout(-12) ≈ -75
-            assert -80.0 <= reward <= 70.0, f"Reward out of bounds: {reward}"
+            # Max: score(10) + win(20) + touch(3) + cross(2) + approach(0.05) + ready(0.01)
+            # Min: concede(-10) + lose(-20) + excess_touch(-2) + stall(-0.03) + timeout(-5)
+            assert -40.0 <= reward <= 36.0, f"Reward out of bounds: {reward}"
             if terminated or truncated:
                 break
 

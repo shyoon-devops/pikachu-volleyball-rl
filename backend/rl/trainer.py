@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import json
 import logging
 import signal
+import subprocess
 import threading
 import time
 import uuid
@@ -20,6 +22,8 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from backend.rl.callbacks import (
     CheckpointCallback,
+    CurriculumCallback,
+    EarlyStoppingCallback,
     LiveFrameCallback,
     MetricsCallback,
 )
@@ -54,9 +58,12 @@ class TrainingManager:
         self,
         model_dir: str = "models",
         replay_dir: str = "replays",
+        tensorboard_dir: str | None = "tensorboard_logs",
     ) -> None:
         self.model_dir = model_dir
         self.replay_dir = replay_dir
+        # None disables TB logging entirely; the empty string is treated the same.
+        self.tensorboard_dir: str | None = tensorboard_dir or None
         self.status: str = "stopped"
         self.current_step: int = 0
         self.current_episode: int = 0
@@ -81,6 +88,9 @@ class TrainingManager:
         self._experiment_id: str = ""
         self._bot_level: int = 1
         self._hyperparams: dict[str, Any] = {}
+        self._seed: int | None = None
+        self._total_timesteps: int = 0
+        self._n_envs: int = 0
         self._started_at: float = 0.0
         # ISO-8601 start timestamp surfaced by /api/training/status; None
         # until the first start() call. Kept separate from ``_started_at``
@@ -95,6 +105,7 @@ class TrainingManager:
         bot_level: int = 1,
         total_timesteps: int = 1_000_000,
         n_envs: int = 8,
+        seed: int | None = None,
     ) -> str:
         """Start a new training experiment. Returns experiment_id."""
         if self.status == "running":
@@ -103,6 +114,9 @@ class TrainingManager:
         self._experiment_id = str(uuid.uuid4())
         self._bot_level = bot_level
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
+        self._seed = seed
+        self._total_timesteps = total_timesteps
+        self._n_envs = n_envs
         self._stop_event.clear()
         self._pause_event.clear()
         self.current_step = 0
@@ -116,6 +130,8 @@ class TrainingManager:
         # dashboard displays.
         self._started_at_wall = datetime.now(timezone.utc)
 
+        self._write_run_config()
+
         loop = asyncio.get_running_loop()
 
         self._thread = threading.Thread(
@@ -127,6 +143,33 @@ class TrainingManager:
         self._thread.start()
 
         return self._experiment_id
+
+    def _tensorboard_run_dir(self) -> str | None:
+        """Return the per-experiment TB log directory, or None if disabled."""
+        if not self.tensorboard_dir:
+            return None
+        return str(Path(self.tensorboard_dir) / self._experiment_id)
+
+    def _write_run_config(self) -> None:
+        """Persist a config.json describing this run for reproducibility."""
+        checkpoint_dir = Path(self.model_dir) / self._experiment_id
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        config = {
+            "experiment_id": self._experiment_id,
+            "bot_level": self._bot_level,
+            "seed": self._seed,
+            "total_timesteps": self._total_timesteps,
+            "n_envs": self._n_envs,
+            "hyperparams": self._hyperparams,
+            "obs_space_shape": [18],
+            "action_space_n": 12,
+            "net_arch": DEFAULT_NET_ARCH,
+            "started_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "git_commit": _get_git_commit(),
+            "tensorboard_log": self._tensorboard_run_dir(),
+        }
+        (checkpoint_dir / "config.json").write_text(json.dumps(config, indent=2))
 
     async def stop(self, *, force: bool = False) -> dict[str, Any]:
         """Gracefully stop training and save a final checkpoint.
@@ -355,11 +398,17 @@ class TrainingManager:
             )
 
             hp = self._hyperparams
+            if self._seed is not None:
+                env.seed(self._seed)
+            tb_log = self._tensorboard_run_dir()
+            if tb_log:
+                Path(tb_log).mkdir(parents=True, exist_ok=True)
             if checkpoint_path:
                 self._model = PPO.load(
                     checkpoint_path,
                     env=env,
                     learning_rate=hp.get("learning_rate", 3e-4),
+                    tensorboard_log=tb_log,
                 )
             else:
                 self._model = PPO(
@@ -373,11 +422,13 @@ class TrainingManager:
                     gae_lambda=hp.get("gae_lambda", 0.95),
                     clip_range=hp.get("clip_range", 0.2),
                     ent_coef=hp.get("ent_coef", 0.01),
+                    seed=self._seed,
                     verbose=0,
                     policy_kwargs={"net_arch": DEFAULT_NET_ARCH},
+                    tensorboard_log=tb_log,
                 )
 
-            callbacks = CallbackList([
+            callback_list: list[BaseCallback] = [
                 MetricsCallback(
                     queue=self.metrics_queue,
                     loop=loop,
@@ -442,6 +493,24 @@ class TrainingManager:
             return None
         # SB3 load expects path without .zip extension
         return str(zips[-1].with_suffix(""))
+
+
+def _get_git_commit() -> str:
+    """Best-effort git commit hash for the current checkout.
+
+    Returns ``"unknown"`` when not in a git repo or when git is unavailable —
+    config logging shouldn't fail the run.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+    return "unknown"
 
 
 class _StopEventCallback(BaseCallback):
