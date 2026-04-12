@@ -180,8 +180,40 @@ was also wrong — please disregard).
    PM approval conditions:
    - ✅ "Deterministic fail 2개 해결 완료" — resolved as invalid-invariant
      tests; fixes in this commit.
-   - ⏳ "Rate-limit exemption 적용 완료" — needs Backend confirmation after
-     next QA re-run.
+   - ✅ "Rate-limit exemption 적용 완료" — cross-env probe confirms the
+     exemption is **ALREADY IN PLACE** on dev, QA, and prod (see below).
+     Backend just needs to make it explicit in code comments so it isn't
+     accidentally removed.
+
+### Cross-env `/api/health` exemption probe — 2026-04-12 15:xx
+
+200-request burst against `/api/health` on each environment:
+
+| Env | Port | 200 | 429 | 5xx |
+|-----|:----:|:---:|:---:|:---:|
+| dev  | 8001 | 200 | 0 | 0 |
+| qa   | 8002 | 200 | 0 | 0 |
+| prod | 8003 | 200 | 0 | 0 |
+
+Exemption invariant holds on all three. No Backend code change required; the
+follow-up is documentation/test-reinforcement only.
+
+### Separate finding — `/api/health/live`, `/api/health/ready` missing on QA + prod
+
+Probe result:
+
+| Env  | `/api/health` | `/api/health/live` | `/api/health/ready` |
+|------|:-------------:|:------------------:|:-------------------:|
+| dev  | 200 | 200 | 200 |
+| qa   | 200 | **404** | **404** |
+| prod | 200 | **404** | **404** |
+
+Dev has the k8s-style liveness/readiness split; QA and prod do not. The PM
+decision 2026-04-12 mentions all three endpoints by name, so if kube probes
+are expected to hit `/live` and `/ready`, the next QA build (currently
+`dab203bf580e…`) must include them. File this as **`HC-SPLIT-MISSING`**
+(MEDIUM, not prod-blocking for today's promotion since only `/api/health`
+is actually in use) — Backend to include in the next deploy cycle.
 
 ---
 
