@@ -1,7 +1,7 @@
 # Sprint 1 (v0.2.1) Progress Tracker
 
 > **Sprint Start**: 2026-04-12 | **Target End**: 2026-04-15 (3d dev + QA)
-> **Last Updated**: 2026-04-12 (late session — 9 issues closed, merge ongoing)
+> **Last Updated**: 2026-04-12 (code complete — 20 items dev-merged, 11 more issues closed, QA pending)
 
 ---
 
@@ -35,13 +35,13 @@
 
 | # | Issue | Item | Status | Assignee | PR | Notes |
 |---|-------|------|--------|----------|-----|-------|
-| 5 | [#13](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/13) | BUG-1: Queue Unbounded (OOM risk) | 🔵 진행중 | Backend | — | BE-1에 부분 포함 |
-| 6 | [#14](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/14) | BUG-2: Health Check False OK | ⬜ 미착수 | Backend | — | MongoDB/disk/thread 확인 |
+| 5 | ~~[#13](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/13)~~ | BUG-1: Queue Unbounded (OOM risk) | 🟡 검증중 | Backend | `5d143ae` | dev 머지, QA v0.2.1 확인 대기 |
+| 6 | ~~[#14](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/14)~~ | BUG-2: Health Check False OK | 🟡 검증중 | Backend | `5d143ae` | dev 머지, QA v0.2.1 확인 대기 |
 | 7 | ~~[#15](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/15)~~ | BUG-3: Training Status Incomplete | 🟡 검증중 | Trainer | `5c30671` | dev 머지, QA v0.2.1 확인 대기 |
-| 8 | [#16](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/16) | BUG-4: Heartbeat No Pong Protocol | 🔵 진행중 | Backend + FE | — | BE-1에서 서버 측 대응됨, FE 재연결 필요 |
+| 8 | ~~[#16](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/16)~~ | BUG-4: Heartbeat No Pong Protocol | 🟡 검증중 | Backend + FE | `5d143ae` | dev 머지, QA v0.2.1 확인 대기 |
 | 9 | ~~[#17](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/17)~~ | BUG-5: Models/Replays No Pagination | 🟡 검증중 | Backend | `07c36bd` | dev 머지, QA v0.2.1 확인 대기 |
-| 10 | [#18](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/18) | BUG-6: Game Result Save Data Loss | ⬜ 미착수 | Backend | — | retry + fallback |
-| 11 | [#19](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/19) | BUG-7: WS Reconnection Missing | ⬜ 미착수 | Frontend | — | exponential backoff |
+| 10 | ~~[#18](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/18)~~ | BUG-6: Game Result Save Data Loss | 🟡 검증중 | Backend | `5d143ae` | dev 머지, QA v0.2.1 확인 대기 |
+| 11 | ~~[#19](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/19)~~ | BUG-7: WS Reconnection Missing | 🟡 검증중 | Frontend | `2338102` | dev 머지, QA v0.2.1 확인 대기 |
 
 ## Sprint 1 Enhancement Items
 
@@ -49,11 +49,12 @@
 |---|-------|------|--------|----------|-----|-------|
 | 12 | ~~[#20](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/20)~~ | BE-1: WS Heartbeat + Backpressure | 🟡 검증중 | Backend | `3f8abb8` | dev 머지, QA v0.2.1 확인 대기 |
 | 13 | ~~[#21](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/21)~~ | BE-4: Input Validation | 🟡 검증중 | Backend | `3f8abb8` | dev 머지, QA v0.2.1 확인 대기 |
-| 14 | [#22](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/22) | FE-3: GameCanvas Responsive | ⬜ 미착수 | Frontend | — | ResizeObserver |
+| 14 | ~~[#22](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/22)~~ | FE-3: GameCanvas Responsive | 🟡 검증중 | Frontend | `2338102` | dev 머지, QA v0.2.1 확인 대기 |
 | 15 | ~~[#23](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/23)~~ | FE-1: Replay Keyboard Shortcuts | 🟡 검증중 | Frontend | `830278b` | dev 머지, QA v0.2.1 확인 대기 |
-| 16 | [#24](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/24) | FE-5: A11y Accessibility | ⬜ 미착수 | Frontend | — | ARIA, contrast, motion |
-| 17 | [#25](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/25) | QA-2: CI/CD Test Pipeline | ⬜ 미착수 | QA | — | GH Actions, coverage gate |
-| 18 | [#26](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/26) | QA-4: Security Auto-Scan | ⬜ 미착수 | QA | — | bandit, npm audit |
+| 16 | ~~[#24](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/24)~~ | FE-5: A11y Accessibility | 🟡 검증중 | Frontend | `2338102` | dev 머지, QA v0.2.1 확인 대기 |
+| 17 | ~~[#25](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/25)~~ | QA-2: CI/CD Test Pipeline | 🟡 검증중 | DevOps | `9d257c9` (PR #29) | dev 머지, QA v0.2.1 확인 대기 |
+| 18 | ~~[#26](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/26)~~ | QA-4: Security Auto-Scan | 🟡 검증중 | DevOps | `9d257c9` (PR #29) | dev 머지, QA v0.2.1 확인 대기 |
+| 19 | ~~[#27](https://github.com/shyoon-devops/pikachu-volleyball-rl/issues/27)~~ | Design Review: Sprite Rendering | 🟡 검증중 | Designer | `ede4e34` | dev 머지, QA v0.2.1 확인 대기 |
 
 ---
 
@@ -112,14 +113,14 @@ Progress: 0/1 ████████████████████ 0%
 ## Overall Sprint Progress
 
 ```
-Total Items:   18 (14 net after overlap)
-Completed:      0
-In Progress:    2 (BUG-1, BUG-4)
-Under Review:   9 (SEC-1/2/3, TR-4, BUG-3, BUG-5, BE-1, BE-4, FE-1)
-Not Started:   7 (BUG-2, BUG-6, BUG-7, FE-3, FE-5, QA-2, QA-4)
+Total Items:   19 (Sprint 1 expanded + design review)
+Completed:      0 (QA 검증 후 ✅)
+Under Review:  19 (전 항목 dev 머지 완료, QA v0.2.1 배포 및 검증 대기)
+In Progress:    0
+Not Started:    0
 Blocked:        0
 
-Overall: ██████░░░░░░░░░░░░░░ 50% (code complete or in progress)
+Overall: ████████████████████ 100% 코드 완료 · QA 검증 0%
 ```
 
 ---
@@ -130,11 +131,14 @@ Overall: ██████░░░░░░░░░░░░░░ 50% (code 
 - Sprint 1 승인, 작업 할당 문서 배포 완료
 - GitHub Issues #9~#26 생성
 - 각 팀 워크트리에 SPRINT1-ASSIGNMENT.md 전달
-- **dev 머지 확인**: SEC-1/2/3 (10c9f1d), TR-4 (PR #28), BUG-3 (5c30671), BUG-5 (07c36bd), BE-1 + BE-4 (3f8abb8), FE-1 (830278b)
-- **9개 이슈 CLOSED**: #9, #10, #11, #12, #15, #17, #20, #21, #23 (dev 머지 확인 후 커밋 참조로 종료)
+- **dev 머지 1차**: SEC-1/2/3 (10c9f1d), TR-4 (PR #28), BUG-3 (5c30671), BUG-5 (07c36bd), BE-1 + BE-4 (3f8abb8), FE-1 (830278b)
+- **dev 머지 2차**: BUG-1/2/4/6 (5d143ae, 8565887), BUG-7 + FE-3 + FE-5 (2338102), Design Review #27 (ede4e34), QA-2 + QA-4 (9d257c9, PR #29), 미머지 브랜치 전부 통합 (devops/trainer/evaluator)
+- **이슈 CLOSED (20건 누적)**:
+  - 1차 9건: #9, #10, #11, #12, #15, #17, #20, #21, #23
+  - 2차 11건: #13, #14, #16, #18, #19, #22, #24, #25, #26, #27, #3
 - **prod → main 머지 완료**: `fdc41de` — `v0.1.0` 태그 부착 및 push
 - **dev health check 통과**: `docker ps` = healthy, `/api/health` = 200 OK
-- CHANGELOG.md에 [0.2.0] 상세 섹션 추가
+- CHANGELOG.md에 [0.2.0] + [0.2.1] 상세 섹션 추가
 
 ---
 

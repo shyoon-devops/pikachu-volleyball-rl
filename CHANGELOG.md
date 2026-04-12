@@ -7,13 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Sprint 1 (v0.2.1) 작업 진행 중 — 추적 문서: [docs/sprint-tracking/sprint1-v0.2.1.md](docs/sprint-tracking/sprint1-v0.2.1.md)
+Sprint 1 코드 완료 — QA v0.2.1 배포 및 검증 대기 중. 추적: [docs/sprint-tracking/sprint1-v0.2.1.md](docs/sprint-tracking/sprint1-v0.2.1.md)
 
-### In Progress
-- FE-3: GameCanvas Responsive Scaling (#22)
-- FE-5: A11y Improvements (#24)
-- QA-2: CI/CD Test Pipeline (#25), QA-4: Security Auto-Scan in CI (#26)
-- BUG-1/2/4/6/7: 잔여 HIGH 버그 수정
+## [0.2.1] - 2026-04-12 (dev 코드 완료, QA 배포 대기)
+
+Sprint 1 — HIGH 버그 일괄 처리, 프론트엔드 UX/A11y 개선, CI/CD 보안 자동화. 전체 범위: [docs/proposals/SPRINT-1-ASSIGNMENTS.md](docs/proposals/SPRINT-1-ASSIGNMENTS.md).
+
+### Added
+- **QA-2 CI/CD Test Pipeline** (#25): GitHub Actions 테스트 파이프라인 + 커버리지 게이트 (9d257c9, PR #29)
+- **QA-4 Security Auto-Scan** (#26): CI 보안 자동 스캔 (bandit, npm audit) (9d257c9, PR #29)
+- **FE-3 GameCanvas Responsive** (#22): ResizeObserver 기반 반응형 캔버스 스케일링 (2338102)
+- **FE-5 A11y Improvements** (#24): ARIA 라벨, 색상 대비, reduced-motion 지원 (2338102)
+- **Monitoring/Backup**: Prometheus 메트릭 계측, 백업 스크립트, 디스크 정리 작업 (72e1606)
+- **Expanded RL spaces**: Observation 12→18, Action 6→12, anti-toss-loop 리워드 셰이핑 (5a5def9, f8ea612)
+- **QA Regression Suite**: 16-bug 회귀 테스트 + Sprint 1 수정 검증 스위트 (720458b, d5aa9fc)
+
+### Fixed
+- **BUG-1 WebSocket Queue Bounded** (#13): 큐 상한 + drop-oldest 정책으로 OOM 방지 (5d143ae, merged 8565887)
+- **BUG-2 Health Check** (#14): MongoDB/disk/thread 실측 기반 health 응답 (5d143ae)
+- **BUG-4 Heartbeat Pong** (#16): 완전한 ping/pong 프로토콜 (서버 + 클라이언트) (5d143ae)
+- **BUG-6 Game Result Save** (#18): retry + fallback 영속화로 데이터 손실 방지 (5d143ae)
+- **BUG-7 FE WS Reconnection** (#19): 지수 백오프 재연결 구현 (2338102)
+- **Design Review — Sprite Rendering** (#27): 스코어 중복 표시 + 캔버스 반응형 스케일링 수정 (ede4e34)
+- Dockerfile 복구 및 빌드 실패 해결 (167bc07)
+
+### Changed
+- 미머지 브랜치 3개(devops/trainer/evaluator)를 dev로 일괄 통합 (#3) — PR #28, PR #29 포함
+
+### Closed Issues
+#13, #14, #16, #18, #19, #22, #24, #25, #26, #27, #3 (11건)
+
+### Known Issues
+- v0.2.1은 dev 코드 완료 상태. QA 환경 배포 후 검증 필요 (#6의 연장선).
+- v0.2.0도 QA 태그만 되어 있고 prod 미승격 — v0.2.1과 함께 prod 승격 여부 PM 판단 필요.
 
 ## [0.2.0] - 2026-04-11 (QA 환경 배포 완료, prod 미배포)
 
@@ -158,6 +184,7 @@ Initial release — 전체 시스템 MVP 완성.
   - TrainingControls.test.tsx, GameOverlay.test.tsx
   - ReplayControls.test.tsx, useWebSocket.test.ts
 
-[Unreleased]: https://github.com/shyoon-devops/pikachu-volleyball-rl/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/shyoon-devops/pikachu-volleyball-rl/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/shyoon-devops/pikachu-volleyball-rl/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/shyoon-devops/pikachu-volleyball-rl/releases/tag/v0.2.0
 [0.1.0]: https://github.com/shyoon-devops/pikachu-volleyball-rl/releases/tag/v0.1.0
