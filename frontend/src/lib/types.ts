@@ -63,6 +63,20 @@ export interface TrainingStatus {
    *  status broadcast carries it; server emits `bot_level` after
    *  `training:set_level` and on explicit status queries. */
   botLevel?: number
+  /** Active training-run identifier. Optional because `training:status`
+   *  WS broadcasts omit it (they carry only the delta); populated by
+   *  REST `/api/training/status`. Used by the chart hydration path to
+   *  scope `/api/training/timeseries` queries to the current run so a
+   *  refresh doesn't mix last session's points into this one. */
+  experimentId?: string | null
+}
+
+/** Raw (step, value) point from GET /api/training/timeseries. Timestamps
+ *  are ISO-8601 UTC strings or null if the backing doc lacked one. */
+export interface TimeseriesPoint {
+  step: number
+  value: number
+  timestamp: string | null
 }
 
 export interface GameRecord {

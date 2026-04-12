@@ -1,18 +1,17 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { useWebSocket } from './useWebSocket'
 import {
   snakeToCamel,
   getTrainingStatus,
   getRecentGames,
-  // getMetricsHistory intentionally NOT imported — see metrics-hydration
-  // TODO block below. Re-enable (via getTimeseries) once BE lands
-  // /api/training/timeseries per API spec v0.2.4.
   getCurrentFrame,
+  getTimeseries,
   stopTraining,
   pauseTraining,
   resumeTraining,
   patchTrainingLevel,
 } from '../lib/api'
+import { mergeTimeseries } from '../lib/mergeTimeseries'
 import type {
   GameState,
   TrainingMetrics,
@@ -147,39 +146,6 @@ export function useTrainingStateImpl(): TrainingState {
   // first WS `training:frame`. Returns null when training isn't running —
   // in that case we leave latestFrame null and the canvas renders its
   // idle placeholder.
-  //
-  // ────────────────────────────────────────────────────────────────
-  // METRICS HYDRATION DISABLED (P0 stopgap, 2026-04-12)
-  // ────────────────────────────────────────────────────────────────
-  // `/api/training/metrics/aggregate` returns 1-minute-wall-clock
-  // buckets with AVG(mean_reward, win_rate, policy_loss, value_loss)
-  // plotted against bucket step_max. Live WS `training:metrics`
-  // streams per-snapshot raw values plotted against actual step.
-  //
-  // Seeding the live chart from the aggregate endpoint caused a
-  // user-reported "refresh shows different data" bug: same (step, Y)
-  // pair yielded different values because the REST point was an
-  // average of several snapshots and the live point was a single
-  // snapshot. Disabling hydration makes the chart start empty on
-  // refresh and fill in from WS — at least it no longer lies.
-  //
-  // TODO(FE): Re-enable via `getTimeseries(experimentId, sinceStep)`
-  // once BE lands `GET /api/training/timeseries` (API spec v0.2.4).
-  // That endpoint returns raw per-snapshot points matching the live
-  // WS resolution 1:1. At that point also add dedup + step-sort merge
-  // so the seed + live stream join cleanly:
-  //
-  //     setMetrics(prev => {
-  //       const byStep = new Map<number, TrainingMetrics>()
-  //       for (const m of history) byStep.set(m.step, m)
-  //       for (const m of prev) byStep.set(m.step, m)  // live wins
-  //       return [...byStep.values()]
-  //         .sort((a, b) => a.step - b.step)
-  //         .slice(-MAX_METRICS_POINTS)
-  //     })
-  //
-  // See docs/NOTICE-FRONTEND-METRICS-HYDRATION.md for the PM-approved
-  // rollout plan.
   useEffect(() => {
     let cancelled = false
     getRecentGames(SEED_RECENT_GAMES)
@@ -197,6 +163,63 @@ export function useTrainingStateImpl(): TrainingState {
       .catch(() => { /* best-effort */ })
     return () => { cancelled = true }
   }, [])
+
+  // Metrics hydration from `/api/training/timeseries` (API spec v0.2.4).
+  //
+  // Problem this fixes (user-reported 2026-04-12, PM Phase 2 #3): a page
+  // refresh mid-session started the chart empty and only picked up from
+  // the next WS `training:metrics` tick onward — the prior thousands of
+  // steps were invisible until the user waited out a full log_interval
+  // cycle. The previous stopgap disabled hydration entirely because
+  // `/api/training/metrics/aggregate` returns wall-clock-bucketed
+  // averages that don't line up with the live WS's per-snapshot stream
+  // (caused "same step, different Y" on refresh).
+  //
+  // /timeseries returns the same raw snapshots the WS carries, so REST
+  // seed + live stream join 1:1 on `step`. The 4 per-metric calls run
+  // in parallel, each .catch()-ing into [] so a failed endpoint
+  // degrades one chart line instead of blocking the others.
+  //
+  // Scoped to `status.experimentId` so a refresh mid-session doesn't
+  // mix last run's (step, value) pairs onto this run's chart — training
+  // steps reset on each run, so without this filter a fresh experiment
+  // starting at step 0 would overlap the previous experiment's step 0
+  // rows. The ref gate ensures we hydrate exactly once per
+  // experiment_id (not every render that observes the status prop).
+  //
+  // Live WS wins on merge conflicts: any WS frame that arrived between
+  // mount and hydration completion overwrites the REST row for that
+  // step, so a brief network delay can't regress the chart.
+  const hydratedExpIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const expId = status.experimentId
+    if (!expId) return
+    if (hydratedExpIdRef.current === expId) return
+    hydratedExpIdRef.current = expId
+
+    let cancelled = false
+    Promise.all([
+      getTimeseries('reward', 1000, expId).catch(() => []),
+      getTimeseries('win_rate', 1000, expId).catch(() => []),
+      getTimeseries('policy_loss', 1000, expId).catch(() => []),
+      getTimeseries('value_loss', 1000, expId).catch(() => []),
+    ])
+      .then(([reward, winRate, policyLoss, valueLoss]) => {
+        if (cancelled) return
+        const history = mergeTimeseries(reward, winRate, policyLoss, valueLoss)
+        if (history.length === 0) return
+        setMetrics(prev => {
+          const byStep = new Map<number, TrainingMetrics>()
+          for (const m of history) byStep.set(m.step, m)
+          for (const m of prev) byStep.set(m.step, m) // live wins
+          return [...byStep.values()]
+            .sort((a, b) => a.step - b.step)
+            .slice(-MAX_METRICS_POINTS)
+        })
+      })
+      .catch(() => { /* best-effort — live WS remains authoritative */ })
+    return () => { cancelled = true }
+  }, [status.experimentId])
 
   // Wrap the raw WS send so the UI reflects the user's intent the instant
   // they click. Backend's echoed `training:status` broadcast will override

@@ -5,9 +5,22 @@ import type {
   ModelInfo,
   PaginatedResponse,
   ReplayInfo,
+  TimeseriesPoint,
   TrainingMetrics,
   TrainingStatus,
 } from './types'
+
+/**
+ * Metric tokens accepted by `/api/training/timeseries`. Keep in sync
+ * with `backend/app/api/routes.py::_TIMESERIES_METRICS`. "reward" and
+ * "loss" are aliases server-side; we use the canonical 4 to make the
+ * merge path unambiguous.
+ */
+export type TimeseriesMetric =
+  | 'reward'
+  | 'win_rate'
+  | 'policy_loss'
+  | 'value_loss'
 
 class ApiError extends Error {
   status: number
@@ -198,6 +211,43 @@ interface MetricsAggregateResponse {
  * irregular. Unknown / null fields collapse to 0 rather than blowing
  * up the chart pipeline.
  */
+/**
+ * Fetch raw per-step training metric points from the BE timeseries
+ * endpoint (API spec v0.2.4). Used on mount to hydrate the MetricsChart
+ * after a page refresh — the live WS stream then appends new points on
+ * top. Unlike `/api/training/metrics/aggregate` (which returns bucketed
+ * averages), this endpoint returns the same raw snapshots that the WS
+ * stream carries, so REST seed + live stream join 1:1 on `step`.
+ *
+ * BE caps `limit` at 1000 (validated `ge=1, le=1000`). We request the
+ * max by default; `MetricsCallback.log_interval=100` means 1000 points
+ * covers 100k training steps — enough for all normal sessions.
+ *
+ * Points are returned newest-last so callers can extend the chart to
+ * the right without sorting. `experimentId` scopes the query to a
+ * single run so a refresh mid-session doesn't mix a prior experiment's
+ * (step, value) pairs onto the current chart.
+ *
+ * Best-effort: callers should `.catch(() => [])` — a network failure
+ * here just means the chart stays empty until the next WS tick, which
+ * is the same fallback we had before hydration existed.
+ */
+export async function getTimeseries(
+  metric: TimeseriesMetric,
+  limit = 1000,
+  experimentId?: string | null,
+): Promise<TimeseriesPoint[]> {
+  const params = new URLSearchParams({
+    metric,
+    limit: String(limit),
+  })
+  if (experimentId) params.set('experiment_id', experimentId)
+  const raw = await request<{ points?: unknown }>(
+    `/api/training/timeseries?${params.toString()}`,
+  )
+  return Array.isArray(raw.points) ? (raw.points as TimeseriesPoint[]) : []
+}
+
 export async function getMetricsHistory(
   bucket: '1m' | '5m' | '1h' = '1m',
 ): Promise<TrainingMetrics[]> {

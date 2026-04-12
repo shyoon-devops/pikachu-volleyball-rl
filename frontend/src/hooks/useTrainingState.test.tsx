@@ -281,14 +281,13 @@ describe('useTrainingState — REST hydration (CRITICAL: refresh wipes graph/gam
     })
   })
 
-  // Metrics REST hydration is intentionally DISABLED as a P0 stopgap
-  // (2026-04-12). The aggregate endpoint returns 1-minute-bucket
-  // averages, which diverge visibly from the live WS per-snapshot
-  // stream and caused a "refresh shows different data" bug.
-  //
-  // Re-enable (via /api/training/timeseries) once BE lands the raw
-  // endpoint; see useTrainingState.ts TODO block for the rollout plan.
-  it('does NOT call /api/training/metrics/aggregate on mount (P0 stopgap)', async () => {
+  // Metrics REST hydration uses `/api/training/timeseries` (API spec
+  // v0.2.4), not `/metrics/aggregate`. The aggregate endpoint returns
+  // 1-minute-bucket averages that diverge from the live WS per-snapshot
+  // stream and caused a "refresh shows different data" bug when it was
+  // tried previously. /timeseries returns raw per-snapshot points so
+  // REST seed + live WS join 1:1 on step.
+  it('does NOT call /api/training/metrics/aggregate on mount (wrong endpoint)', async () => {
     const fetchMock = installFetchRouter(url => {
       if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
       if (url.startsWith('/api/training/status')) {
@@ -317,13 +316,109 @@ describe('useTrainingState — REST hydration (CRITICAL: refresh wipes graph/gam
       expect(statusCalls.length).toBeGreaterThanOrEqual(1)
     })
 
-    // No aggregate call happened. Live WS is the only metrics source.
+    // No aggregate call happened. The timeseries endpoint is the one
+    // this hook uses (covered by the hydration tests below).
     const aggregateCalls = fetchMock.mock.calls.filter(([u]) =>
       typeof u === 'string' && u.startsWith('/api/training/metrics/aggregate'),
     )
     expect(aggregateCalls.length).toBe(0)
+  })
 
-    // Metrics list stays empty on mount.
+  it('hydrates metrics from /api/training/timeseries scoped to experiment_id', async () => {
+    // User-reported 2026-04-12 (PM Phase 2 #3): refreshing mid-session
+    // wiped the chart. Guard: on mount we fetch the 4 metric names in
+    // parallel, merge by step, and seed the chart before the WS stream
+    // resumes. Scoped to the live experiment_id so a fresh run doesn't
+    // mix last session's rows.
+    const fetchMock = installFetchRouter(url => {
+      if (url.startsWith('/api/training/status')) {
+        return {
+          ok: true,
+          payload: {
+            state: 'running',
+            current_step: 300,
+            current_episode: 5,
+            experiment_id: 'exp-42',
+          },
+        }
+      }
+      if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
+      if (url.startsWith('/api/training/timeseries')) {
+        // Emit 3 points per metric at matching steps so the merge
+        // yields 3 fully-joined rows.
+        const pointsFor = (base: number) => [
+          { step: 100, value: base + 0.1, timestamp: null },
+          { step: 200, value: base + 0.2, timestamp: null },
+          { step: 300, value: base + 0.3, timestamp: null },
+        ]
+        if (url.includes('metric=reward')) return { ok: true, payload: { metric: 'reward', experiment_id: 'exp-42', points: pointsFor(1) } }
+        if (url.includes('metric=win_rate')) return { ok: true, payload: { metric: 'win_rate', experiment_id: 'exp-42', points: pointsFor(0) } }
+        if (url.includes('metric=policy_loss')) return { ok: true, payload: { metric: 'policy_loss', experiment_id: 'exp-42', points: pointsFor(0) } }
+        if (url.includes('metric=value_loss')) return { ok: true, payload: { metric: 'value_loss', experiment_id: 'exp-42', points: pointsFor(0) } }
+        return { ok: true, payload: { metric: 'reward', experiment_id: null, points: [] } }
+      }
+      return { ok: false, status: 404, payload: {} }
+    })
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('metrics-count').textContent).toBe('3')
+    })
+
+    // All 4 metric endpoints were queried with experiment_id filter.
+    const tsCalls = fetchMock.mock.calls
+      .map(([u]) => (typeof u === 'string' ? u : ''))
+      .filter(u => u.startsWith('/api/training/timeseries'))
+    expect(tsCalls.some(u => u.includes('metric=reward'))).toBe(true)
+    expect(tsCalls.some(u => u.includes('metric=win_rate'))).toBe(true)
+    expect(tsCalls.some(u => u.includes('metric=policy_loss'))).toBe(true)
+    expect(tsCalls.some(u => u.includes('metric=value_loss'))).toBe(true)
+    for (const u of tsCalls) {
+      expect(u).toContain('experiment_id=exp-42')
+    }
+  })
+
+  it('skips timeseries hydration when no experiment_id is known', async () => {
+    // Training never started: /status returns no experiment_id. We
+    // should not fire 4 empty-returning timeseries calls just to find
+    // nothing — skip entirely and let the chart stay empty.
+    const fetchMock = installFetchRouter(url => {
+      if (url.startsWith('/api/training/status')) {
+        return {
+          ok: true,
+          payload: { state: 'stopped', current_step: 0, current_episode: 0 },
+        }
+      }
+      if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
+      if (url.startsWith('/api/training/timeseries')) {
+        return { ok: true, payload: { metric: 'reward', experiment_id: null, points: [] } }
+      }
+      return { ok: false, status: 404, payload: {} }
+    })
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    // Let mount-phase fetches settle.
+    await waitFor(() => {
+      const statusCalls = fetchMock.mock.calls.filter(([u]) =>
+        typeof u === 'string' && u.startsWith('/api/training/status'),
+      )
+      expect(statusCalls.length).toBeGreaterThanOrEqual(1)
+    })
+
+    const tsCalls = fetchMock.mock.calls.filter(([u]) =>
+      typeof u === 'string' && u.startsWith('/api/training/timeseries'),
+    )
+    expect(tsCalls.length).toBe(0)
     expect(screen.getByTestId('metrics-count').textContent).toBe('0')
   })
 })
