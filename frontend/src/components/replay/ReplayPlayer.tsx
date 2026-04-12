@@ -106,6 +106,9 @@ export function ReplayPlayer() {
           e.preventDefault()
           stepFrame(e.shiftKey ? 10 : 1)
           break
+        case 'Digit0':
+          setSpeed(0.5)
+          break
         case 'Digit1':
           setSpeed(1)
           break

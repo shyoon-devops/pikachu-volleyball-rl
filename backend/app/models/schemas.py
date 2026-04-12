@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class GameRecord(BaseModel):
@@ -54,15 +54,32 @@ class EvaluationRecord(BaseModel):
 
 
 class PaginatedResponse(BaseModel):
-    """Envelope for paginated list endpoints."""
+    """Unified envelope for paginated list endpoints.
+
+    ``has_more`` is derived from (page, limit, total) rather than stored
+    directly, so callers cannot supply an inconsistent value. Emitted as a
+    regular field via ``computed_field`` so OpenAPI reflects it.
+    """
 
     data: list
     total: int
     page: int
     limit: int
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def has_more(self) -> bool:
+        if self.limit <= 0:
+            return False
+        return self.page * self.limit < self.total
+
 
 # --- WebSocket message schemas ---
+#
+# All incoming WS messages share the envelope `{type: str, payload: object}`.
+# Each known type has a dedicated payload schema. The parse_ws_message helper
+# validates envelope + payload in one step and returns a discriminated union,
+# so handlers only receive already-validated data.
 
 
 class WsTrainingStartPayload(BaseModel):
@@ -76,4 +93,33 @@ class WsSetLevelPayload(BaseModel):
 
 
 class WsReplayRequestPayload(BaseModel):
-    game_id: str = Field(min_length=1)
+    game_id: str = Field(min_length=1, max_length=128)
+
+
+class WsEmptyPayload(BaseModel):
+    """Payload schema for messages that carry no data (e.g. ping, stop)."""
+
+    model_config = {"extra": "ignore"}
+
+
+# Mapping of known message type -> payload schema. `None` means the message
+# carries no inspectable payload (pong is a liveness signal, not a handler
+# invocation; empty payloads use WsEmptyPayload).
+WS_MESSAGE_SCHEMAS: dict[str, type[BaseModel] | None] = {
+    "ping": WsEmptyPayload,
+    "pong": WsEmptyPayload,
+    "training:start": WsTrainingStartPayload,
+    "training:stop": WsEmptyPayload,
+    "training:resume": WsEmptyPayload,
+    "training:set_level": WsSetLevelPayload,
+    "replay:request": WsReplayRequestPayload,
+}
+
+
+class WsEnvelope(BaseModel):
+    """Outer envelope shared by every inbound WS message."""
+
+    type: str = Field(min_length=1, max_length=64)
+    payload: dict | None = None
+
+    model_config = {"extra": "ignore"}

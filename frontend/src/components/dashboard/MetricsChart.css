@@ -9,6 +9,39 @@
 
 .metrics-chart {
   padding: var(--space-4) var(--space-2) var(--space-2);
+  /* Smooth card-level transitions on theme swap / prop updates */
+  transition:
+    background var(--duration-normal) var(--ease-out),
+    border-color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+/* Smooth SVG line updates. recharts redraws the path on every data append —
+ * a short CSS transition on `d` would be ideal but isn't supported, so we
+ * rely on recharts' own animation prop (see MetricsChart.tsx) and use CSS
+ * only for stroke/opacity transitions. */
+.metrics-chart .recharts-line path.recharts-curve {
+  transition:
+    stroke var(--duration-normal) var(--ease-out),
+    stroke-opacity var(--duration-normal) var(--ease-out),
+    stroke-width var(--duration-fast) var(--ease-out);
+  will-change: d;
+}
+
+.metrics-chart .recharts-cartesian-grid line,
+.metrics-chart .recharts-cartesian-axis line,
+.metrics-chart .recharts-cartesian-axis-tick-value {
+  transition: stroke var(--duration-normal) var(--ease-out),
+              fill var(--duration-normal) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metrics-chart,
+  .metrics-chart *,
+  .metrics-chart .recharts-line path.recharts-curve {
+    transition: none !important;
+    animation: none !important;
+  }
 }
 
 .metrics-chart-header {

@@ -48,8 +48,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._last_cleanup = time.monotonic()
 
     async def dispatch(self, request: Request, call_next):
-        # Skip WebSocket upgrades and health checks
-        if request.url.path in ("/ws", "/api/health"):
+        # Skip WebSocket upgrades and every health probe (/api/health,
+        # /api/health/live, /api/health/ready). Probes must bypass the
+        # limiter or busy nodes start getting marked unhealthy.
+        path = request.url.path
+        if path == "/ws" or path == "/api/health" or path.startswith("/api/health/"):
             return await call_next(request)
 
         client_ip = request.client.host if request.client else "unknown"

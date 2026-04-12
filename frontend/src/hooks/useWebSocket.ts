@@ -3,14 +3,23 @@ import type { ConnectionState, WSMessage, WSClientMessageType } from '../lib/typ
 
 const MAX_RECONNECT_DELAY = 30_000
 const INITIAL_RECONNECT_DELAY = 1_000
+const PING_INTERVAL = 30_000
+const PONG_TIMEOUT = 10_000
 
 type MessageHandler = (message: WSMessage) => void
 
+interface WebSocketSnapshot {
+  connectionState: ConnectionState
+  reconnectAttempt: number
+}
+
 function createWebSocketStore(url: string) {
   let ws: WebSocket | null = null
-  let state: ConnectionState = 'disconnected'
+  let snapshot: WebSocketSnapshot = { connectionState: 'disconnected', reconnectAttempt: 0 }
   let reconnectDelay = INITIAL_RECONNECT_DELAY
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let pingTimer: ReturnType<typeof setInterval> | null = null
+  let pongTimer: ReturnType<typeof setTimeout> | null = null
   let destroyed = false
   const listeners = new Set<() => void>()
   const messageHandlers = new Map<string, Set<MessageHandler>>()
@@ -21,9 +30,10 @@ function createWebSocketStore(url: string) {
     }
   }
 
-  function setState(next: ConnectionState) {
-    if (state !== next) {
-      state = next
+  function setSnapshot(next: Partial<WebSocketSnapshot>) {
+    const updated = { ...snapshot, ...next }
+    if (updated.connectionState !== snapshot.connectionState || updated.reconnectAttempt !== snapshot.reconnectAttempt) {
+      snapshot = updated
       notify()
     }
   }
@@ -33,6 +43,32 @@ function createWebSocketStore(url: string) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
     }
+  }
+
+  function clearPingTimers() {
+    if (pingTimer !== null) {
+      clearInterval(pingTimer)
+      pingTimer = null
+    }
+    if (pongTimer !== null) {
+      clearTimeout(pongTimer)
+      pongTimer = null
+    }
+  }
+
+  function startPing() {
+    clearPingTimers()
+    pingTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }))
+        pongTimer = setTimeout(() => {
+          // No pong response — force reconnect
+          if (ws) {
+            ws.close()
+          }
+        }, PONG_TIMEOUT)
+      }
+    }, PING_INTERVAL)
   }
 
   function scheduleReconnect() {
@@ -48,13 +84,14 @@ function createWebSocketStore(url: string) {
   function connect() {
     if (destroyed) return
     clearReconnectTimer()
+    clearPingTimers()
 
     if (ws) {
       ws.close()
       ws = null
     }
 
-    setState('connecting')
+    setSnapshot({ connectionState: 'connecting', reconnectAttempt: snapshot.reconnectAttempt })
     const socket = new WebSocket(url)
 
     socket.onopen = () => {
@@ -62,14 +99,23 @@ function createWebSocketStore(url: string) {
         socket.close()
         return
       }
-      setState('connected')
+      setSnapshot({ connectionState: 'connected', reconnectAttempt: 0 })
       reconnectDelay = INITIAL_RECONNECT_DELAY
+      startPing()
     }
 
     socket.onmessage = (event: MessageEvent) => {
       try {
-        const message = JSON.parse(event.data as string) as WSMessage
-        const handlers = messageHandlers.get(message.type)
+        const raw = JSON.parse(event.data as string) as { type: string; payload?: unknown }
+        // Reset pong timer on any message
+        if (pongTimer !== null) {
+          clearTimeout(pongTimer)
+          pongTimer = null
+        }
+        if (raw.type === 'pong') return
+
+        const message = raw as WSMessage
+        const handlers = messageHandlers.get(raw.type)
         if (handlers) {
           for (const handler of handlers) {
             handler(message)
@@ -88,8 +134,12 @@ function createWebSocketStore(url: string) {
 
     socket.onclose = () => {
       if (destroyed) return
-      setState('disconnected')
+      clearPingTimers()
       ws = null
+      setSnapshot({
+        connectionState: 'disconnected',
+        reconnectAttempt: snapshot.reconnectAttempt + 1,
+      })
       scheduleReconnect()
     }
 
@@ -100,9 +150,22 @@ function createWebSocketStore(url: string) {
     ws = socket
   }
 
+  // Reconnect immediately when tab becomes visible
+  function handleVisibilityChange() {
+    if (document.visibilityState === 'visible' && snapshot.connectionState === 'disconnected') {
+      reconnectDelay = INITIAL_RECONNECT_DELAY
+      setSnapshot({ reconnectAttempt: 0 })
+      connect()
+    }
+  }
+
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+
   function destroy() {
     destroyed = true
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
     clearReconnectTimer()
+    clearPingTimers()
     if (ws) {
       ws.close()
       ws = null
@@ -122,8 +185,8 @@ function createWebSocketStore(url: string) {
     return () => { listeners.delete(callback) }
   }
 
-  function getSnapshot(): ConnectionState {
-    return state
+  function getSnapshot(): WebSocketSnapshot {
+    return snapshot
   }
 
   function onMessage(type: string, handler: MessageHandler) {
@@ -157,7 +220,7 @@ export function useWebSocket(url: string) {
     }
   }, [store])
 
-  const connectionState = useSyncExternalStore(store.subscribe, store.getSnapshot)
+  const wsSnapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
 
   const send = useCallback((type: WSClientMessageType, payload?: unknown) => {
     store.send(type, payload)
@@ -167,5 +230,10 @@ export function useWebSocket(url: string) {
     return store.onMessage(type, handler)
   }, [store])
 
-  return { connectionState, send, subscribe: subscribeMessage }
+  return {
+    connectionState: wsSnapshot.connectionState,
+    reconnectAttempt: wsSnapshot.reconnectAttempt,
+    send,
+    subscribe: subscribeMessage,
+  }
 }
