@@ -169,10 +169,13 @@ class TestSerializeState:
             ball=BallState(x=0, y=0),
         )
         result = _serialize_state(state)
-        # `is_round_over` + `is_game_ended` + `game_end_frame_counter` drive
-        # the FE scoring / winner-pose overlays. The pre-view-port field
-        # `post_score_freeze_frames` was dropped; replay_service back-fills
-        # it for legacy replays so old replay files still decode on the FE.
+        # Display-state-machine fields (state_name / slow_motion_frames_left
+        # / fade_black_alpha / ready_message_visible) added by
+        # ``port(engine-state): add slowMotion + afterEndOfRound +
+        # beforeStartOfNextRound`` so the FE replay viewer can render the
+        # full pikavolley.js round/afterEndOfRound/beforeStartOfNextRound
+        # transitions. ``post_score_freeze_frames`` is back-filled by
+        # replay_service for legacy replays only.
         assert set(result.keys()) == {
             "player1",
             "player2",
@@ -184,6 +187,10 @@ class TestSerializeState:
             "is_game_ended",
             "game_end_frame_counter",
             "sounds",
+            "state_name",
+            "slow_motion_frames_left",
+            "fade_black_alpha",
+            "ready_message_visible",
         }
 
     def test_serialize_state_sounds_has_five_keys(self) -> None:

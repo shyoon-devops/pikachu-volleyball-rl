@@ -22,3 +22,37 @@ export function formatBotLevel(level: number | null | undefined): string {
   }
   return `L${level}`
 }
+
+/**
+ * Render a rally count cell while distinguishing "BE didn't tell us"
+ * from "the game legitimately ended with N rallies".
+ *
+ * [BE-WAITING] rally_count field required.
+ *
+ * Today every saved game reads 0 because:
+ *   1. `LiveFrameCallback._on_step` enqueues the result dict
+ *      WITHOUT a `rally_count` key
+ *      (`backend/rl/callbacks.py:284-292`).
+ *   2. The handler defaults to 0 when persisting
+ *      (`backend/app/ws/handlers.py:341` —
+ *      `rally_count=data.get("rally_count", 0)`).
+ *   3. The WS broadcast forwards the same payload, so the live FE
+ *      row also reads 0.
+ *
+ * BE needs to track rally crossings (the original engine has no
+ * rally counter; one needs to be added — likely incremented on every
+ * net-cross detected during a rally, reset on score) and add the
+ * field to both the queued dict and the GameRecord schema.
+ *
+ * Until BE ships that, this helper renders "?" when the field is
+ * missing OR 0, so the History column stops claiming "0 rallies"
+ * for every game. After BE ships, callers should prefer the
+ * non-defensive path: render `g.rallyCount` directly when the
+ * field is reliably present.
+ */
+export function formatRallyCount(count: number | null | undefined): string {
+  if (count === null || count === undefined || count === 0 || Number.isNaN(count)) {
+    return '?'
+  }
+  return String(count)
+}

@@ -21,6 +21,22 @@ export interface PlayerState {
   state?: number
   frameNumber?: number
   divingDirection?: number
+  /**
+   * Per-player winner / game-ended flags emitted by the engine
+   * (`backend/game/engine.py`, BE commit 0ec693ef). `isWinner` is
+   * true on the winning player only; `gameEnded` is true on BOTH
+   * players for the duration of the 211-frame gameEnd window so
+   * either sprite can opt into its own pose timing.
+   *
+   * The 5/6 win/lose poses themselves come through `state` (5 = win,
+   * 6 = lose); these flags are useful for FE-only effects (e.g.
+   * "winner highlight") that don't need to peek at top-level
+   * isGameEnded + score.
+   *
+   * Optional for pre-port-state replay decode.
+   */
+  isWinner?: boolean
+  gameEnded?: boolean
 }
 
 export interface BallState {
@@ -88,6 +104,31 @@ export interface GameState {
   isGameEnded?: boolean
   gameEndFrameCounter?: number
   /**
+   * Display state-machine fields ported from `pikavolley.js`:
+   *   - `round`                  active rally
+   *   - `afterEndOfRound`        5-frame fade-to-black after a score
+   *   - `beforeStartOfNextRound` 30-frame ready window with a blinking
+   *                              "READY" sprite, fade back to clear
+   *   - `gameEnd`                211-frame winner/loser pose
+   *
+   * `slowMotionFramesLeft` decrements during the post-score slow-mo
+   * window (max 6). The BE re-emits the same frame several times in
+   * a row during this window so the FE renders naturally slow without
+   * needing to special-case animation timing.
+   *
+   * `fadeBlackAlpha` is in [0, 1] and drives a full-screen black
+   * overlay sprite (asset `objects/black.png`).
+   * `readyMessageVisible` toggles every 5 engine frames during
+   * `beforeStartOfNextRound` (`pikavolley.js:443-444`).
+   *
+   * All optional for compatibility with pre-port replay decode and
+   * any frame the engine emits before the state-machine port lands.
+   */
+  stateName?: string
+  slowMotionFramesLeft?: number
+  fadeBlackAlpha?: number
+  readyMessageVisible?: boolean
+  /**
    * Per-frame SFX trigger flags emitted by the ported engine
    * (`backend/rl/callbacks.py::_serialize_state::sounds`, BE dev
    * 2084a13d). Each key is true *only on the frame the sound fires*
@@ -142,7 +183,19 @@ export interface TimeseriesPoint {
 }
 
 export interface GameRecord {
+  /** Mongo `_id` hex string. Unique row key for React. NOT the same as
+   *  the replay file stem — see `gameId` below. */
   id: string
+  /**
+   * UUID4 minted at game-end (`callbacks.py::run_demo_game`) and used
+   * as the replay `.msgpack` filename stem (`replay_service.py:30`).
+   * The unified history list joins games to replay availability on
+   * THIS field, not `id` (the Mongo ObjectId hex). Optional because
+   * pre-port replay payloads omit it; the join falls back to `id`
+   * when missing so legacy rows still resolve in the rare case the
+   * Mongo doc happened to use the UUID as `_id`.
+   */
+  gameId?: string
   timestamp: string
   /** Bot difficulty (1-5). Optional because the WS `game:result`
    *  broadcast currently omits `bot_level` — the BE enqueues a result
@@ -158,7 +211,20 @@ export interface GameRecord {
   score2: number
   winner: number
   durationFrames: number
-  rallyCount: number
+  /**
+   * Number of rallies in the game. Optional because BE currently does
+   * not track rallies — `LiveFrameCallback._on_step` enqueues a result
+   * dict without this field (`backend/rl/callbacks.py:284-292`) and
+   * the handler defaults to 0 on save (`backend/app/ws/handlers.py:341`),
+   * so every persisted record reads 0. Keeping it optional prevents
+   * the FE from confidently rendering "0 rallies" when the truth is
+   * "BE never told us"; renderers should use `formatRallyCount` to
+   * distinguish missing-data from a legitimate zero.
+   *
+   * Tracking blocker: see [BE-WAITING] note in
+   * `frontend/src/lib/formatGame.ts::formatRallyCount`.
+   */
+  rallyCount?: number
 }
 
 export interface EvalResult {

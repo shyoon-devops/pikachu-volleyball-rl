@@ -33,6 +33,12 @@ class MockWebSocket {
     this.readyState = 3
     this.onclose?.(new CloseEvent('close'))
   }
+
+  simulateMessage(type: string, payload: unknown) {
+    this.onmessage?.(
+      new MessageEvent('message', { data: JSON.stringify({ type, payload }) }),
+    )
+  }
 }
 
 type RouteResponder = (url: string) => {
@@ -724,5 +730,101 @@ describe('useTrainingState — current_frame hydration (API spec v0.2.4)', () =>
       )
       expect(frameCalls.length).toBeGreaterThanOrEqual(1)
     })
+  })
+})
+
+describe('useTrainingState — text/chart sync (B1, 2026-04-18)', () => {
+  // BE only broadcasts `training:status` on explicit transitions, so
+  // before this fix `status.currentStep` lagged the chart by an
+  // arbitrary number of training steps. The hook now bumps the counter
+  // off every `training:metrics` payload so the dashboard's text and
+  // graph track the same authoritative cadence.
+
+  function setupMinimalRoutes() {
+    return installFetchRouter(url => {
+      if (url.startsWith('/api/training/status')) {
+        return {
+          ok: true,
+          payload: { state: 'running', current_step: 0, current_episode: 0 },
+        }
+      }
+      if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
+      if (url.startsWith('/api/training/timeseries')) {
+        return { ok: true, payload: { data: [] } }
+      }
+      const side = matchSideEffectRoute(url, {})
+      if (side) return side
+      return { ok: false, status: 404, payload: {} }
+    })
+  }
+
+  it('bumps status.currentStep when a training:metrics payload arrives', async () => {
+    setupMinimalRoutes()
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1))
+    await act(async () => { MockWebSocket.instances[0]?.simulateOpen() })
+
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('training:metrics', {
+        step: 1024,
+        episode: 5,
+        mean_reward: 0.4,
+        win_rate: 0.5,
+        policy_loss: 0.1,
+        value_loss: 0.2,
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('step').textContent).toBe('1024')
+    })
+    expect(screen.getByTestId('metrics-count').textContent).toBe('1')
+  })
+
+  it('does not regress currentStep when a stale metrics payload arrives', async () => {
+    // Defensive guard: if a slow Mongo write delivers an old metrics
+    // dict from a prior experiment, the user-visible counter must not
+    // jump backward (would look like training rewound).
+    setupMinimalRoutes()
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1))
+    await act(async () => { MockWebSocket.instances[0]?.simulateOpen() })
+
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('training:metrics', {
+        step: 5000,
+        episode: 12,
+        mean_reward: 0,
+        win_rate: 0,
+        policy_loss: 0,
+        value_loss: 0,
+      })
+    })
+    await waitFor(() => expect(screen.getByTestId('step').textContent).toBe('5000'))
+
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('training:metrics', {
+        step: 200, // older payload
+        episode: 1,
+        mean_reward: 0,
+        win_rate: 0,
+        policy_loss: 0,
+        value_loss: 0,
+      })
+    })
+
+    expect(screen.getByTestId('step').textContent).toBe('5000')
   })
 })

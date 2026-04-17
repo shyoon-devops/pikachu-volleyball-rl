@@ -8,7 +8,7 @@ import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { Hyperparams } from '../../lib/types'
-import { formatBotLevel } from '../../lib/formatGame'
+import { formatBotLevel, formatRallyCount } from '../../lib/formatGame'
 import './Dashboard.css'
 
 export function Dashboard() {
@@ -117,7 +117,7 @@ export function Dashboard() {
                         {g.winner === 1 ? 'RL Agent' : 'Bot'}
                       </td>
                       <td className="text-muted">{g.durationFrames}</td>
-                      <td className="text-muted">{g.rallyCount}</td>
+                      <td className="text-muted">{formatRallyCount(g.rallyCount)}</td>
                     </tr>
                   ))}
                 </tbody>

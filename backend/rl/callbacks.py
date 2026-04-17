@@ -227,12 +227,25 @@ class LiveFrameCallback(BaseCallback):
             current_bot_level = self.bot_level
             current_experiment_id = ""
 
-        game = PikachuVolleyball()
+        # Replay viewer needs the full pikavolley.js display state machine —
+        # slow-motion on score, 5f fade-out, 30f ready-message ramp, 211f
+        # gameEnd window — so the FE can render them. The RL training env
+        # opts out (default False) to avoid feeding no-op frames to the agent.
+        game = PikachuVolleyball(display_state_machine=True)
         bot = RuleBasedBot(level=current_bot_level)
         state = game.reset()
         frames: list[dict[str, Any]] = []
         prev_ball_x = float(state.ball.x)
         prev_ball_y = float(state.ball.y)
+
+        # Rally counter — increments whenever the ball crosses the net.
+        # Same definition the offline evaluator uses (rl/evaluator.py:82-85)
+        # so the dashboard "Rallies" stat is comparable to the eval report's
+        # avg_rally_length. A rally is a back-and-forth across the net,
+        # NOT a single hit; ball touching the ground ends the rally and
+        # is captured by the score change instead.
+        rally_count = 0
+        prev_ball_side_right = state.ball.x > NET_PILLAR_X
 
         # Keep emitting frames while the match is live OR while the engine
         # is still inside the post-MAX_SCORE gameEnd window (211 frames of
@@ -267,6 +280,13 @@ class LiveFrameCallback(BaseCallback):
             p2_input = bot.get_action(state, is_player2=True)
             state = game.step(p1_input, p2_input)
 
+            # Net-crossing detector — checked AFTER the step so the new
+            # ball.x reflects this frame's movement.
+            ball_side_right = state.ball.x > NET_PILLAR_X
+            if ball_side_right != prev_ball_side_right:
+                rally_count += 1
+            prev_ball_side_right = ball_side_right
+
         # Final frame — also cache so /current_frame reports the terminal
         # state (winner's score, not a stale in-play frame) until the next
         # demo game starts.
@@ -289,6 +309,11 @@ class LiveFrameCallback(BaseCallback):
             "score2": state.score2,
             "winner": 1 if state.score1 >= MAX_SCORE else 2,
             "duration_frames": state.frame,
+            # Net-crossing total over the whole match. The dashboard
+            # "Rallies" counter and the GameRecord doc both pull this
+            # field; the handler used to default to 0, which is why every
+            # game in /api/games showed 0 rallies.
+            "rally_count": rally_count,
         }
         _safe_enqueue(self.loop, self.results_queue, result)
 
@@ -375,6 +400,16 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             "diving_direction": int(
                 getattr(state.player1, "diving_direction", 0)
             ),
+            # Pikachu sprite state (port of physics.js Player.state at 0xC0):
+            # 0=normal, 1=jumping, 2=jumping+power_hit, 3=diving,
+            # 4=lying_down, 5=win, 6=lose. The FE picks the pikachu sprite
+            # frame from (state, frame_number); without these the 5/6
+            # winner/loser poses during the 211f gameEnd window have no
+            # data to render against.
+            "state": int(getattr(state.player1, "state", 0)),
+            "frame_number": int(getattr(state.player1, "frame_number", 0)),
+            "is_winner": bool(getattr(state.player1, "is_winner", False)),
+            "game_ended": bool(getattr(state.player1, "game_ended", False)),
         },
         "player2": {
             "x": state.player2.x,
@@ -387,6 +422,10 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             "diving_direction": int(
                 getattr(state.player2, "diving_direction", 0)
             ),
+            "state": int(getattr(state.player2, "state", 0)),
+            "frame_number": int(getattr(state.player2, "frame_number", 0)),
+            "is_winner": bool(getattr(state.player2, "is_winner", False)),
+            "game_ended": bool(getattr(state.player2, "game_ended", False)),
         },
         "ball": {
             "x": state.ball.x,
@@ -451,4 +490,17 @@ def _serialize_state(state: Any) -> dict[str, Any]:
                 getattr(state.ball, "sound_ball_touches_ground", False)
             ),
         },
+        # Display state-machine fields (port of pikavolley.js round /
+        # afterEndOfRound / beforeStartOfNextRound). The FE renders the
+        # black fade overlay using fade_black_alpha, blinks the READY
+        # message via ready_message_visible, and shifts physics-frame
+        # interpolation timing during the slow-motion window.
+        "state_name": str(getattr(state, "state_name", "round")),
+        "slow_motion_frames_left": int(
+            getattr(state, "slow_motion_frames_left", 0)
+        ),
+        "fade_black_alpha": float(getattr(state, "fade_black_alpha", 0.0)),
+        "ready_message_visible": bool(
+            getattr(state, "ready_message_visible", False)
+        ),
     }

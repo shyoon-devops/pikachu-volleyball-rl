@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatBotLevel } from './formatGame'
+import { formatBotLevel, formatRallyCount } from './formatGame'
 
 describe('formatBotLevel', () => {
   it('renders L1 through L5 for valid levels', () => {
@@ -35,5 +35,36 @@ describe('formatBotLevel', () => {
     // as "L?" — a visible "L0" surfaces schema drift faster than a
     // silent fallback.
     expect(formatBotLevel(0)).toBe('L0')
+  })
+})
+
+describe('formatRallyCount (BE-WAITING)', () => {
+  // Until BE tracks rally crossings, every persisted game has
+  // rally_count=0 (handler default). Rendering "0 rallies" would be
+  // a lie — switch to "?" so the column reads as "no data" instead
+  // of "this game had zero rallies".
+  it('renders "?" for undefined (live row from WS broadcast)', () => {
+    expect(formatRallyCount(undefined)).toBe('?')
+  })
+
+  it('renders "?" for null (defensive — REST shape change)', () => {
+    expect(formatRallyCount(null)).toBe('?')
+  })
+
+  it('renders "?" for 0 (current BE default — treat as missing)', () => {
+    // Once BE actually tracks rallies the helper should be
+    // re-evaluated: a legitimate 0-rally game (e.g. single serve win)
+    // would also render "?" today. Acceptable trade-off until
+    // BE-WAITING is resolved.
+    expect(formatRallyCount(0)).toBe('?')
+  })
+
+  it('renders "?" for NaN', () => {
+    expect(formatRallyCount(Number.NaN)).toBe('?')
+  })
+
+  it('renders the integer when BE provides a real count', () => {
+    expect(formatRallyCount(7)).toBe('7')
+    expect(formatRallyCount(1)).toBe('1')
   })
 })
