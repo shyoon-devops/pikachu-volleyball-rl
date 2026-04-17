@@ -62,22 +62,27 @@ class TestRateLimit:
             assert resp.status_code == 200
 
     def test_rate_limit_triggers(self, client):
-        """Exceeding burst limit returns 429."""
+        """Exceeding burst limit returns 429.
+
+        Default burst raised to 100 (2026-04-18) so dev users don't hit
+        429 on normal SPA navigation; the request count here was bumped
+        in lockstep so the test still proves the limiter engages.
+        """
         statuses = []
-        for _ in range(25):
+        for _ in range(120):
             resp = client.get("/api/games")
             statuses.append(resp.status_code)
         assert 429 in statuses, f"Expected 429 in statuses but got: {set(statuses)}"
 
     def test_rate_limit_response_format(self, client):
         """429 response includes Retry-After header."""
-        for _ in range(25):
+        for _ in range(120):
             resp = client.get("/api/games")
             if resp.status_code == 429:
                 assert "Retry-After" in resp.headers
                 assert resp.json()["detail"] == "Too many requests"
                 return
-        pytest.skip("Rate limit not triggered within 25 requests")
+        pytest.skip("Rate limit not triggered within 120 requests")
 
 
 class TestRateLimitExemptions:
@@ -91,9 +96,14 @@ class TestRateLimitExemptions:
 
     @staticmethod
     def _exhaust_bucket(client) -> None:
-        """Consume all tokens on the shared bucket until 429 is observed."""
+        """Consume all tokens on the shared bucket until 429 is observed.
+
+        Cap raised to 200 to match the relaxed default burst (100); the
+        old cap of 50 is no longer enough to drain the bucket so the
+        precondition would fail and shadow the real assertion below.
+        """
         seen_429 = False
-        for _ in range(50):
+        for _ in range(200):
             if client.get("/api/games").status_code == 429:
                 seen_429 = True
                 break
