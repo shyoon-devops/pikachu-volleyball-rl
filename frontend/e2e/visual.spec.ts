@@ -19,7 +19,9 @@ import { test, expect, type Page } from '@playwright/test'
  *   serve     — idle spawn positions, score 0-0
  *   rally     — both pikachus airborne, ball mid-court
  *   powerhit  — trail + hyper + punch-ring simultaneously visible
- *   gameend   — 15-14 endgame with the overlay still expanding
+ *   gameend   — 15-14 endgame with the overlay still expanding,
+ *               winning/losing poses (state 5 / 6)
+ *   ready     — beforeStartOfNextRound: half-faded overlay + READY blink
  */
 
 async function gotoScene(page: Page, scene: string): Promise<void> {
@@ -52,5 +54,10 @@ test.describe('GameCanvas visual regression (view.js port)', () => {
   test('gameend scene matches baseline (expanding overlay, winning/losing poses)', async ({ page }) => {
     await gotoScene(page, 'gameend')
     await expect(page.locator('[data-testid="visual-harness"]')).toHaveScreenshot('gameend.png')
+  })
+
+  test('ready scene matches baseline (mid-fade overlay + READY blink)', async ({ page }) => {
+    await gotoScene(page, 'ready')
+    await expect(page.locator('[data-testid="visual-harness"]')).toHaveScreenshot('ready.png')
   })
 })
