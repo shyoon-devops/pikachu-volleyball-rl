@@ -110,6 +110,14 @@ class TestConstantsParity:
     def test_max_score(self) -> None:
         assert MAX_SCORE == 15
 
+    def test_engine_tick_rate_matches_original(self) -> None:
+        # Original ``this.normalFPS = 25`` at pikavolley.js:53. Pre-port the
+        # constant was 30, which made dive/jump/lying-down windows look
+        # 17% faster than the reference game.
+        from backend.game.constants import FPS
+
+        assert FPS == 25
+
 
 # ─── Ball-player collision distance boundary ──────────────────────────────────
 

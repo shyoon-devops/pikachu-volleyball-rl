@@ -14,7 +14,7 @@ import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
 
 from backend.game.bot import RuleBasedBot
-from backend.game.constants import MAX_SCORE, NET_PILLAR_X
+from backend.game.constants import FPS, MAX_SCORE, NET_PILLAR_X
 from backend.game.engine import PikachuVolleyball
 from backend.rl.env import ACTION_MAP
 
@@ -503,4 +503,11 @@ def _serialize_state(state: Any) -> dict[str, Any]:
         "ready_message_visible": bool(
             getattr(state, "ready_message_visible", False)
         ),
+        # Canonical engine tick rate for interpolation. The FE was
+        # previously hard-coded to assume 30fps server frames (see
+        # GameCanvas.tsx lerpFactor `+1/2` per rAF), which made the
+        # ported physics look 17% faster than the original. Emitting the
+        # rate per frame lets the FE derive the correct lerp step.
+        # Matches pikavolley.js:53 ``this.normalFPS = 25``.
+        "tick_rate": int(FPS),
     }
