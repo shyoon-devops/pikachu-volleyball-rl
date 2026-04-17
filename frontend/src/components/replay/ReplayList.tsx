@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getGames, getAvailableReplays } from '../../lib/api'
 import type { GameRecord, ReplayInfo } from '../../lib/types'
-import { formatBotLevel } from '../../lib/formatGame'
+import { formatBotLevel, formatRallyCount } from '../../lib/formatGame'
 import { formatKstDateTime } from '../../lib/formatTime'
 import './ReplayList.css'
 
@@ -135,7 +135,7 @@ export function ReplayList() {
                       {g.winner === 1 ? 'RL Agent' : 'Bot'}
                     </td>
                     <td className="text-muted">{g.durationFrames}</td>
-                    <td className="text-muted">{g.rallyCount}</td>
+                    <td className="text-muted">{formatRallyCount(g.rallyCount)}</td>
                     <td>
                       {replay ? (
                         <button

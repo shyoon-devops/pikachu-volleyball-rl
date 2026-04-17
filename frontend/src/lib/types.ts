@@ -170,7 +170,20 @@ export interface GameRecord {
   score2: number
   winner: number
   durationFrames: number
-  rallyCount: number
+  /**
+   * Number of rallies in the game. Optional because BE currently does
+   * not track rallies — `LiveFrameCallback._on_step` enqueues a result
+   * dict without this field (`backend/rl/callbacks.py:284-292`) and
+   * the handler defaults to 0 on save (`backend/app/ws/handlers.py:341`),
+   * so every persisted record reads 0. Keeping it optional prevents
+   * the FE from confidently rendering "0 rallies" when the truth is
+   * "BE never told us"; renderers should use `formatRallyCount` to
+   * distinguish missing-data from a legitimate zero.
+   *
+   * Tracking blocker: see [BE-WAITING] note in
+   * `frontend/src/lib/formatGame.ts::formatRallyCount`.
+   */
+  rallyCount?: number
 }
 
 export interface EvalResult {
