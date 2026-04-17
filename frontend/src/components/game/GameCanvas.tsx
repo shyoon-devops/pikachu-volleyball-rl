@@ -15,6 +15,7 @@ import {
   type BallHistoryPoint,
 } from './powerHitTrail'
 import { computePunchEffect } from './punchEffect'
+import { computeGameEndOverlay } from './gameEndOverlay'
 import { inferPlayerFrame } from './playerFrame'
 import {
   Cloud,
@@ -198,6 +199,11 @@ interface SpriteObjects {
   shadowBall: Sprite
   scoreBoard1: Container
   scoreBoard2: Container
+  // "GAME END" overlay rendered during the 211-frame gameEnd window
+  // (view.js:377, 622-645). Sprite anchor stays at (0, 0) so the
+  // computeGameEndOverlay math — which derives a top-left position
+  // from the centre plus increments — lines up with view.js directly.
+  gameEndMessage: Sprite
 }
 
 function buildScoreBoard(
@@ -385,7 +391,11 @@ function buildSpriteScene(
   punch.visible = false
   stage.addChild(punch)
 
-  // ── Score boards ──
+  // ── Score boards (view.js:363-366, 415-418) ──
+  // Each board has a tens + units AnimatedSprite pinned to the number
+  // atlas (number_0..9.png). `scoreBoard2.x` = 432 - 32 - 32 - 14 keeps
+  // the two-digit area 14px from the right-hand edge, matching the
+  // original UI chrome.
   const numberTextures = buildNumberTextures(textures)
   const scoreBoard1 = buildScoreBoard(numberTextures)
   scoreBoard1.x = 14
@@ -394,6 +404,15 @@ function buildSpriteScene(
   scoreBoard2.x = COURT_WIDTH - 32 - 32 - 14
   scoreBoard2.y = 10
   stage.addChild(scoreBoard1, scoreBoard2)
+
+  // ── "GAME END" overlay (view.js:377, 622-645) ──
+  // Added last so it sits on top of everything else. Hidden by default;
+  // drawSprites gates visibility on isGameEnded + gameEndFrameCounter.
+  const gameEndTex = textures['messages/common/game_end.png']
+  const gameEndMessage = new Sprite(gameEndTex)
+  gameEndMessage.anchor.set(0, 0)
+  gameEndMessage.visible = false
+  stage.addChild(gameEndMessage)
 
   return {
     bg,
@@ -412,6 +431,7 @@ function buildSpriteScene(
     shadowBall,
     scoreBoard1,
     scoreBoard2,
+    gameEndMessage,
   }
 }
 
@@ -658,6 +678,26 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
     // ── Score boards ──
     updateScoreBoard(sprites.scoreBoard1, state.score1)
     updateScoreBoard(sprites.scoreBoard2, state.score2)
+
+    // ── "GAME END" overlay (view.js:622-645 via computeGameEndOverlay) ──
+    // The sprite's natural size comes from the loaded texture — use
+    // that instead of the scaled `.width/.height` so the sizing math
+    // stays idempotent across frames (width assignment would otherwise
+    // compound each tick).
+    const gameEndTex = sprites.gameEndMessage.texture
+    const overlay = computeGameEndOverlay({
+      isGameEnded: state.isGameEnded ?? false,
+      frameCounter: state.gameEndFrameCounter ?? 0,
+      textureWidth: gameEndTex.width,
+      textureHeight: gameEndTex.height,
+    })
+    sprites.gameEndMessage.visible = overlay.visible
+    if (overlay.visible) {
+      sprites.gameEndMessage.x = overlay.x
+      sprites.gameEndMessage.y = overlay.y
+      sprites.gameEndMessage.width = overlay.width
+      sprites.gameEndMessage.height = overlay.height
+    }
   }, [])
 
   const drawGraphics = useCallback((state: GameState) => {
