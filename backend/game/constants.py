@@ -26,7 +26,13 @@ PLAYER_DIVE_VELOCITY: int = -5  # original: yVelocity = -5 on dive start
 PLAYER_INIT_X_P1: int = 36  # original: player1.x = 36
 PLAYER_INIT_X_P2: int = GROUND_WIDTH - 36  # original: 396
 
-# Lying-down after dive landing — original: lyingDownDurationLeft = 3
+# Lying-down after dive landing. Set on the landing frame (player.state
+# 3 → 4), then decremented by 1 each frame the player is in state==4;
+# state transitions back to 0 the frame the counter falls below -1. So
+# total time stuck in state=4 is exactly 5 frames (3 → 2 → 1 → 0 → -1,
+# then -2 triggers the state=0 transition). Matches the literal value
+# at physics.js:575 ``player.lyingDownDurationLeft = 3``; see also the
+# decrement / exit branch at physics.js:507-512.
 LYING_DOWN_DURATION: int = 3
 
 # Ball — original: BALL_RADIUS=20, BALL_TOUCHING_GROUND_Y=252

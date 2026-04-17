@@ -802,3 +802,97 @@ class TestWinPoseEmit:
         assert emitted["player2"]["state"] == 6
         assert emitted["player1"]["is_winner"] is True
         assert emitted["player2"]["is_winner"] is False
+
+
+class TestSlidingCooldownMatchesOriginal:
+    """Pin the dive→lying-down→idle cycle frame counts to physics.js.
+
+    Cross-reference for each phase:
+      * dive flight  : physics.js:598 (vy=-5) + the gravity loop at 562-579,
+        which produces 12 frames between trigger and re-touch of
+        PLAYER_TOUCHING_GROUND_Y_COORD
+      * lying down   : physics.js:507-512 + 575 (lyingDownDurationLeft set
+        to 3, then 5 ticks of state==4 because the exit check is
+        ``< -1`` rather than ``< 0``)
+      * total       : 12 + 5 = 17 frames before state==0 returns
+    """
+
+    def test_dive_flight_lasts_exactly_12_frames(self) -> None:
+        # state=3 must persist for 12 engine frames between trigger and
+        # landing — drift here means the dive flight is faster or slower
+        # than the original, which the user perceives as a "shorter
+        # sliding cooldown" even though LYING_DOWN_DURATION is unchanged.
+        game = PikachuVolleyball(seed=0)
+        game.reset()
+        dive = PlayerInput(x_dir=1, y_dir=0, power_hit=True)
+        game.step(dive, NOOP)
+        # Frame 1: dive triggered, state=3.
+        assert game._state.player1.state == 3
+
+        in_dive = 1  # the trigger frame counts as state=3
+        for _ in range(20):
+            game.step(NOOP, NOOP)
+            if game._state.is_round_over:
+                break
+            if game._state.player1.state == 3:
+                in_dive += 1
+            else:
+                break
+        assert in_dive == 12, f"dive flight should be 12 frames, got {in_dive}"
+
+    def test_lying_down_lasts_exactly_5_frames(self) -> None:
+        # state=4 must persist for 5 engine frames between landing and
+        # the state==0 transition. Direct port of the physics.js:507-512
+        # decrement loop: ldl ticks 3→2→1→0→-1, the 6th tick takes ldl
+        # to -2 which triggers state=0.
+        game = PikachuVolleyball(seed=0)
+        game.reset()
+        # Skip the round-over interaction by pinning the player into
+        # state=4 directly (the cycle test above covers the trigger path).
+        game._state.player1.state = 4
+        game._state.player1.lying_down_duration_left = 3
+        game._state.player1.sync_derived_flags()
+
+        # The pinned landing frame counts toward the window even though
+        # no step() has fired yet — equivalent to the gravity-branch tick
+        # at physics.js:571-575 that flips state 3→4 in line.
+        in_lying = 1
+        for _ in range(10):
+            game.step(NOOP, NOOP)
+            if game._state.is_round_over:
+                break
+            if game._state.player1.state == 4:
+                in_lying += 1
+            else:
+                break
+        assert in_lying == 5, f"lying-down should be 5 frames, got {in_lying}"
+
+    def test_full_dive_cycle_blocks_next_dive_for_17_frames(self) -> None:
+        # End-to-end: from the dive-trigger frame to the first frame the
+        # player is back in state==0 (and could dive again) must be
+        # exactly 17 frames (12 dive flight + 5 lying down). Drift here
+        # changes the user-visible "next slide ready" cadence.
+        game = PikachuVolleyball(seed=0)
+        game.reset()
+        # Park the ball off-court so the round doesn't end mid-cycle.
+        game._state.ball.x = 100
+        game._state.ball.y = 30
+        game._state.ball.vx = 0
+        game._state.ball.vy = 0
+
+        dive = PlayerInput(x_dir=1, y_dir=0, power_hit=True)
+        game.step(dive, NOOP)
+        assert game._state.player1.state == 3
+
+        cycle_frames = 1  # the trigger frame
+        ready_again_at: int | None = None
+        for i in range(30):
+            game.step(NOOP, NOOP)
+            cycle_frames += 1
+            if game._state.player1.state == 0:
+                ready_again_at = cycle_frames
+                break
+        assert ready_again_at == 18, (
+            "expected state==0 first observed on frame 18 "
+            f"(12 dive + 5 lying + 1 transition), got {ready_again_at}"
+        )
