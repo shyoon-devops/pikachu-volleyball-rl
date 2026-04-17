@@ -810,19 +810,22 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
  * P2 (mirrored, since the sheet only stores right-facing poses).
  *
  * During a dive or lie (state 3 / 4), the sheet's single diving pose
- * must be flipped to match which direction the player is diving — the
- * original engine encodes that in `divingDirection`:
- *   P1: scale.x = (divingDirection === -1) ? -1 : 1
- *   P2: scale.x = (divingDirection ===  1) ? 1 : -1
- * These two rules collapse to `divingDirection * sign` when
- * `divingDirection` is signed, which is what the port emits.
+ * must be flipped to match which direction the player is diving. The
+ * ported engine emits `diving_direction` (-1 / 0 / +1) on every frame
+ * — snakeToCamel turns that into `divingDirection` on the WS payload.
+ * The original's two-branch rule (view.js:467-474 P1, 476-483 P2)
+ * collapses to `divingDirection * sign` when the field is signed,
+ * which matches what we get from BE now.
  *
- * Fallback when `divingDirection` is absent (pre-port frames or flag-
- * only payloads): use the player's `vx` sign so the dive still faces
- * forward instead of locking to the default facing.
+ * When `divingDirection === 0` (no lateral input this tick — rare
+ * mid-dive but possible) or the field is absent (pre-port replay),
+ * fall through to `defaultFacing` so the sprite doesn't flip to an
+ * arbitrary side. The vx-sign fallback that lived here before BE
+ * emitted the field has been retired — the engine is now the single
+ * source of truth (per 2026-04-17 PM dev-deploy 2084a13d).
  */
 function resolvePlayerScaleX(
-  p: { state?: number; isDiving: boolean; vx: number; divingDirection?: number },
+  p: { state?: number; isDiving: boolean; divingDirection?: number },
   defaultFacing: 1 | -1,
 ): number {
   const inDiveLike = p.state === 3 || p.state === 4 || p.isDiving
@@ -832,11 +835,6 @@ function resolvePlayerScaleX(
   if (dir === 1) return 1
   if (dir === -1) return -1
 
-  // No authoritative direction → fall back to velocity sign. `vx > 0`
-  // means moving right → face right, same as default for P1 and the
-  // mirrored case for P2.
-  if (p.vx > 0) return 1
-  if (p.vx < 0) return -1
   return defaultFacing
 }
 
