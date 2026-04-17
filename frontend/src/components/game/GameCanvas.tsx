@@ -23,6 +23,8 @@ import {
   cloudAndWaveEngine,
   NUM_OF_CLOUDS,
 } from './cloudAndWave'
+import { diffAudioTriggers } from './audioTriggers'
+import { getPikaAudio } from '../../lib/pikaAudio'
 import './GameCanvas.css'
 
 // ── Original game constants (from physics.js) ──
@@ -554,10 +556,22 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
 
   useEffect(() => {
     if (gameState) {
+      const prevForAudio = currentStateRef.current
       prevStateRef.current = currentStateRef.current ?? gameState
       currentStateRef.current = gameState
       lerpFactorRef.current = 0
       frameCounterRef.current++
+
+      // ── SFX triggers (audio.js + pikavolley.js trigger points) ──
+      // Compute against the *previous* server frame, not the 60fps
+      // interpolated value, so rising edges land once per engine tick
+      // (not 2× due to rAF doubling). Audio singleton is muted by
+      // default — calls are cheap no-ops until the user unmutes.
+      const triggers = diffAudioTriggers(prevForAudio, gameState)
+      if (triggers.length > 0) {
+        const audio = getPikaAudio()
+        for (const t of triggers) audio.playSfx(t.name, t.pan)
+      }
       // Maintain 3-slot ring buffer of server ball positions. Only the
       // last BALL_HISTORY_LEN entries are kept. The buffer feeds the
       // power-hit trail; see computePowerHitTrail() for how it's read.
