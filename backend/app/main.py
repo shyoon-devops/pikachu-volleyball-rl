@@ -116,15 +116,25 @@ app.add_middleware(
 
 app.add_middleware(
     RateLimitMiddleware,
-    # Defaults raised 2026-04-18 after dev users hit "Too many requests"
-    # during normal SPA navigation. The frontend fires 5–10 GETs in
-    # parallel on every panel switch (status + games + replays + models +
-    # metrics), so the previous 60 rpm / 20-token burst was tripping a
-    # 429 on the second tab change. New defaults give one user ~5 req/s
-    # sustained with a 100-request burst window, still bounded enough
-    # that a real attacker burns through their bucket within seconds.
-    requests_per_minute=int(os.getenv("RATE_LIMIT_RPM", "300")),
-    burst=int(os.getenv("RATE_LIMIT_BURST", "100")),
+    # Defaults raised again 2026-04-18 (round 2) after PM repro showed
+    # users still hitting 429 on the history page. Two issues:
+    #
+    #   1. Per-row metadata fan-out — opening Recent Games fires the
+    #      list endpoint plus N detail endpoints per row (games + game/{id}
+    #      + replays + replays/{id} + evaluations). Two refreshes in 10s
+    #      blew through the previous 100-token burst.
+    #   2. Behind nginx every real user collapses into ONE shared bucket
+    #      because uvicorn sees the proxy IP. Set RATE_LIMIT_TRUST_PROXY=true
+    #      in the dev/qa/prod envs (where nginx is in front and strips
+    #      external XFF) so each real client gets its own bucket.
+    #
+    # New defaults give ~10 req/s sustained per IP with a 200-burst
+    # window. RATE_LIMIT_TRUST_PROXY defaults OFF — direct-internet
+    # deploys must NOT trust XFF (trivially spoofable).
+    requests_per_minute=int(os.getenv("RATE_LIMIT_RPM", "600")),
+    burst=int(os.getenv("RATE_LIMIT_BURST", "200")),
+    trust_proxy=os.getenv("RATE_LIMIT_TRUST_PROXY", "false").lower()
+    in ("1", "true", "yes"),
 )
 
 # Correlation ID middleware is added last so it runs first in the Starlette
