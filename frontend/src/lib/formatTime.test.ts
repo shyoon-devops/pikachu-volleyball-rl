@@ -35,4 +35,35 @@ describe('formatKstDateTime', () => {
   it('exports the KST IANA name for callers building their own formatter', () => {
     expect(KST_TZ).toBe('Asia/Seoul')
   })
+
+  // V2 root-cause regression guards: BE serialises `datetime.utcnow()`
+  // as a naive ISO string ("2026-04-17T17:32:22") with NO timezone
+  // suffix, which JS would otherwise parse as local-time. We force-tag
+  // these as UTC before the KST conversion.
+  it('treats a naive ISO timestamp (no Z) as UTC, not local-time', () => {
+    // 2026-04-17T17:32:22 → 2026-04-18 02:32:22 KST (+9 hours).
+    const out = formatKstDateTime('2026-04-17T17:32:22')
+    expect(out).toMatch(/2026/)
+    expect(out).toMatch(/18/)
+    expect(out).toMatch(/02:32:22/)
+  })
+
+  it('handles naive ISO with fractional seconds', () => {
+    // BE may include microseconds: "2026-04-17T17:32:22.123456".
+    const out = formatKstDateTime('2026-04-17T17:32:22.500000')
+    expect(out).toMatch(/02:32:22/)
+  })
+
+  it('does NOT modify a string that already carries an offset', () => {
+    // Tagged with explicit Z → parsed normally, same KST result.
+    const fromZ = formatKstDateTime('2026-04-17T17:32:22Z')
+    const fromNaive = formatKstDateTime('2026-04-17T17:32:22')
+    expect(fromZ).toBe(fromNaive)
+  })
+
+  it('does NOT modify a string with explicit ±HH:MM offset', () => {
+    // 2026-04-17T20:32:22+03:00 = 17:32:22Z = 02:32:22 KST.
+    const out = formatKstDateTime('2026-04-17T20:32:22+03:00')
+    expect(out).toMatch(/02:32:22/)
+  })
 })

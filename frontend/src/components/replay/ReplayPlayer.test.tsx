@@ -8,10 +8,15 @@ vi.mock('../game/GameCanvas', () => ({
   GameCanvas: () => <div data-testid="game-canvas" />,
 }))
 
-// Mock getReplay so we can feed a fixed-length frame array
+// Mock getReplay so we can feed a fixed-length frame array.
+// `getGames` is also mocked because V4 added a best-effort fetch for
+// the bottom metadata strip — without the mock the real fetch path
+// runs against undefined and aborts the test load.
 const mockGetReplay = vi.fn()
+const mockGetGames = vi.fn()
 vi.mock('../../lib/api', () => ({
   getReplay: (...args: unknown[]) => mockGetReplay(...args),
+  getGames: (...args: unknown[]) => mockGetGames(...args),
 }))
 
 import { ReplayPlayer } from './ReplayPlayer'
@@ -28,6 +33,9 @@ function makeFrames(count: number): GameState[] {
 
 async function renderPlayerWithFrames(count: number) {
   mockGetReplay.mockResolvedValueOnce({ frames: makeFrames(count) })
+  // Default the metadata fetch to "no records found" — keyboard tests
+  // don't care about the strip, they just need the call to resolve.
+  mockGetGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 100 })
   render(
     <MemoryRouter initialEntries={['/replay/game-1']}>
       <Routes>
@@ -50,6 +58,7 @@ function frameCounterText() {
 describe('ReplayPlayer keyboard scrubbing', () => {
   beforeEach(() => {
     mockGetReplay.mockReset()
+    mockGetGames.mockReset()
   })
 
   afterEach(() => {
@@ -128,6 +137,7 @@ describe('ReplayPlayer keyboard scrubbing', () => {
 describe('ReplayControls shortcuts hint', () => {
   beforeEach(() => {
     mockGetReplay.mockReset()
+    mockGetGames.mockReset()
   })
 
   it('documents the ←/→ and ↓/↑ keyboard shortcuts', async () => {
@@ -137,5 +147,120 @@ describe('ReplayControls shortcuts hint', () => {
     const text = hint!.textContent ?? ''
     expect(text).toMatch(/1 frame/i)
     expect(text).toMatch(/10 frames/i)
+  })
+})
+
+describe('ReplayPlayer metadata strip (V4, 2026-04-18)', () => {
+  beforeEach(() => {
+    mockGetReplay.mockReset()
+    mockGetGames.mockReset()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function makeFrameWithScore(score1: number, score2: number, frame: number): GameState {
+    return {
+      ball: { x: 0, y: 0, vx: 0, vy: 0, rotation: 0 },
+      player1: {
+        x: 0, y: 0, vx: 0, vy: 0,
+        isJumping: false, isDiving: false, isPowerHitting: false,
+      },
+      player2: {
+        x: 0, y: 0, vx: 0, vy: 0,
+        isJumping: false, isDiving: false, isPowerHitting: false,
+      },
+      score1,
+      score2,
+      frame,
+    }
+  }
+
+  it('renders frame-derived final score / winner / duration even without a GameRecord', async () => {
+    // /api/games returns empty (game older than page 1) — strip
+    // degrades to last-frame derivation only.
+    mockGetReplay.mockResolvedValueOnce({
+      frames: [
+        makeFrameWithScore(0, 0, 0),
+        makeFrameWithScore(15, 12, 4500),
+      ],
+    })
+    mockGetGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 100 })
+
+    render(
+      <MemoryRouter initialEntries={['/replay/uuid-orphan']}>
+        <Routes>
+          <Route path="/replay/:id" element={<ReplayPlayer />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByLabelText('Replay metadata')).toBeInTheDocument())
+    // Final score = last frame, winner derived from score comparison
+    // (15 > 12 → P1 wins → "RL Agent"), duration = last frame.frame.
+    expect(screen.getByText('RL Agent')).toBeInTheDocument()
+    expect(screen.getByText('4500 frames')).toBeInTheDocument()
+    // Bot level + rallies fall through to "?" because GameRecord missing.
+    expect(screen.getByText('L?')).toBeInTheDocument()
+  })
+
+  it('merges GameRecord fields when /api/games resolves a match', async () => {
+    mockGetReplay.mockResolvedValueOnce({
+      frames: [makeFrameWithScore(15, 14, 5000)],
+    })
+    mockGetGames.mockResolvedValueOnce({
+      data: [{
+        id: 'mongo-1',
+        gameId: 'uuid-1',
+        timestamp: '2026-04-17T17:32:22Z',
+        botLevel: 4,
+        score1: 15,
+        score2: 14,
+        winner: 1,
+        durationFrames: 5000,
+        rallyCount: 7,
+        experimentId: 'exp-abc',
+      }],
+      total: 1,
+      page: 1,
+      limit: 100,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/replay/uuid-1']}>
+        <Routes>
+          <Route path="/replay/:id" element={<ReplayPlayer />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByLabelText('Replay metadata')).toBeInTheDocument())
+    expect(screen.getByText('L4')).toBeInTheDocument()       // bot level from GameRecord
+    expect(screen.getByText('7')).toBeInTheDocument()         // rallies from GameRecord
+    expect(screen.getByText('exp-abc')).toBeInTheDocument()   // experiment id
+    // KST conversion of 17:32 UTC → 02:32 next day
+    expect(screen.getByText(/02:32:22/)).toBeInTheDocument()
+  })
+
+  it('keeps the strip rendered when /api/games rejects (degraded mode)', async () => {
+    // /games endpoint failure should not blank the strip — frame-derived
+    // values still appear.
+    mockGetReplay.mockResolvedValueOnce({
+      frames: [makeFrameWithScore(8, 15, 3200)],
+    })
+    mockGetGames.mockRejectedValueOnce(new Error('games endpoint down'))
+
+    render(
+      <MemoryRouter initialEntries={['/replay/uuid-x']}>
+        <Routes>
+          <Route path="/replay/:id" element={<ReplayPlayer />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByLabelText('Replay metadata')).toBeInTheDocument())
+    expect(screen.getByText('Bot')).toBeInTheDocument() // P2 won → "Bot"
+    expect(screen.getByText('3200 frames')).toBeInTheDocument()
   })
 })

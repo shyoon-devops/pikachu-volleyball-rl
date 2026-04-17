@@ -8,7 +8,13 @@ import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { Hyperparams } from '../../lib/types'
-import { formatBotLevel, formatRallyCount } from '../../lib/formatGame'
+import {
+  formatBotLevel,
+  formatRallyCount,
+  formatAvgRallyLength,
+  formatExperimentIdShort,
+} from '../../lib/formatGame'
+import { formatKstDateTime } from '../../lib/formatTime'
 import './Dashboard.css'
 
 export function Dashboard() {
@@ -98,7 +104,17 @@ export function Dashboard() {
               <table className="recent-games-table" aria-labelledby="recent-games-heading">
                 <thead>
                   <tr>
-                    {['#', 'Bot Level', 'Score', 'Winner', 'Frames', 'Rallies'].map(h => (
+                    {[
+                      '#',
+                      'Time',
+                      'Bot Level',
+                      'Score',
+                      'Winner',
+                      'Frames',
+                      'Rallies',
+                      'Avg Rally',
+                      'Experiment',
+                    ].map(h => (
                       <th key={h} scope="col">{h}</th>
                     ))}
                   </tr>
@@ -107,6 +123,7 @@ export function Dashboard() {
                   {recentGames.slice(0, 20).map((g, i) => (
                     <tr key={g.id}>
                       <td className="text-muted">{i + 1}</td>
+                      <td className="text-muted">{formatKstDateTime(g.timestamp)}</td>
                       <td>{formatBotLevel(g.botLevel)}</td>
                       <td>
                         <span className="score-p1">{g.score1}</span>
@@ -118,6 +135,12 @@ export function Dashboard() {
                       </td>
                       <td className="text-muted">{g.durationFrames}</td>
                       <td className="text-muted">{formatRallyCount(g.rallyCount)}</td>
+                      <td className="text-muted">
+                        {formatAvgRallyLength(g.durationFrames, g.rallyCount)}
+                      </td>
+                      <td className="text-muted text-mono" title={g.experimentId ?? undefined}>
+                        {formatExperimentIdShort(g.experimentId)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

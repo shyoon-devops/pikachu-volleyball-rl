@@ -212,6 +212,13 @@ export interface GameRecord {
   winner: number
   durationFrames: number
   /**
+   * Training experiment id this game was played under
+   * (`backend/app/models/schemas.py::GameRecord.experiment_id`).
+   * Optional because legacy/manual records may lack the field; the
+   * replay metadata strip only renders it when present.
+   */
+  experimentId?: string
+  /**
    * Number of rallies in the game. Optional because BE currently does
    * not track rallies — `LiveFrameCallback._on_step` enqueues a result
    * dict without this field (`backend/rl/callbacks.py:284-292`) and

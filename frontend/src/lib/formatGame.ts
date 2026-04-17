@@ -56,3 +56,44 @@ export function formatRallyCount(count: number | null | undefined): string {
   }
   return String(count)
 }
+
+/**
+ * Average frames-per-rally for a game. Used in the Recent Games
+ * column to give an at-a-glance "how long was each rally" reading.
+ *
+ * Derives from `durationFrames / rallyCount` (rounded). Returns "?"
+ * when `rallyCount` is missing/0 (BE-WAITING) so the cell is honest
+ * rather than rendering "Infinity" or a misleading "0".
+ *
+ * Originally this column was going to read raw `avg_rally_length`
+ * from BE, but BE doesn't track per-game rally length and tracking
+ * `rally_count` itself is still BE-WAITING (see `formatRallyCount`).
+ * Deriving on the FE means the column starts working immediately
+ * once BE ships the rally counter — no second roundtrip required.
+ */
+export function formatAvgRallyLength(
+  durationFrames: number | null | undefined,
+  rallyCount: number | null | undefined,
+): string {
+  if (
+    durationFrames === null || durationFrames === undefined ||
+    rallyCount === null || rallyCount === undefined ||
+    rallyCount === 0 || Number.isNaN(durationFrames) || Number.isNaN(rallyCount)
+  ) {
+    return '?'
+  }
+  return `${Math.round(durationFrames / rallyCount)}f`
+}
+
+/**
+ * Short-form experiment id for table cells. Full UUID4-style ids
+ * are 36 chars and break the table layout — first 8 chars are
+ * unique enough for the operator to spot grouping at a glance.
+ *
+ * Returns "—" when missing so cells stay aligned. The full id is
+ * still surfaced in the title attribute by the caller.
+ */
+export function formatExperimentIdShort(id: string | null | undefined): string {
+  if (!id) return '—'
+  return id.length > 8 ? id.slice(0, 8) : id
+}
