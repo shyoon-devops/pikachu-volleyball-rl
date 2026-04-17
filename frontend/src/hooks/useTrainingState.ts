@@ -107,6 +107,28 @@ export function useTrainingStateImpl(): TrainingState {
 
   const handleGameResult = useCallback((msg: WSMessage) => {
     const record = snakeToCamel<GameRecord>(msg.payload)
+    // R1 fallback (2026-04-18): WS `game:result` payloads ship without
+    // `timestamp` because BE enqueues a raw result dict in
+    // `LiveFrameCallback._on_step` (callbacks.py:304-316) — the field
+    // only gets populated when GameRecord is constructed for Mongo
+    // save (handlers.py:332-341 → schemas.py default_factory). The
+    // dispatcher then broadcasts the original `data` dict, NOT the
+    // saved record, so live FE rows arrive with `timestamp:undefined`
+    // and rendered "undefined" in the History column until refresh
+    // re-hydrated via REST. Falling back to `Date.now()` here is
+    // accurate within ~1s of the actual game-end (the WS push happens
+    // immediately after the engine reports the final score), which
+    // matches REST's `datetime.utcnow()` semantics close enough.
+    //
+    // [BE-WAITING] When BE adds `timestamp` to the enqueued result
+    // dict (e.g. `result["timestamp"] = datetime.utcnow().isoformat()`
+    // in callbacks.py before `_safe_enqueue`), the BE-authoritative
+    // value will overwrite this fallback on the next REST hydration.
+    // The shim is safe to keep across that fix — `record.timestamp ??`
+    // uses BE value when present.
+    if (!record.timestamp) {
+      record.timestamp = new Date().toISOString()
+    }
     setRecentGames(prev => {
       const next = [record, ...prev]
       return next.length > MAX_RECENT_GAMES ? next.slice(0, MAX_RECENT_GAMES) : next
