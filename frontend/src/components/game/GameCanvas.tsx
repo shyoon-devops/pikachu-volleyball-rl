@@ -14,6 +14,7 @@ import {
   computePowerHitTrail,
   type BallHistoryPoint,
 } from './powerHitTrail'
+import { computePunchEffect } from './punchEffect'
 import { inferPlayerFrame } from './playerFrame'
 import './GameCanvas.css'
 
@@ -590,12 +591,25 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
       // Maintain 3-slot ring buffer of server ball positions. Only the
       // last BALL_HISTORY_LEN entries are kept. The buffer feeds the
       // power-hit trail; see computePowerHitTrail() for how it's read.
-      const hist = ballHistoryRef.current
-      const pt: BallHistoryPoint = { x: gameState.ball.x, y: gameState.ball.y }
-      ballHistoryRef.current =
-        hist.length < BALL_HISTORY_LEN
-          ? [...hist, pt]
-          : [...hist.slice(hist.length - (BALL_HISTORY_LEN - 1)), pt]
+      //
+      // Reset on a round boundary (isRoundOver rising edge from BE's
+      // 211-frame gameEnd window — pikavolley.js frameTotal.gameEnd) so
+      // the first power hit of the next serve doesn't read stale
+      // prev/prevPrev positions from the last rally's final frames.
+      // Without this, the trail briefly renders from wherever the ball
+      // landed back to the new serve point — a visible warp artifact.
+      if (gameState.isRoundOver) {
+        ballHistoryRef.current = [
+          { x: gameState.ball.x, y: gameState.ball.y },
+        ]
+      } else {
+        const hist = ballHistoryRef.current
+        const pt: BallHistoryPoint = { x: gameState.ball.x, y: gameState.ball.y }
+        ballHistoryRef.current =
+          hist.length < BALL_HISTORY_LEN
+            ? [...hist, pt]
+            : [...hist.slice(hist.length - (BALL_HISTORY_LEN - 1)), pt]
+      }
     }
   }, [gameState])
 
@@ -663,20 +677,14 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
     sprites.ball.gotoAndStop(Math.min(ballFrame, sprites.ball.totalFrames - 1))
     sprites.shadowBall.x = state.ball.x
 
-    // ── Punch ring (view.js:501-511) ──
-    // BE decrements punchEffectRadius by 2/frame; the FE just reads the
-    // authoritative value. Visible only while radius > 0. Width/height
-    // are 2×radius so the sprite's natural size is irrelevant to the
-    // on-screen ring size.
-    const punchRadius = state.ball.punchEffectRadius ?? 0
-    if (punchRadius > 0) {
-      sprites.punch.visible = true
-      sprites.punch.x = state.ball.punchEffectX ?? state.ball.x
-      sprites.punch.y = state.ball.punchEffectY ?? state.ball.y
-      sprites.punch.width = 2 * punchRadius
-      sprites.punch.height = 2 * punchRadius
-    } else {
-      sprites.punch.visible = false
+    // ── Punch ring (view.js:501-511 via computePunchEffect) ──
+    const punch = computePunchEffect(state.ball)
+    sprites.punch.visible = punch.visible
+    if (punch.visible) {
+      sprites.punch.x = punch.x
+      sprites.punch.y = punch.y
+      sprites.punch.width = punch.width
+      sprites.punch.height = punch.height
     }
 
     // ── Ball power-hit effects (authoritative: BE `is_power_hit`) ──
