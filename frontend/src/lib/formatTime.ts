@@ -20,7 +20,9 @@
 const KST_TIME_ZONE = 'Asia/Seoul'
 
 /**
- * Format an ISO-8601 timestamp (or a Date) as a KST date+time string.
+ * Format an ISO-8601 timestamp (or a Date) as a KST date+time string
+ * in the canonical `YYYY-MM-DD HH:mm:ss` shape.
+ *
  * Returns the input string unchanged when it can't be parsed — keeps
  * older / corrupted records from blanking the whole row.
  *
@@ -28,18 +30,20 @@ const KST_TIME_ZONE = 'Asia/Seoul'
  * `datetime.utcnow()` as `"2026-04-17T17:32:22"` — no `Z`, no offset.
  * JavaScript's `new Date(s)` interprets such bare strings as LOCAL
  * time, so the subsequent KST conversion ran from a wrong base and
- * produced wall-clock-shifted output (the "looks like UTC" symptom
- * the user reported). We preprocess by appending `Z` when the input
- * matches the bare-ISO shape, forcing the parser to treat it as UTC
- * before converting to KST.
+ * produced wall-clock-shifted output. We preprocess by appending `Z`
+ * when the input matches the bare-ISO shape (`coerceNaiveIsoToUtc`).
  *
- * BE may still emit a string with explicit `Z` or a `±HH:MM` offset
- * (e.g. timeseries timestamps); those bypass the patch.
- *
- * Output shape (matches the historic `toLocaleString` output users
- * expect): `2026. 04. 18. 10:00:00` style via the `ko-KR` locale.
- * We pin the locale too because the user runs Korean dashboards;
- * otherwise CI-rendered snapshots diverge from the deployed UI.
+ * Output shape (R2 fix, 2026-04-18): direct ISO `YYYY-MM-DD HH:mm:ss`
+ * built from `Intl.DateTimeFormat.formatToParts`. The previous
+ * `format()` route on `'ko-KR'` returned `" 2026. 04. 18. 02:32:22"`
+ * — a LEADING SPACE (charcode 0x20) followed by dot-separated dates.
+ * The hidden whitespace is what the user perceived as a "gray first
+ * character" — it shifted the visible "2" rightward inside the table
+ * cell while taking color from the background. Building the string
+ * manually from parts gives us total control: no leading whitespace,
+ * uniform separators, and the same character class (digits + `-` /
+ * `:` / single space) end-to-end so the rendered text is one solid
+ * color block.
  */
 export function formatKstDateTime(value: string | number | Date): string {
   const date =
@@ -49,7 +53,7 @@ export function formatKstDateTime(value: string | number | Date): string {
   if (Number.isNaN(date.getTime())) {
     return typeof value === 'string' ? value : String(value)
   }
-  return new Intl.DateTimeFormat('ko-KR', {
+  const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: KST_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
@@ -58,7 +62,19 @@ export function formatKstDateTime(value: string | number | Date): string {
     minute: '2-digit',
     second: '2-digit',
     hour12: false,
-  }).format(date)
+  }).formatToParts(date)
+
+  // Pull each part by `.type` so format-string drift on platforms
+  // (some Node versions reorder literals) can't shift the assembly.
+  // `en-CA` is the cleanest 24-hour locale that Intl gives us — it
+  // reliably emits 2-digit components without locale punctuation.
+  const get = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find(p => p.type === type)?.value ?? ''
+
+  // Manual `00` fallback only kicks in if a platform omits `hour` at
+  // midnight (rare bug). Keeps the shape consistent.
+  const hh = (get('hour') || '00') === '24' ? '00' : (get('hour') || '00')
+  return `${get('year')}-${get('month')}-${get('day')} ${hh}:${get('minute')}:${get('second')}`
 }
 
 /**
