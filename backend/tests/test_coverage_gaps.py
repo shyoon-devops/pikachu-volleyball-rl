@@ -191,6 +191,7 @@ class TestSerializeState:
             "slow_motion_frames_left",
             "fade_black_alpha",
             "ready_message_visible",
+            "tick_rate",
         }
 
     def test_serialize_state_sounds_has_five_keys(self) -> None:

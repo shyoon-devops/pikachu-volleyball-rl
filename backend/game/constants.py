@@ -49,4 +49,12 @@ BALL_MIN_REFLECT_VY_ABS: int = 15
 
 # Game rules
 MAX_SCORE: int = 15
-FPS: int = 30
+# Canonical engine tick rate. One ``PikachuVolleyball.step()`` call advances
+# the physics by exactly one game frame; this constant declares how many of
+# those frames make up one real-time second so consumers (FE replay player,
+# WS frame emitter, dashboard interpolator) can convert tick counts to
+# milliseconds correctly. Matches pikavolley.js:53 ``this.normalFPS = 25``.
+# Pre-2026-04-18 this was 30 — that 17% mismatch made dive/jump/lying-down
+# durations and the slow-motion window all play back faster than the
+# original.
+FPS: int = 25

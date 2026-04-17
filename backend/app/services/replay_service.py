@@ -93,6 +93,10 @@ _FRAME_DEFAULTS = {
     "slow_motion_frames_left": 0,
     "fade_black_alpha": 0.0,
     "ready_message_visible": False,
+    # Pre-FPS-fix replays were emitted at 30fps. Back-fill matches the
+    # constant the FE used to hard-code so old replays scrub at the
+    # rate they were originally recorded at.
+    "tick_rate": 30,
 }
 # Per-frame SFX triggers added by the be-sfx port. Legacy replays predate
 # all five flags; back-fill False so FE readers never KeyError.
