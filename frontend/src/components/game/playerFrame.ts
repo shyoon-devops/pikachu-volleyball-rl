@@ -1,46 +1,64 @@
 import type { PlayerState } from '../../lib/types'
 
 /**
- * Map a player's current state to an index into the pikachu sprite
- * sheet's 28-frame texture array. Pure so the fallback logic stays
- * testable without a PixiJS stage.
+ * Map a player's engine state to an index into the 28-frame pikachu
+ * texture array. 1:1 port of
+ * `view.js::getFrameNumberForPlayerAnimatedSprite` (lines 948-966):
  *
- * Original reference: `physics.js` and `view.js::getFrameNumberForPlayerAnimatedSprite`.
- * The sheet packs states sequentially:
+ *   state < 4   → 5 * state + frameNumber   (0..14)
+ *   state === 4 → 17 + frameNumber          (17)
+ *   state > 4   → 18 + 5 * (state - 5) + frameNumber  (18..27)
  *
- *   idle       (state 0, 5 frames) → indices 0..4
- *   jumping    (state 1, 5 frames) → indices 5..9
- *   power-hit  (state 2, 5 frames) → indices 10..14
- *   diving     (state 3, 2 frames) → indices 15..16
- *   lying      (state 4, 1 frame)  → index 17
- *   win/lose   (state 5..6)        → not emitted by the RL engine
+ * Sheet layout (matching `makePlayerAnimatedSprites`):
+ *   0 idle        (5 frames)  → 0..4
+ *   1 jumping     (5 frames)  → 5..9
+ *   2 power-hit   (5 frames)  → 10..14
+ *   3 diving      (2 frames)  → 15..16
+ *   4 lying       (1 frame)   → 17
+ *   5 winning     (5 frames)  → 18..22
+ *   6 losing      (5 frames)  → 23..27
+ */
+export function frameForState(state: number, frameNumber: number): number {
+  if (state < 4) {
+    return 5 * state + frameNumber
+  }
+  if (state === 4) {
+    return 17 + frameNumber
+  }
+  return 18 + 5 * (state - 5) + frameNumber
+}
+
+/**
+ * Resolve the sprite index for a player.
  *
- * BE sends `is_jumping`, `is_diving`, `is_power_hitting` flags but no
- * explicit `state` / `frameNumber` fields, so we derive the state from
- * the flags in original-game priority order (power_hit > dive > jump >
- * idle) — matching how physics.js prioritizes transitions within a
- * single tick. `frameCounter` is the FE's own incrementing counter so
- * the animation plays forward deterministically regardless of WS
- * arrival cadence.
+ * Preferred path: the ported engine emits authoritative `state` + `frameNumber`
+ * on every WS frame, so we delegate to `frameForState`. The physics port
+ * advances `frame_number` deterministically based on
+ * `delay_before_next_frame` (physics.js:2xx), giving a faithful
+ * reproduction of the original animation cadence.
  *
- * Why diving checks the flag first and not `vy !== 0`: a diving player
- * has upward velocity (`yVelocity = -5` per physics.js:598) so the
- * old velocity-only heuristic mapped dives to the jump frames, and
- * the dive pose never rendered. Reading `is_diving` directly fixes
- * that silent miss.
+ * Fallback path: pre-port replays and any transport that strips these
+ * fields (older mock frames, truncated payloads) land here. We derive
+ * state from the boolean flags in the same priority order physics.js
+ * uses when resolving transitions within a single tick:
+ * power_hit > dive > jump > idle. The FE-local `frameCounter` drives
+ * the cycle, so the animation still plays — it just won't share the
+ * engine's exact delay schedule. Losing half a frame of timing is
+ * acceptable here; flags-only inputs are intentionally a degraded
+ * mode, not parity.
  */
 export function inferPlayerFrame(p: PlayerState, frameCounter: number): number {
+  if (typeof p.state === 'number' && typeof p.frameNumber === 'number') {
+    return frameForState(p.state, p.frameNumber)
+  }
   if (p.isPowerHitting) {
-    return 10 + (frameCounter % 5)
+    return frameForState(2, frameCounter % 5)
   }
   if (p.isDiving) {
-    return 15 + (frameCounter % 2)
+    return frameForState(3, frameCounter % 2)
   }
   if (p.isJumping || p.vy !== 0) {
-    return 5 + (frameCounter % 5)
+    return frameForState(1, frameCounter % 5)
   }
-  // Idle / walk both use state=0; BE sets vx to walk direction but the
-  // sheet reuses idle frames for the 5-frame loop (view.js does the
-  // same — there's no separate walk sheet).
-  return frameCounter % 5
+  return frameForState(0, frameCounter % 5)
 }

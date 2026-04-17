@@ -66,9 +66,12 @@ class TestEngineDiving:
     def test_diving_landing_sets_lying_down(self) -> None:
         game = PikachuVolleyball()
         game.reset()
-        # Force player1 into diving state at ground level
-        game._state.player1.is_diving = True
-        game._state.player1.is_jumping = False
+        # Force player1 into diving state at ground level. state=3 is
+        # "diving" per the port; sync_derived_flags propagates to
+        # is_diving/is_jumping compat views.
+        game._state.player1.state = 3
+        game._state.player1.diving_direction = 0
+        game._state.player1.sync_derived_flags()
         game._state.player1.y = PLAYER_GROUND_Y - 5
         game._state.player1.vy = 10  # will reach ground
 
@@ -166,9 +169,10 @@ class TestSerializeState:
             ball=BallState(x=0, y=0),
         )
         result = _serialize_state(state)
-        # `is_round_over` + `post_score_freeze_frames` were added so the FE
-        # replay viewer can render a scoring freeze overlay on the grounded
-        # frames emitted by the new post-score hold.
+        # `is_round_over` + `is_game_ended` + `game_end_frame_counter` drive
+        # the FE scoring / winner-pose overlays. The pre-view-port field
+        # `post_score_freeze_frames` was dropped; replay_service back-fills
+        # it for legacy replays so old replay files still decode on the FE.
         assert set(result.keys()) == {
             "player1",
             "player2",
@@ -177,8 +181,70 @@ class TestSerializeState:
             "score2",
             "frame",
             "is_round_over",
-            "post_score_freeze_frames",
+            "is_game_ended",
+            "game_end_frame_counter",
+            "sounds",
         }
+
+    def test_serialize_state_sounds_has_five_keys(self) -> None:
+        # Schema contract: `sounds` holds the 5 physics-layer flags.
+        # `pi` / `pikachu` are menu sounds and intentionally NOT emitted.
+        state = GameState(
+            player1=PlayerState(x=0, y=0),
+            player2=PlayerState(x=0, y=0),
+            ball=BallState(x=0, y=0),
+        )
+        result = _serialize_state(state)
+        assert set(result["sounds"].keys()) == {
+            "pika",
+            "chu",
+            "pipikachu",
+            "power_hit",
+            "ball_touches_ground",
+        }
+        assert all(v is False for v in result["sounds"].values())
+
+    def test_serialize_state_sounds_or_across_players(self) -> None:
+        # Player-side flags are OR'd so a single True from either player
+        # bubbles up. Ball-side flags come directly from the ball.
+        state = GameState(
+            player1=PlayerState(x=0, y=0, sound_chu=True),
+            player2=PlayerState(x=0, y=0, sound_pika=True, sound_pipikachu=True),
+            ball=BallState(
+                x=0, y=0, sound_power_hit=True, sound_ball_touches_ground=True
+            ),
+        )
+        result = _serialize_state(state)
+        assert result["sounds"] == {
+            "pika": True,
+            "chu": True,
+            "pipikachu": True,
+            "power_hit": True,
+            "ball_touches_ground": True,
+        }
+
+    def test_serialize_state_emits_diving_direction(self) -> None:
+        # Port check: physics.js Player.divingDirection (0xB4, init 0) must
+        # round-trip through the WS/replay frame. FE uses this to flip the
+        # dive sprite left/right instead of guessing from vx sign.
+        state = GameState(
+            player1=PlayerState(x=100, y=200, is_diving=True, diving_direction=-1),
+            player2=PlayerState(x=300, y=200, is_diving=True, diving_direction=1),
+            ball=BallState(x=200, y=150),
+        )
+        result = _serialize_state(state)
+        assert result["player1"]["diving_direction"] == -1
+        assert result["player2"]["diving_direction"] == 1
+
+    def test_serialize_state_diving_direction_defaults_zero(self) -> None:
+        state = GameState(
+            player1=PlayerState(x=0, y=0),
+            player2=PlayerState(x=0, y=0),
+            ball=BallState(x=0, y=0),
+        )
+        result = _serialize_state(state)
+        assert result["player1"]["diving_direction"] == 0
+        assert result["player2"]["diving_direction"] == 0
 
 
 class TestCheckpointCallback:

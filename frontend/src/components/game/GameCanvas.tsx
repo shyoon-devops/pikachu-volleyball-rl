@@ -15,7 +15,17 @@ import {
   computePowerHitTrail,
   type BallHistoryPoint,
 } from './powerHitTrail'
+import { computePunchEffect } from './punchEffect'
+import { computeGameEndOverlay } from './gameEndOverlay'
 import { inferPlayerFrame } from './playerFrame'
+import {
+  Cloud,
+  Wave,
+  cloudAndWaveEngine,
+  NUM_OF_CLOUDS,
+} from './cloudAndWave'
+import { resolveAudioTriggers } from './audioTriggers'
+import { getPikaAudio } from '../../lib/pikaAudio'
 import './GameCanvas.css'
 
 // Pixel-art rendering: force NEAREST filter globally so texture atlas tiles do
@@ -35,7 +45,16 @@ const PLAYER_HALF = 32
 const BALL_RADIUS = 20
 const PLAYER_GROUND_Y = 244
 const SHADOW_Y = 273
-const NUM_CLOUDS = 10
+// Net pillar x-anchor in the original engine (view.js:785, 789).
+// Distinct from NET_X (216) which is the collision-axis centre — the
+// sprite sits 3px to the left of that centre line.
+const NET_PILLAR_X = 213
+// Ball sprite textures: 6 frames total, ball_0..4 plus ball_hyper at
+// index 5. The engine's `fine_rotation` maxes at 50, which integer-
+// divides to rotation=5 — deliberately rendering the hyper-ball frame
+// (the "hyper ball glitch" described in physics.js:410-414). We clamp
+// to [0,5] but never modulo away index 5.
+const BALL_TEXTURE_COUNT = 6
 
 // How many server ball positions to keep for the power-hit trail.
 // Original engine renders ballHyper at ball.previousX/Y (t-1) and
@@ -69,6 +88,12 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
       isJumping: next.player1.isJumping ?? false,
       isDiving: next.player1.isDiving ?? false,
       isPowerHitting: next.player1.isPowerHitting ?? false,
+      // Engine-authoritative animation fields must survive interpolation
+      // unchanged — they are discrete indices, not positions. Taking
+      // `next` pins the sprite to the latest server tick.
+      state: next.player1.state,
+      frameNumber: next.player1.frameNumber,
+      divingDirection: next.player1.divingDirection,
     },
     player2: {
       x: lerp(prev.player2.x, next.player2.x, t),
@@ -78,6 +103,9 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
       isJumping: next.player2.isJumping ?? false,
       isDiving: next.player2.isDiving ?? false,
       isPowerHitting: next.player2.isPowerHitting ?? false,
+      state: next.player2.state,
+      frameNumber: next.player2.frameNumber,
+      divingDirection: next.player2.divingDirection,
     },
     ball: {
       x: lerp(prev.ball.x, next.ball.x, t),
@@ -95,10 +123,20 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
       previousY: next.ball.previousY,
       previousPreviousX: next.ball.previousPreviousX,
       previousPreviousY: next.ball.previousPreviousY,
+      // Punch-effect markers are per-frame authoritative (radius decays
+      // engine-side by 2/frame, view.js:502-511). Don't interpolate — the
+      // ring needs to anchor to the impact point and shrink on the
+      // engine's tick schedule.
+      punchEffectX: next.ball.punchEffectX,
+      punchEffectY: next.ball.punchEffectY,
+      punchEffectRadius: next.ball.punchEffectRadius,
     },
     score1: next.score1,
     score2: next.score2,
     frame: next.frame,
+    isRoundOver: next.isRoundOver,
+    isGameEnded: next.isGameEnded,
+    gameEndFrameCounter: next.gameEndFrameCounter,
   }
 }
 
@@ -121,6 +159,10 @@ function buildPlayerTextures(textures: Record<string, Texture>): Texture[] {
 }
 
 function buildBallTextures(textures: Record<string, Texture>): Texture[] {
+  // Index 5 is `ball_hyper.png` — rendered when `fine_rotation === 50`
+  // (the original "hyper ball" edge case, physics.js:410-414). Keep all
+  // 6 textures so the engine's rotation=5 path lights up faithfully
+  // instead of silently remapping to ball_0.
   return [
     textures['ball/ball_0.png'],
     textures['ball/ball_1.png'],
@@ -139,67 +181,9 @@ function buildNumberTextures(textures: Record<string, Texture>): Texture[] {
   return result
 }
 
-// ── Cloud model (ported from cloud_and_wave.js) ──
-interface CloudModel {
-  x: number
-  y: number
-  xVelocity: number
-  sizeTurn: number
-}
-
-function createCloud(): CloudModel {
-  return {
-    x: -68 + Math.floor(Math.random() * (COURT_WIDTH + 68)),
-    y: Math.floor(Math.random() * 152),
-    xVelocity: 1 + Math.floor(Math.random() * 2),
-    sizeTurn: Math.floor(Math.random() * 11),
-  }
-}
-
-function cloudSizeDiff(c: CloudModel): number {
-  return 5 - Math.abs(c.sizeTurn - 5)
-}
-
-function tickClouds(clouds: CloudModel[]): void {
-  for (const c of clouds) {
-    c.x += c.xVelocity
-    if (c.x > COURT_WIDTH) {
-      c.x = -68
-      c.y = Math.floor(Math.random() * 152)
-      c.xVelocity = 1 + Math.floor(Math.random() * 2)
-    }
-    c.sizeTurn = (c.sizeTurn + 1) % 11
-  }
-}
-
-// ── Wave model ──
-interface WaveModel {
-  verticalCoord: number
-  velocity: number
-  yCoords: number[]
-}
-
-function createWave(): WaveModel {
-  const yCoords: number[] = []
-  for (let i = 0; i < COURT_WIDTH / 16; i++) {
-    yCoords.push(314)
-  }
-  return { verticalCoord: 0, velocity: 2, yCoords }
-}
-
-function tickWave(w: WaveModel): void {
-  w.verticalCoord += w.velocity
-  if (w.verticalCoord > 32) {
-    w.verticalCoord = 32
-    w.velocity = -1
-  } else if (w.verticalCoord < 0 && w.velocity < 0) {
-    w.velocity = 2
-    w.verticalCoord = -Math.floor(Math.random() * 40)
-  }
-  for (let i = 0; i < COURT_WIDTH / 16; i++) {
-    w.yCoords[i] = 314 - w.verticalCoord + Math.floor(Math.random() * 3)
-  }
-}
+// Cloud/Wave models + engine live in ./cloudAndWave (1:1 port of the
+// original cloud_and_wave.js). GameCanvas just holds the instances and
+// forwards their state onto Pixi sprites each frame.
 
 // ── Scene objects ──
 interface SpriteObjects {
@@ -216,11 +200,20 @@ interface SpriteObjects {
   ball: AnimatedSprite
   ballHyper: Sprite
   ballTrail: Sprite
+  // Radial white "punch" ring drawn on the impact frame of a successful
+  // hit — anchored at the impact point, shrinking 2px/frame. Ported
+  // from view.js:502-511.
+  punch: Sprite
   shadowP1: Sprite
   shadowP2: Sprite
   shadowBall: Sprite
   scoreBoard1: Container
   scoreBoard2: Container
+  // "GAME END" overlay rendered during the 211-frame gameEnd window
+  // (view.js:377, 622-645). Sprite anchor stays at (0, 0) so the
+  // computeGameEndOverlay math — which derives a top-left position
+  // from the centre plus increments — lines up with view.js directly.
+  gameEndMessage: Sprite
 }
 
 function buildScoreBoard(
@@ -303,17 +296,19 @@ function buildSpriteScene(
     }
   }
 
-  // ── Net pillar ──
+  // ── Net pillar (1:1 from view.js:783-790) ──
+  //   top sprite at (NET_PILLAR_X, NET_TOP_Y) = (213, 176)
+  //   12 tiling pillar segments stepping 8px from y=184
   const netPillarTex = textures['objects/net_pillar.png']
   const netTopTex = textures['objects/net_pillar_top.png']
   if (netPillarTex && netTopTex) {
     const top = new Sprite(netTopTex)
-    top.x = 213
+    top.x = NET_PILLAR_X
     top.y = NET_TOP_Y
     bg.addChild(top)
     for (let j = 0; j < 12; j++) {
       const pillar = new Sprite(netPillarTex)
-      pillar.x = 213
+      pillar.x = NET_PILLAR_X
       pillar.y = 184 + j * 8
       bg.addChild(pillar)
     }
@@ -321,11 +316,11 @@ function buildSpriteScene(
 
   stage.addChild(bg)
 
-  // ── Clouds ──
+  // ── Clouds (view.js:904-915 makeCloudContainer) ──
   const cloudContainer = new Container()
   const cloudTex = textures['objects/cloud.png']
   if (cloudTex) {
-    for (let i = 0; i < NUM_CLOUDS; i++) {
+    for (let i = 0; i < NUM_OF_CLOUDS; i++) {
       const cloud = new Sprite(cloudTex)
       cloud.anchor.set(0, 0)
       cloudContainer.addChild(cloud)
@@ -396,7 +391,21 @@ function buildSpriteScene(
   ball.anchor.set(0.5)
   stage.addChild(ball)
 
-  // ── Score boards ──
+  // ── Punch ring (above ball, view.js:398) ──
+  // Added AFTER ball so the ring sits in front of it — matches
+  // `container.addChild(this.punch)` ordering after the ball in the
+  // original. Starts hidden; `drawSprites` toggles on punchEffectRadius.
+  const punchTex = textures['ball/ball_punch.png']
+  const punch = new Sprite(punchTex)
+  punch.anchor.set(0.5)
+  punch.visible = false
+  stage.addChild(punch)
+
+  // ── Score boards (view.js:363-366, 415-418) ──
+  // Each board has a tens + units AnimatedSprite pinned to the number
+  // atlas (number_0..9.png). `scoreBoard2.x` = 432 - 32 - 32 - 14 keeps
+  // the two-digit area 14px from the right-hand edge, matching the
+  // original UI chrome.
   const numberTextures = buildNumberTextures(textures)
   const scoreBoard1 = buildScoreBoard(numberTextures)
   scoreBoard1.x = 14
@@ -405,6 +414,15 @@ function buildSpriteScene(
   scoreBoard2.x = COURT_WIDTH - 32 - 32 - 14
   scoreBoard2.y = 10
   stage.addChild(scoreBoard1, scoreBoard2)
+
+  // ── "GAME END" overlay (view.js:377, 622-645) ──
+  // Added last so it sits on top of everything else. Hidden by default;
+  // drawSprites gates visibility on isGameEnded + gameEndFrameCounter.
+  const gameEndTex = textures['messages/common/game_end.png']
+  const gameEndMessage = new Sprite(gameEndTex)
+  gameEndMessage.anchor.set(0, 0)
+  gameEndMessage.visible = false
+  stage.addChild(gameEndMessage)
 
   return {
     bg,
@@ -417,11 +435,13 @@ function buildSpriteScene(
     ball,
     ballHyper,
     ballTrail,
+    punch,
     shadowP1,
     shadowP2,
     shadowBall,
     scoreBoard1,
     scoreBoard2,
+    gameEndMessage,
   }
 }
 
@@ -441,8 +461,8 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
   const lerpFactorRef = useRef(0)
   const animFrameRef = useRef(0)
   const frameCounterRef = useRef(0)
-  const cloudsRef = useRef<CloudModel[]>([])
-  const waveRef = useRef<WaveModel>(createWave())
+  const cloudsRef = useRef<Cloud[]>([])
+  const waveRef = useRef<Wave>(new Wave())
 
   useEffect(() => {
     const container = containerRef.current
@@ -500,13 +520,16 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
           // assignment is needed here. See designer report 2026-04-12
           // (RGB sky stripes) + docs/NOTICE-CANVAS-SKY-STRIPES.md.
           spritesRef.current = buildSpriteScene(textures, app.stage)
-          // Initialize clouds
-          const clouds: CloudModel[] = []
-          for (let i = 0; i < NUM_CLOUDS; i++) {
-            clouds.push(createCloud())
+          // Initialize 10 clouds + wave using the 1:1 port of
+          // cloud_and_wave.js. Each Cloud seeds itself with randomized
+          // x/y/velocity in its constructor; Wave starts at y=314
+          // (bottom of the court) and oscillates 0→32 vertically.
+          const clouds: Cloud[] = []
+          for (let i = 0; i < NUM_OF_CLOUDS; i++) {
+            clouds.push(new Cloud())
           }
           cloudsRef.current = clouds
-          waveRef.current = createWave()
+          waveRef.current = new Wave()
           return
         }
       } catch {
@@ -538,15 +561,41 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
       currentStateRef.current = gameState
       lerpFactorRef.current = 0
       frameCounterRef.current++
+
+      // ── SFX triggers (audio.js + pikavolley.js trigger points) ──
+      // BE resets `sounds.*` at the start of each engine tick and sets
+      // flags only on the triggering frame, so reading them straight
+      // from the server gameState fires exactly once per tick. Firing
+      // from this useEffect (rather than the 60fps rAF loop) is what
+      // guarantees no double-play. Audio singleton is muted by default
+      // — calls are cheap no-ops until the user unmutes.
+      const triggers = resolveAudioTriggers(gameState)
+      if (triggers.length > 0) {
+        const audio = getPikaAudio()
+        for (const t of triggers) audio.playSfx(t.name, t.pan)
+      }
       // Maintain 3-slot ring buffer of server ball positions. Only the
       // last BALL_HISTORY_LEN entries are kept. The buffer feeds the
       // power-hit trail; see computePowerHitTrail() for how it's read.
-      const hist = ballHistoryRef.current
-      const pt: BallHistoryPoint = { x: gameState.ball.x, y: gameState.ball.y }
-      ballHistoryRef.current =
-        hist.length < BALL_HISTORY_LEN
-          ? [...hist, pt]
-          : [...hist.slice(hist.length - (BALL_HISTORY_LEN - 1)), pt]
+      //
+      // Reset on a round boundary (isRoundOver rising edge from BE's
+      // 211-frame gameEnd window — pikavolley.js frameTotal.gameEnd) so
+      // the first power hit of the next serve doesn't read stale
+      // prev/prevPrev positions from the last rally's final frames.
+      // Without this, the trail briefly renders from wherever the ball
+      // landed back to the new serve point — a visible warp artifact.
+      if (gameState.isRoundOver) {
+        ballHistoryRef.current = [
+          { x: gameState.ball.x, y: gameState.ball.y },
+        ]
+      } else {
+        const hist = ballHistoryRef.current
+        const pt: BallHistoryPoint = { x: gameState.ball.x, y: gameState.ball.y }
+        ballHistoryRef.current =
+          hist.length < BALL_HISTORY_LEN
+            ? [...hist, pt]
+            : [...hist.slice(hist.length - (BALL_HISTORY_LEN - 1)), pt]
+      }
     }
   }, [gameState])
 
@@ -556,31 +605,35 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
 
     const fc = frameCounterRef.current
 
-    // ── Clouds & Waves (ambient, independent of game state) ──
+    // ── Clouds & Waves (view.js:552-573 drawCloudsAndWave) ──
+    // One engine tick advances both clouds and wave together, then we
+    // flush each to its Pixi sprite. Sprite positions use the cloud's
+    // size-compensated getters so width/height pulsing stays centered.
     const clouds = cloudsRef.current
-    if (clouds.length > 0) {
-      tickClouds(clouds)
-      for (let i = 0; i < clouds.length && i < sprites.cloudContainer.children.length; i++) {
-        const c = clouds[i]
-        const sd = cloudSizeDiff(c)
-        const sprite = sprites.cloudContainer.children[i]
-        sprite.x = c.x - sd
-        sprite.y = c.y - sd
-        sprite.width = 48 + 2 * sd
-        sprite.height = 24 + 2 * sd
-      }
-    }
-
     const wave = waveRef.current
-    tickWave(wave)
+    cloudAndWaveEngine(clouds, wave)
+    for (
+      let i = 0;
+      i < clouds.length && i < sprites.cloudContainer.children.length;
+      i++
+    ) {
+      const c = clouds[i]
+      const sprite = sprites.cloudContainer.children[i]
+      sprite.x = c.spriteTopLeftPointX
+      sprite.y = c.spriteTopLeftPointY
+      sprite.width = c.spriteWidth
+      sprite.height = c.spriteHeight
+    }
     for (let i = 0; i < sprites.waveContainer.children.length; i++) {
       sprites.waveContainer.children[i].y = wave.yCoords[i] ?? 314
     }
 
-    // ── Player 1 ──
+    // ── Player 1 (view.js:467-474) ──
+    //   scale.x flips for diving/lying states per `divingDirection`;
+    //   otherwise +1 (facing right, native sheet orientation).
     sprites.player1.x = state.player1.x
     sprites.player1.y = state.player1.y
-    sprites.player1.scale.x = 1
+    sprites.player1.scale.x = resolvePlayerScaleX(state.player1, 1)
     const p1Frame = inferPlayerFrame(state.player1, fc)
     sprites.player1.gotoAndStop(Math.min(p1Frame, sprites.player1.totalFrames - 1))
     sprites.shadowP1.x = state.player1.x
@@ -590,21 +643,37 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
     // not diving so idle/jump frames stay crisp.
     updateDiveAfterimage(sprites.afterimageP1, state.player1, p1Frame, 1)
 
-    // ── Player 2 ──
+    // ── Player 2 (view.js:476-483) ──
+    //   P2 mirrors horizontally by default (scale.x = -1). Dive flips
+    //   only when `divingDirection === 1` (dive toward own side).
     sprites.player2.x = state.player2.x
     sprites.player2.y = state.player2.y
-    sprites.player2.scale.x = -1
+    sprites.player2.scale.x = resolvePlayerScaleX(state.player2, -1)
     const p2Frame = inferPlayerFrame(state.player2, fc)
     sprites.player2.gotoAndStop(Math.min(p2Frame, sprites.player2.totalFrames - 1))
     sprites.shadowP2.x = state.player2.x
     updateDiveAfterimage(sprites.afterimageP2, state.player2, p2Frame, -1)
 
-    // ── Ball ──
+    // ── Ball (view.js:496-499) ──
+    // Full 0-5 rotation index. Clamp instead of modulo so rotation=5
+    // lights up ball_hyper (physics.js:410-414 "hyper ball glitch")
+    // instead of being aliased back to ball_0.
     sprites.ball.x = state.ball.x
     sprites.ball.y = state.ball.y
-    const ballFrame = Math.abs(Math.floor(state.ball.rotation ?? 0)) % 5
+    const rawRot = Math.floor(state.ball.rotation ?? 0)
+    const ballFrame = Math.max(0, Math.min(BALL_TEXTURE_COUNT - 1, rawRot))
     sprites.ball.gotoAndStop(Math.min(ballFrame, sprites.ball.totalFrames - 1))
     sprites.shadowBall.x = state.ball.x
+
+    // ── Punch ring (view.js:501-511 via computePunchEffect) ──
+    const punch = computePunchEffect(state.ball)
+    sprites.punch.visible = punch.visible
+    if (punch.visible) {
+      sprites.punch.x = punch.x
+      sprites.punch.y = punch.y
+      sprites.punch.width = punch.width
+      sprites.punch.height = punch.height
+    }
 
     // ── Ball power-hit effects (authoritative: BE `is_power_hit`) ──
     // Trail sprite positions come from the pure helper so the logic
@@ -625,6 +694,26 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
     // ── Score boards ──
     updateScoreBoard(sprites.scoreBoard1, state.score1)
     updateScoreBoard(sprites.scoreBoard2, state.score2)
+
+    // ── "GAME END" overlay (view.js:622-645 via computeGameEndOverlay) ──
+    // The sprite's natural size comes from the loaded texture — use
+    // that instead of the scaled `.width/.height` so the sizing math
+    // stays idempotent across frames (width assignment would otherwise
+    // compound each tick).
+    const gameEndTex = sprites.gameEndMessage.texture
+    const overlay = computeGameEndOverlay({
+      isGameEnded: state.isGameEnded ?? false,
+      frameCounter: state.gameEndFrameCounter ?? 0,
+      textureWidth: gameEndTex.width,
+      textureHeight: gameEndTex.height,
+    })
+    sprites.gameEndMessage.visible = overlay.visible
+    if (overlay.visible) {
+      sprites.gameEndMessage.x = overlay.x
+      sprites.gameEndMessage.y = overlay.y
+      sprites.gameEndMessage.width = overlay.width
+      sprites.gameEndMessage.height = overlay.height
+    }
   }, [])
 
   const drawGraphics = useCallback((state: GameState) => {
@@ -715,6 +804,41 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
 }
 
 // ── Helpers ──
+
+/**
+ * Port of view.js:467-483 scale.x branch.
+ *
+ * `defaultFacing` is +1 for P1 (native sprite orientation) and -1 for
+ * P2 (mirrored, since the sheet only stores right-facing poses).
+ *
+ * During a dive or lie (state 3 / 4), the sheet's single diving pose
+ * must be flipped to match which direction the player is diving. The
+ * ported engine emits `diving_direction` (-1 / 0 / +1) on every frame
+ * — snakeToCamel turns that into `divingDirection` on the WS payload.
+ * The original's two-branch rule (view.js:467-474 P1, 476-483 P2)
+ * collapses to `divingDirection * sign` when the field is signed,
+ * which matches what we get from BE now.
+ *
+ * When `divingDirection === 0` (no lateral input this tick — rare
+ * mid-dive but possible) or the field is absent (pre-port replay),
+ * fall through to `defaultFacing` so the sprite doesn't flip to an
+ * arbitrary side. The vx-sign fallback that lived here before BE
+ * emitted the field has been retired — the engine is now the single
+ * source of truth (per 2026-04-17 PM dev-deploy 2084a13d).
+ */
+function resolvePlayerScaleX(
+  p: { state?: number; isDiving: boolean; divingDirection?: number },
+  defaultFacing: 1 | -1,
+): number {
+  const inDiveLike = p.state === 3 || p.state === 4 || p.isDiving
+  if (!inDiveLike) return defaultFacing
+
+  const dir = p.divingDirection
+  if (dir === 1) return 1
+  if (dir === -1) return -1
+
+  return defaultFacing
+}
 
 /**
  * Motion-blur afterimage used for the dive/slide pose. Placed a few

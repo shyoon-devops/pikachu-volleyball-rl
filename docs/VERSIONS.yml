@@ -14,15 +14,38 @@
 #   last_verified_at   : when this YAML entry was last confirmed via curl + docker inspect
 
 schema_version: 1
-last_file_update: 2026-04-12T22:07:00+09:00   # FE Phase 2 + AI Engineer sky-stripe + BE Phase 2 redeploy (6f4a057f)
+last_file_update: 2026-04-12T23:55:00+09:00   # v0.2.5 post-deploy doc update + main advance
 authoritative_source: docs/VERSIONS.yml       # this file supersedes README + DEPLOYMENT-STATUS on port/version conflicts
 
 release_history:
+  - version: v0.2.5
+    tag_target: cd1e6a39                      # actual runtime source (match-end freeze P0 hotfix merged on top of Phase 2)
+    doc_head: 09a3f99d                        # dev HEAD with CHANGELOG/release note/README for v0.2.5 + post-merge cleanup
+    cut_at: 2026-04-12T22:45:00+09:00
+    deployed_envs: [dev, qa, prod]
+    superseded_by: null
+    supersedes: v0.2.4
+    scope: "Phase 2 bug bundle — gameplay FX (D11-D15, dive, punch ring, freeze-frame), bot L1-L5 upgrade, metrics chart hydration + /timeseries cap + sampling cadence label, legacy games backfill, sky RGB stripe (NEAREST filter), P0 match-end freeze tick, deploy-frontend auto-advance + docker log rotation"
+    bundle: assets/index-CFGidFNF.js
+    env_tags:
+      v0.2.5-dev: cd1e6a39
+      v0.2.5-qa: cd1e6a39
+      v0.2.5-prod: cd1e6a39
+    notes: >
+      3 env byte-identical bundle (index-CFGidFNF.js) deployed over 2 windows:
+      (1) Phase 2 FE+BE @ 22:03-22:05 → runtime 6f4a057f, (2) match-end freeze
+      P0 hotfix → runtime cd1e6a39. BE image rebuilt at ~23:20 (qa/prod) + ~23:40
+      (dev after PR #42 revert). 3 env health/live verified 23:55, uptimes
+      dev ~14min, qa ~35min, prod ~35min. main fast-forwarded from 018a2be1 to
+      cd1e6a39 — v0.2.5 tag reachable from main. PR #42 trainer attempt
+      (be4001eb) reverted in ffe1ae6a due to trainer.py:455 SyntaxError —
+      NOT in this release.
   - version: v0.2.4
     tag_target: dabd84a1                      # actual runtime source (built container image)
     doc_head: d4a89231                        # dev HEAD with CHANGELOG + release note expansion on top of dabd84a1
     cut_at: 2026-04-12T18:20:00+09:00
     deployed_envs: [dev, qa, prod]
+    superseded_by: v0.2.5
     scope: "4 CRITICAL (live-UI hydration, optimistic controls, BE stop/pause halt, rally-timeout safety valve) + hyper-ball power-hit visual + /timeseries endpoint + bot_level Option A single source + promote.sh backend restart fix"
     bundle: assets/index-DqBsWzf5.js
     env_tags:
@@ -72,127 +95,125 @@ environments:
     host_frontend: 192.168.0.248
     backend:
       port: 8001
-      status: up                              # FE Phase 2 + sky-stripe + BE Phase 2 redeploy (6f4a057f)
+      status: up                              # P0 hotfix — match-end freeze tick (cd1e6a39)
       health_endpoint: /api/health
       live_endpoint: /api/health/live
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
-      commit: 6f4a057f                        # runtime code HEAD (image built from this SHA)
-      image: sha256:f56c05eab731e8a524019a71764d5e07f80db1927eed2c3afcece5baf6521c95
-      built_at: 2026-04-12T22:05:35+09:00
-      deployed_at: 2026-04-12T22:05:35+09:00
+      commit: cd1e6a39                        # P0 hotfix runtime (e9f72459 engine fix merged)
+      image: sha256:d577fb9ab05cf013c6f43b4f64253210bf27b850d5da1177a78c9bd527ed9f16
+      built_at: 2026-04-12T22:42:29+09:00
+      deployed_at: 2026-04-12T22:42:29+09:00
       training_state: stopped
       runtime_verified:
-        - "punch_effect_radius (6 matches in engine.py — AI Phase 2)"
-        - "is_diving flag (engine.py:48, 350 — AI Phase 2)"
-        - "log_interval: int = 256 at callbacks.py:88 (BE perf hotfix)"
-        - "migrate-games-bot-level.py present"
-        - "/timeseries endpoint present (cap=10000)"
+        - "post_score_freeze_frames tick BEFORE match-over guard (engine.py:219-220)"
+        - "P0 regression fixed: game no longer wedges at 15pt match-winning point"
+        - "punch_effect_radius (6 matches), is_diving (engine.py:48, 350)"
+        - "log_interval: int = 256 at callbacks.py:88"
     frontend:
       port: 3000
       status: up
-      bundle: assets/index-CFGidFNF.js        # FE Phase 2 + AI sky-stripe (6f4a057f), byte-identical across 3 envs
-      commit: 6f4a057f                        # FE build source = runtime SHA
-      built_at: 2026-04-12T22:03:00+09:00
-      deployed_at: 2026-04-12T22:03:00+09:00
+      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; FE delta = 0 from 6f4a057f
+      commit: cd1e6a39                        # FE built on cd1e6a39 but produced byte-identical bundle
+      built_at: 2026-04-12T22:40:00+09:00
+      deployed_at: 2026-04-12T22:40:00+09:00
     mongodb:
       port: 27018
       status: UNKNOWN
     git_branch: dev
-    git_branch_head: 6f4a057f                 # dev = runtime (FE Phase 2 + AI sky-stripe + BE Phase 2)
-    tag_at_head: null                         # v0.2.4 annotated tag is on dabd84a1; runtime 6f4a057f (hotfix above tag)
-    env_tag: v0.2.4-dev                       # → dabd84a1 (tag unchanged; runtime advanced to 6f4a057f)
-    deploy_pending: false                     # all 3 envs in sync at 6f4a057f
+    git_branch_head: 09a3f99d                 # dev has 3 docs commits on top of cd1e6a39 runtime: v0.2.5 release docs + PR #42 revert (ffe1ae6a) + CHANGELOG cleanup (09a3f99d)
+    tag_at_head: null                         # v0.2.5 annotated tag is on cd1e6a39 (runtime); docs-only delta above
+    env_tag: v0.2.5-dev                       # → cd1e6a39 (matches runtime exactly)
+    deploy_pending: false                     # all 3 envs in sync at cd1e6a39
 
   qa:
     host_backend: 192.168.0.250
     host_frontend: 192.168.0.248
     backend:
       port: 8002
-      status: up                              # FE Phase 2 + sky-stripe + BE Phase 2 redeploy (6f4a057f)
+      status: up                              # P0 hotfix — match-end freeze tick (cd1e6a39)
       health_endpoint: /api/health
       live_endpoint: /api/health/live
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
-      commit: 6f4a057f
-      image: sha256:75c7a1d614a5f04b088d304da5fb84ec03e7670dd11fc9d00eb63ae6891f1ab4
-      built_at: 2026-04-12T22:05:47+09:00
-      deployed_at: 2026-04-12T22:05:47+09:00
+      commit: cd1e6a39
+      image: sha256:304a259dc121e657fab69bf961e824cc0f3ae893e6aa9373a956c42c00ad1312
+      built_at: 2026-04-12T22:42:29+09:00
+      deployed_at: 2026-04-12T22:42:29+09:00
       training_state: stopped
       runtime_verified:
-        - "built from 6f4a057f (cache-reuse across 3 envs)"
-        - "punch_effect_radius (6 matches), is_diving (engine.py:48, 350)"
-        - "log_interval: int = 256 at callbacks.py:88"
-        - "/api/training/status bot_level=1, state=stopped"
-        - "/api/training/timeseries returned 5 reward points"
-        - "/api/games returned 3 docs with bot_level/score/winner fields"
+        - "post_score_freeze_frames tick BEFORE match-over guard (engine.py:219-220)"
+        - "WS /ws training:start end-to-end smoke OK (state=running, metrics @256/512/768/1024)"
+        - "POST /api/training/stop cleanup OK (final step=10000, state=stopped)"
+        - "log_interval: int = 256 at callbacks.py:88 (confirmed by live metric stream)"
+        - "punch_effect_radius (6), is_diving (48, 350) still present"
     frontend:
       port: 3001
       status: up
-      bundle: assets/index-CFGidFNF.js        # byte-identical to dev + prod
-      commit: 6f4a057f
-      built_at: 2026-04-12T22:03:00+09:00
-      deployed_at: 2026-04-12T22:03:00+09:00
+      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; FE delta = 0 from 6f4a057f
+      commit: cd1e6a39                        # FE built on cd1e6a39 but produced byte-identical bundle
+      built_at: 2026-04-12T22:40:00+09:00
+      deployed_at: 2026-04-12T22:40:00+09:00
     mongodb:
       port: 27019
       status: UNKNOWN
     git_branch: qa
-    git_branch_head: 6f4a057f                 # auto-advanced by deploy-frontend.sh during 22:03 redeploy (was ccd1d9e7)
-    tag_at_head: null
-    env_tag: v0.2.4-qa                        # → dabd84a1 (tag unchanged; runtime advanced to 6f4a057f)
+    git_branch_head: cd1e6a39                 # P0 hotfix — auto-advanced by deploy-frontend.sh step [6/6] (was 6f4a057f)
+    tag_at_head: v0.2.5                       # v0.2.5 annotated tag is on cd1e6a39 = qa branch HEAD
+    env_tag: v0.2.5-qa                        # → cd1e6a39 (matches runtime)
     deploy_pending: false
     notes: >
-      2026-04-12 ~22:03 (FE) + ~22:05 (BE): FE Phase 2 + AI sky-stripe +
-      BE Phase 2 redeploy. qa branch auto-advanced ccd1d9e7 → 6f4a057f via
-      deploy-frontend.sh step [6/6]. Bundle byte-identical to dev + prod.
-      Smoke verified: /api/training/status, /timeseries (5 reward points),
-      /api/games (3 docs with bot_level/score/winner fields).
+      2026-04-12 ~22:42 (BE) + ~22:40 (FE): P0 hotfix redeploy — match-end
+      freeze tick fix (engine.py:219-220). qa branch auto-advanced
+      6f4a057f → cd1e6a39 via deploy-frontend.sh step [6/6]. Bundle
+      byte-identical across dev/qa/prod (BE-only change). Smoke verified:
+      WS /ws training:start end-to-end (metrics @ 256/512/768/1024,
+      clean stop at step=10000). REST mutation paths all 200 OK.
 
   prod:
     host_backend: 192.168.0.250
     host_frontend: 192.168.0.248
     backend:
       port: 8003
-      status: up
+      status: up                              # P0 hotfix — match-end freeze tick (cd1e6a39)
       health_endpoint: /api/health
       live_endpoint: /api/health/live         # v0.2.4 runtime has BE-3 split
       ready_endpoint: /api/health/ready
       openapi_version_field: "0.2.4"
-      commit: 6f4a057f
-      image: sha256:f7ead25e82807e44e8e7ba21924e8d1a428e2ca0bb2e4518fc639cbce70a63d5
-      built_at: 2026-04-12T22:05:52+09:00
-      deployed_at: 2026-04-12T22:05:52+09:00
+      commit: cd1e6a39                        # P0 hotfix runtime (e9f72459 engine fix merged)
+      image: sha256:10e7b3b315e7037f39a08066c999674677b118db0e6a67d13e340a69822bbc84
+      built_at: 2026-04-12T22:42:31+09:00
+      deployed_at: 2026-04-12T22:42:31+09:00
       training_state: stopped
       runtime_verified:
-        - "Designer D11-D15 + FE Phase 2 (dive sprite, power-hit trail, metrics hydration, bot fallback)"
-        - "AI Engineer sky-stripe fix (NEAREST filter + antialias:false + roundPixels:true)"
-        - "BE Phase 2 (punch_effect_radius, is_diving, bot L1-L5 upgrade, freeze-frame)"
-        - "punch_effect_radius (6 matches in engine.py), is_diving (engine.py:48, 350)"
+        - "post_score_freeze_frames tick BEFORE match-over guard (engine.py:219-220)"
+        - "P0 regression fixed: game no longer wedges at 15pt match-winning point"
+        - "punch_effect_radius (6 matches), is_diving (engine.py:48, 350)"
         - "log_interval: int = 256 at callbacks.py:88"
-        - "built from same 6f4a057f SHA as dev/qa (cache-reuse)"
+        - "built from same cd1e6a39 SHA as dev/qa (cache-reuse)"
     frontend:
       port: 3002
       status: up
-      bundle: assets/index-CFGidFNF.js        # FE Phase 2 + AI sky-stripe (6f4a057f), byte-identical across 3 envs
-      commit: 6f4a057f                        # FE build source = runtime SHA
-      built_at: 2026-04-12T22:03:00+09:00
-      deployed_at: 2026-04-12T22:03:00+09:00
+      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; byte-identical across 3 envs
+      commit: cd1e6a39                        # FE built on cd1e6a39 but produced byte-identical bundle
+      built_at: 2026-04-12T22:40:00+09:00
+      deployed_at: 2026-04-12T22:40:00+09:00
     mongodb:
       port: 27020
       status: UNKNOWN
     git_branch: prod
-    git_branch_head: 6f4a057f                 # auto-advanced by deploy-frontend.sh during 22:03 redeploy (was ccd1d9e7)
-    tag_at_head: null                         # v0.2.4 annotated tag is on dabd84a1 (runtime now 6f4a057f — hotfix above tag)
-    env_tag: v0.2.4-prod                      # → dabd84a1 (tag unchanged; runtime advanced to 6f4a057f)
+    git_branch_head: cd1e6a39                 # P0 hotfix — auto-advanced by deploy-frontend.sh (was 6f4a057f)
+    tag_at_head: v0.2.5                       # v0.2.5 annotated tag is on cd1e6a39 = prod branch HEAD
+    env_tag: v0.2.5-prod                      # → cd1e6a39 (matches runtime)
     deploy_pending: false
-    prod_branch_advance_pending: false        # DONE 2026-04-12 (18:30, 21:36, 22:03)
+    prod_branch_advance_pending: false        # DONE — main also advanced to cd1e6a39 (2026-04-12 ~23:55)
     notes: >
-      2026-04-12 ~22:03 (FE) + ~22:05 (BE): FE Phase 2 + AI sky-stripe +
-      BE Phase 2 redeploy. prod branch auto-advanced ccd1d9e7 → 6f4a057f.
-      Runtime carries Designer D11-D15, AI Engineer sky-stripe fix, FE
-      Phase 2 (dive sprite, power-hit trail, metrics hydration), BE Phase 2
-      (punch_effect_radius, is_diving, bot L1-L5 upgrade). main branch
-      advance to 6f4a057f pending.
+      2026-04-12 ~22:42 (BE) + ~22:40 (FE): P0 hotfix redeploy — match-end
+      freeze tick fix (engine.py:219-220). prod branch auto-advanced
+      6f4a057f → cd1e6a39. Runtime carries P0 fix (e9f72459) on top of
+      full v0.2.4 + FE Phase 2 + AI sky-stripe + BE Phase 2 stack.
+      Bundle byte-identical to dev/qa (BE-only change). main branch
+      advance to cd1e6a39 completed by PM ~23:55.
 
 # =========================================================================
 # DevOps update protocol:

@@ -7,7 +7,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-v0.2.4 이후 scope. Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) + Evaluator PR #44 (E1-E10 baseline comparator / batch eval / history / timeseries / Elo tracker) 후속 릴리스 후보.
+v0.2.5 이후 scope — PR #44 evaluator 번들만 dev 에 머지 완료 (v0.2.6 candidate). 배포 전 smoke test + 회귀 스위트 GREEN 확인 필요.
+
+PR #42 trainer (`be4001eb`) 는 머지 직후 `backend/rl/trainer.py:455` 에 `SyntaxError: unmatched ')'` 가 드러나 dev backend 컨테이너를 crash 시켜 **revert 완료** (`ffe1ae6a`, 2026-04-12). 이 릴리스에서는 trainer 관련 신규 기능은 **전부 제외**.
+
+### Added — Evaluator system E1-E10 (PR #44, merge `f9ffdd2d`)
+
+- **`backend/rl/elo.py`** — EloRatingSystem (L1=1200/L3=1500/L5=1800 seed, k-factor=32, leaderboard + to_dict)
+- **`backend/rl/baseline_comparator.py`** — prod-vs-candidate per-level deltas (IMPROVED/REGRESSED/NEUTRAL with deadbands) + regression 교차 검증
+- **`backend/rl/batch_evaluate.py`** — `python -m backend.rl.batch_evaluate models/ --levels 1 3 5` ProcessPoolExecutor 병렬 실행 + BatchFailure 기록
+- **`backend/rl/best_model_selector.py`** — verdict-tier ranking (PASS > CONDITIONAL > FAIL > CRITICAL) + regression_report veto
+- **`backend/rl/comparison_chart.py`** — matplotlib 2×2 비교 그리드 + single-level progression (PNG, markdown 삽입용)
+- **`backend/rl/report_generator.py`** — self-contained markdown 리포트 (verdict + charts + Elo leaderboard + threshold appendix)
+- **`backend/app/api/evaluations.py`** — POST/GET `/evaluations`, GET `/evaluations/{id}`, GET `/evaluations/checkpoints`
+- **`backend/app/services/evaluation_repository.py`** — Motor protocol-backed, tests 에서 `FakeCollection` 대체
+- **`backend/app/services/evaluation_timeseries.py`** — `/evaluations/timeseries` — (model_path, bot_level) 별 training_step + checkpoint_label 포함
+- **`backend/app/services/elo_tracker.py`** — asyncio 백그라운드 tick, timestamp cursor 로 재시작 dedup
+- **`EvalResult.dominance_score`** — win_rate(60%) + point_share(40%) 합성 메트릭
+
+### Reverted — PR #42 trainer (do-not-retry)
+
+- `ffe1ae6a revert: be4001eb PR #42 — trainer.py syntax error broke dev BE` — 원인: 3-way auto-merge 는 깨끗했으나 결과 파일이 `trainer.py:455` 에서 bracket mismatch. dev backend 컨테이너 unhealthy. qa/prod 는 이전 SHA 였기 때문에 영향 없음. **PM 결정: trainer 브랜치 이후 재머지 시도 금지**
+
+### Notes
+
+- v0.2.5 태그(`cd1e6a39`) 보다 후행 커밋(PR #44 evaluator). v0.2.5 범위에 포함되지 않음 — **v0.2.6 릴리스 후보**
+
+## [0.2.5] - 2026-04-12 (Phase 2 bug bundle — gameplay feel + metrics fidelity + match-end freeze / dev HEAD cd1e6a39)
+
+v0.2.4 배포 이후 Phase 2 재작업 번들. 핵심 축 4개: (1) 게임 감각 개선(강타 링/다이브 잔상/freeze-frame), (2) 봇 난이도 상향(L5 역전 이슈 해소), (3) 메트릭 차트 충실도(/timeseries hydration + cap 확장 + 'N pts · M steps' 라벨), (4) P0 match-end freeze tick 핫픽스(`cd1e6a39`). 2 배포 창(22:03 FE + 22:05 BE → runtime `6f4a057f`, 그리고 match-end freeze merge → `cd1e6a39`) 를 하나의 태그 번들로 닫음.
+
+### Fixed — Game engine / match end
+
+- **15점 match-end freeze tick** (`e9f72459`, merge `cd1e6a39`): 매치 최종 점수가 올라간 직후 freeze 타이머가 tick 되지 않아 마지막 포인트 장면이 무한 고착 → 다음 매치 진행 불가. `_tick_post_score_freeze` 가 match-winning point 에도 불리도록 교정
+- **Score hold grounded-ball frame** (`6ff911d9`): 득점 후 공이 지면에 닿은 프레임이 즉시 사라져 마지막 포인트 시각 피드백 상실. 득점 시 grounded frame 을 짧게 홀드하여 원본 가독성 회복
+- **`last_frame` seed on training start** (`ca4cb608`): 훈련 시작 직후 `/api/training/current_frame` 이 `None` 을 반환해 404 가 나던 문제. 시작 지점에서 첫 frame 을 즉시 시드
+
+### Fixed — Metrics chart / data fidelity
+
+- **Chart hydration from `/timeseries` on mount** (`917c53cc`): 새로고침 시 차트가 비었던 문제. mount 에서 `/api/training/timeseries` 로 전체 포인트 seed → WS incremental 로 자연스러운 이어붙이기
+- **`log_interval` 100 → 256 + `/timeseries` cap 1000 → 10000** (`856f689e`): 장기 실행 시 포인트 누락 방지 + 과샘플링 완화로 차트 해상도 실질 개선
+- **Sampling cadence label "N pts · M steps"** (`2ed23c94`): 사용자가 차트가 보여주는 샘플 밀도를 한눈에 파악하도록 노출
+- **WS dead-letter routing for missing `bot_level`/`experiment_id`** (`05ffd073`): 필드 누락 시 silent L1 fallback 이 L1 데이터로 보이게 만들던 문제. 이제 dead-letter 로 분리 → 데이터 품질 투명화
+
+### Fixed — FE UX polish
+
+- **Recent Games bot level fallback** (`b9819d5a`): 레거시 문서에 `bot_level` 가 없어 배지가 빈 "L" 로만 보이던 문제. 누락 시 fallback 렌더 — 빈 라벨 제거
+- **Legacy games backfill migration** (`2e6bf373` + purge mode `116dd6ae`): 과거 문서에 `bot_level` / `experiment_id` 재주입 + 회복 불가 케이스에 대한 `--mode=purge-pre-fix` Option B 제공
+- **Sky RGB stripe regression** (`ff24cc9a` / `f6e73e86`): PixiJS 필터/샘플링 이슈로 스카이 그라디언트가 RGB 줄무늬로 깨지던 현상. `NEAREST` 필터 + `antialias:false` + `roundPixels:true` 조합으로 픽셀 완전성 회복
+- **Build: exclude `*.test.{ts,tsx}` from `tsconfig.app.json`** (`630b66c5`): 프로덕션 번들에 테스트 타입이 끌려오지 않도록 tsconfig 분리
+
+### Added — Visual FX + Designer D11-D15
+
+- **Dive sprite + motion-blur afterimage (D11)** (`a8cd7c59`): `is_diving` 상태에서 다이브 스프라이트 + 잔상 렌더 — 원본의 역동성 복구
+- **Punch ring (D12) + power-hit trail overlay (D13)** (`34137663`): 지면/강타 타격점에 흰색 링, 강타 시 authoritative trail 렌더
+- **Recent Games bot level badges (D14)** (`bad997f1`): L1-L5 난이도 램프를 배지 색으로 시각화
+- **Score freeze-frame scoreboard flash (D15)** (`5f0b0cd7`): 득점 시 점수판이 freeze-frame 동안 플래시 — 관전 흐름 강조
+- **`ball.punchEffect{X,Y,Radius}` types** (`743dc8ae`): bottom-hit ring 의 optional payload 타입 노출
+- **`punch_effect_radius` emit on WS** (`982e3a80`): ground/power-hit 흰 링을 클라이언트 인퍼런스 없이 서버 권위로 전송
+
+### Changed — Bot difficulty
+
+- **L1-L5 난이도 상향 + aggression/net-bias 추가** (`d2436993`): 사용자 리포트 "L5 상대로 역전 가능" 이슈 해소. `aggression` + `net_bias` 로 네트 압박 + 반응 속도 두 축을 올림. L5 는 인간-사용자 승률 목표 <10% 로 재튜닝
+
+### Changed — Deploy / ops
+
+- **`scripts/deploy-frontend.sh` auto-advances `github/<env>` ref** (`6f96d7fd`): 배포 시 브랜치 head 가 자동으로 runtime SHA 로 정렬 — 지난 deploy window 에서 발견된 "branch lags runtime" 드리프트 재발 방지
+- **`docker-compose` json-file log rotation + Round-2 disk cleanup** (`63bc1ca1`): dev/qa docker log 가 다시 GB 단위로 불어나던 현상 방지. 추가 ~disk 정리
+- **Incident postmortem `20260412-dev-backend-stale` published** (`018a2be1`): v0.2.3 당시 promote.sh 백엔드 재기동 누락 인시던트 공식 기록화
+
+### Deployment
+
+- **3 환경(dev/qa/prod) 에 동일 bundle `index-CFGidFNF.js` 배포 완료** — 2 배포 창(22:03 FE + 22:05 BE) 으로 runtime 이 `6f4a057f` 에 도달. 이후 match-end freeze P0 hotfix (`e9f72459` merge `cd1e6a39`) 재배포 진행
+- **env tag `v0.2.5-{dev,qa,prod}`** — DevOps 재배포 완료 후 최종 runtime SHA 에 부착
+- **main advance** — prod → main 머지하여 `v0.2.5` tag main reachable 필수
+
+### Not in v0.2.5 (deferred)
+
+- Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) — 여전히 v0.2.6+
+- Evaluator PR #44 (E1-E10 baseline / batch eval / history / timeseries / Elo) — 여전히 v0.2.6+
+- Keyboard input handler 실구현 (spec 은 v0.2.4 `15c702ca` 에 기록됨)
+
+### Rollback
+
+- target `v0.2.4` (`dabd84a1`). 단 Phase 2 로 해소된 (i) match-end freeze, (ii) 차트 새로고침 복구, (iii) Recent Games 빈 "L", (iv) L5 승률 이상, (v) 스카이 RGB 줄무늬, (vi) 강타/다이브 시각 피드백 누락 — 이상 6 건이 재노출되므로 forward-fix 권장
 
 ## [0.2.4] - 2026-04-12 (post-v0.2.3 live-UI + engine + hyper-ball bundle / dev HEAD dabd84a1)
 

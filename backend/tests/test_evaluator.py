@@ -8,7 +8,7 @@ import pytest
 from stable_baselines3 import PPO
 
 from backend.rl.env import PikachuVolleyballEnv
-from backend.rl.evaluator import EvalResult, ModelEvaluator
+from backend.rl.evaluator import EvalResult, ModelEvaluator, compute_dominance_score
 
 MODEL_DIR = Path(__file__).resolve().parents[2] / "models"
 MODEL_PATH = str(MODEL_DIR / "test_random")
@@ -70,6 +70,42 @@ class TestEvalResult:
         result = evaluator.evaluate(MODEL_PATH, bot_level=1, n_games=3)
         # Should not raise
         datetime.fromisoformat(result.timestamp)
+
+    def test_dominance_score_in_range(self, evaluator: ModelEvaluator) -> None:
+        result = evaluator.evaluate(MODEL_PATH, bot_level=1, n_games=3)
+        assert isinstance(result.dominance_score, float)
+        assert 0.0 <= result.dominance_score <= 1.0
+
+
+class TestComputeDominanceScore:
+    """compute_dominance_score is a pure function — fast unit tests."""
+
+    def test_perfect_dominance(self) -> None:
+        # 100% wins, 15-0 sweep
+        assert compute_dominance_score(1.0, 15.0, 0.0) == pytest.approx(1.0)
+
+    def test_total_loss(self) -> None:
+        # 0% wins, 0-15 sweep
+        assert compute_dominance_score(0.0, 0.0, 15.0) == pytest.approx(0.0)
+
+    def test_even_match(self) -> None:
+        # 50% wins, even point split → 0.5
+        assert compute_dominance_score(0.5, 7.5, 7.5) == pytest.approx(0.5)
+
+    def test_close_wins(self) -> None:
+        # 100% wins, 15-14 close games → 0.6 + 0.4 * (15/29) ≈ 0.807
+        result = compute_dominance_score(1.0, 15.0, 14.0)
+        assert 0.80 <= result <= 0.81
+
+    def test_zero_zero_safe(self) -> None:
+        # Degenerate: no points scored either side → score share = 0
+        assert compute_dominance_score(0.0, 0.0, 0.0) == pytest.approx(0.0)
+
+    def test_clamped_to_unit_interval(self) -> None:
+        # Even with extreme inputs, output must stay in [0, 1]
+        for wr, s, opp in [(1.5, 100.0, 0.0), (-0.5, 0.0, 100.0)]:
+            v = compute_dominance_score(wr, s, opp)
+            assert 0.0 <= v <= 1.0
 
 
 class TestEvaluateAllLevels:

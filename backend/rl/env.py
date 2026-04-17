@@ -59,13 +59,14 @@ class PikachuVolleyballEnv(gymnasium.Env):
         )
         self.action_space = spaces.Discrete(12)
 
-        # RL training disables the post-score freeze: the agent would
-        # otherwise be forced to emit ~20 no-op actions after every scoring
-        # event, wasting steps and feeding stale (grounded-ball) transitions
-        # into the replay buffer. The freeze is purely a display-layer
-        # concern — the render/replay pipeline (callbacks._on_step) uses a
-        # separate PikachuVolleyball() instance that keeps freeze on.
-        self._game = PikachuVolleyball(post_score_freeze=False)
+        # The port(view) commit dropped the engine's post-score freeze.
+        # Mid-match scoring now immediately swaps to a fresh serving state,
+        # which is exactly the behavior the RL env previously opted into
+        # via `post_score_freeze=False`. The engine enters a 211-frame
+        # gameEnd window at MAX_SCORE, but the env terminates on MAX_SCORE
+        # before that window is entered so the RL agent never sees no-op
+        # game-end frames.
+        self._game = PikachuVolleyball()
         self._bot = RuleBasedBot(level=bot_level)
         self._steps = 0
         self._prev_score1 = 0
@@ -84,7 +85,13 @@ class PikachuVolleyballEnv(gymnasium.Env):
         options: dict[str, Any] | None = None,
     ) -> tuple[np.ndarray, dict[str, Any]]:
         super().reset(seed=seed, options=options)
-        self._game = PikachuVolleyball(post_score_freeze=False)
+        # Port commit `port(view): gameEnd 211f` dropped the engine's
+        # post-score freeze. Mid-match scoring now immediately swaps to a
+        # fresh serving state, which is exactly the behavior the RL env
+        # previously opted into via `post_score_freeze=False`. The engine
+        # enters a 211-frame gameEnd window at MAX_SCORE, but the env
+        # terminates on MAX_SCORE before that window is entered.
+        self._game = PikachuVolleyball()
         self._bot = RuleBasedBot(level=self.bot_level)
         state = self._game.reset()
         self._steps = 0

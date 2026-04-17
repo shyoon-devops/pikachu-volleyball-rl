@@ -266,19 +266,37 @@ class TestBotDifficultyUpgrade2026_04_12:
 class TestSkillOrderingAgainstWeakerOpponent:
     """Regression guard for the pre-upgrade L5<L3 inversion.
 
-    Baseline measurement against dev HEAD (pre-upgrade) showed L5 vs L3
-    = 40% (inverted — L3 was beating L5). After the upgrade it should
-    be a clear L5 majority. We use a short 15-game sample + seed for
-    determinism and require L5 to win ≥80% (12/15) to catch regression
-    without being flaky.
+    Three-phase history:
+      * Pre-upgrade (dev HEAD, pre-2026-04-12): L5 vs L3 = 40% (inverted).
+      * Post-upgrade: target ≥80% (12/15) achieved.
+      * Post-physics-port (2026-04-13): regressed to 5/15 because the
+        pre-port bot tuning assumed instantaneous power-hit semantics;
+        the ported state=2 dwell window changed optimal jump timing.
+      * Current: L5 retuned with jump_timing_error=-1 + zero stochastic
+        noise, restoring ≥12/15 across tested seed bases.
+
+    Both RNGs (bot's global random, engine's own random.Random) are
+    seeded explicitly so this test is reproducible in and out of the
+    pytest harness — earlier iterations were confusingly flaky because
+    only the bot RNG was seeded, leaving the engine's zero-vx tiebreak
+    and computer_boldness draws at the mercy of process entropy.
     """
 
     def test_l5_comfortably_beats_l3(self) -> None:
+        # Seed BOTH RNGs explicitly for reproducibility. The bot uses
+        # the global random module (seeded via rng.seed); the engine has
+        # its own random.Random instance that must be seeded separately
+        # (zero-vx ball-player tiebreak + computer_boldness draws). Without
+        # an engine seed the test was flaky — the pytest process env was
+        # producing a different engine-entropy sequence than a standalone
+        # python -c invocation, driving 5/15 vs 15/15 across runs with the
+        # same bot seed.
         rng.seed(42)
         l5_wins = 0
         n_games = 15
-        for _ in range(n_games):
-            game = PikachuVolleyball()
+        scores: list[tuple[int, int]] = []
+        for game_idx in range(n_games):
+            game = PikachuVolleyball(seed=1000 + game_idx)
             state = game.reset()
             bot_l3 = RuleBasedBot(level=3)
             bot_l5 = RuleBasedBot(level=5)
@@ -288,6 +306,9 @@ class TestSkillOrderingAgainstWeakerOpponent:
                 state = game.step(a1, a2)
                 if state.score1 >= 15 or state.score2 >= 15:
                     break
+            scores.append((state.score1, state.score2))
             if state.score2 > state.score1:
                 l5_wins += 1
-        assert l5_wins >= 12, f"L5 won only {l5_wins}/{n_games} vs L3 (baseline: 40%)"
+        assert l5_wins >= 12, (
+            f"L5 won only {l5_wins}/{n_games} vs L3 (baseline: 40%) — {scores=}"
+        )

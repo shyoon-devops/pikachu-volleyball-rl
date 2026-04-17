@@ -235,14 +235,17 @@ class LiveFrameCallback(BaseCallback):
         prev_ball_y = float(state.ball.y)
 
         # Keep emitting frames while the match is live OR while the engine
-        # is still holding a post-score freeze frame. Without the freeze
-        # clause, the final 14→15 scoring frame would be visible only for
-        # one frame (and any earlier scoring frame would be skipped entirely
-        # because the engine now holds the grounded state before resetting
-        # to the next serve).
+        # is still inside the post-MAX_SCORE gameEnd window (211 frames of
+        # physics running with winner/loser poses playing out — port of
+        # pikavolley.js ``frameTotal.gameEnd``). Without the second clause
+        # the final scoring moment would vanish a frame after it happens
+        # and the viewer would miss the winner pose entirely.
         while (
             state.score1 < MAX_SCORE and state.score2 < MAX_SCORE
-        ) or state.post_score_freeze_frames > 0:
+        ) or (
+            state.is_game_ended
+            and state.game_end_frame_counter < PikachuVolleyball.GAME_END_FRAMES
+        ):
             frame_data = _serialize_state(state)
             frames.append(frame_data)
             # No "type" key — handlers.frames_push_loop wraps the payload.
@@ -363,6 +366,15 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             "is_jumping": state.player1.is_jumping,
             "is_diving": state.player1.is_diving,
             "is_power_hitting": state.player1.is_power_hitting,
+            # Signed dive direction (-1 left, 0 none, +1 right).
+            # Mirrors original physics.js:138 (init) / :597 (set on dive
+            # trigger) / :522 (drives dive horizontal velocity). FE needs
+            # this to render the dive pose facing the correct side — vx
+            # sign was being used as a fallback and flipped wrong when the
+            # diving player's x-velocity was clamped against a wall.
+            "diving_direction": int(
+                getattr(state.player1, "diving_direction", 0)
+            ),
         },
         "player2": {
             "x": state.player2.x,
@@ -372,6 +384,9 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             "is_jumping": state.player2.is_jumping,
             "is_diving": state.player2.is_diving,
             "is_power_hitting": state.player2.is_power_hitting,
+            "diving_direction": int(
+                getattr(state.player2, "diving_direction", 0)
+            ),
         },
         "ball": {
             "x": state.ball.x,
@@ -397,13 +412,43 @@ def _serialize_state(state: Any) -> dict[str, Any]:
         "score1": state.score1,
         "score2": state.score2,
         "frame": state.frame,
-        # Signals for the FE to render a scoring overlay / freeze treatment.
-        # Defensive getattr so older replays (pickled before these fields
-        # existed) still decode without KeyError. `is_round_over` stays True
-        # for the entire post-score freeze window; `post_score_freeze_frames`
-        # lets the FE drive progress-based effects (fade, slow-motion).
+        # Signals for the FE to render scoring / game-end overlays.
+        # Defensive getattr keeps old replays decoding without KeyError.
+        # `is_round_over` latches True from the scoring frame onward
+        # (through the gameEnd window). `is_game_ended` + counter drives
+        # the final winner/loser pose animation on the FE.
         "is_round_over": bool(getattr(state, "is_round_over", False)),
-        "post_score_freeze_frames": int(
-            getattr(state, "post_score_freeze_frames", 0)
+        "is_game_ended": bool(getattr(state, "is_game_ended", False)),
+        "game_end_frame_counter": int(
+            getattr(state, "game_end_frame_counter", 0)
         ),
+        # Per-frame SFX triggers. Flat bool dict — each True means the
+        # corresponding audio cue fired *on this frame*. Consumers play
+        # once and move on; the engine clears every flag at the top of
+        # the next step(). Ports physics.js sound flags:
+        #   - pika / chu / pipikachu: player.sound (physics.js:162-166)
+        #   - power_hit / ball_touches_ground: ball.sound (physics.js:263-266)
+        # Player-side flags are OR'd across both players; stereo panning
+        # (pikavolley.js:465) can be derived from player x if needed.
+        # NOTE: `pi` and `pikachu` are menu-layer sounds in pikavolley.js
+        # (withWhoAreWeGoingToPlay L211/220/241) — they are NOT physics
+        # events and are intentionally not emitted by the engine.
+        "sounds": {
+            "pika": bool(
+                getattr(state.player1, "sound_pika", False)
+                or getattr(state.player2, "sound_pika", False)
+            ),
+            "chu": bool(
+                getattr(state.player1, "sound_chu", False)
+                or getattr(state.player2, "sound_chu", False)
+            ),
+            "pipikachu": bool(
+                getattr(state.player1, "sound_pipikachu", False)
+                or getattr(state.player2, "sound_pipikachu", False)
+            ),
+            "power_hit": bool(getattr(state.ball, "sound_power_hit", False)),
+            "ball_touches_ground": bool(
+                getattr(state.ball, "sound_ball_touches_ground", False)
+            ),
+        },
     }
