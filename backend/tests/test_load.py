@@ -27,7 +27,12 @@ import websockets
 import websockets.exceptions
 
 
-pytestmark = pytest.mark.load
+# Live-backend load tests — httpx + WebSocket against --base-url. Double
+# marker so the default `-m 'not e2e'` filter also excludes this file
+# (in addition to the long-standing `-m 'not load'` opt-in), preventing a
+# plain `pytest` from hammering dev/qa/prod. See 2026-04-17 incident note
+# in pyproject.toml.
+pytestmark = [pytest.mark.load, pytest.mark.e2e]
 
 
 @pytest.fixture(scope="session")

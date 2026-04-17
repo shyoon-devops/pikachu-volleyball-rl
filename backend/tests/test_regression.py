@@ -19,6 +19,13 @@ import pytest
 import pytest_asyncio
 import websockets
 
+# Live-backend regression suite — every test opens an HTTP/WebSocket
+# connection to whatever `--base-url` points at. Module-level marker
+# keeps the default `-m 'not e2e'` addopts filter excluding the whole
+# file so a plain `pytest backend/tests/` never touches dev/qa/prod.
+# See the 2026-04-17 incident note in pyproject.toml.
+pytestmark = pytest.mark.e2e
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
