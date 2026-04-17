@@ -133,9 +133,14 @@ const SCENES = {
       isJumping: false,
       isDiving: false,
       isPowerHitting: false,
-      // state 5 = winning pose (frameForState 5,0 → sprite index 18)
+      // state 5 = winning pose (frameForState 5,0 → sprite index 18).
+      // BE sets `state` from `is_winner + game_ended` together
+      // (engine.py:755-762); the harness mirrors both so the regression
+      // surface tracks the wire shape exactly.
       state: 5,
       frameNumber: 0,
+      isWinner: true,
+      gameEnded: true,
     },
     player2: {
       x: 332,
@@ -145,9 +150,11 @@ const SCENES = {
       isJumping: false,
       isDiving: false,
       isPowerHitting: false,
-      // state 6 = losing pose (frameForState 6,0 → sprite index 23)
+      // state 6 = losing pose (frameForState 6,0 → sprite index 23).
       state: 6,
       frameNumber: 0,
+      isWinner: false,
+      gameEnded: true,
     },
     ball: { x: 216, y: 200, vx: 0, vy: 0, rotation: 0 },
     score1: 15,
@@ -159,13 +166,58 @@ const SCENES = {
     // the snapshot catches the expanding phase rather than the static
     // hold that lasts most of the window.
     gameEndFrameCounter: 10,
+    // gameEnd sits in its own engine state branch (pikavolley.js):
+    // fade overlay is fully clear (alpha = 0) and the READY blink is
+    // off. Setting these explicitly so the harness covers the full
+    // FC1 wiring under the FC2 win/lose pose scenario.
+    stateName: 'gameEnd',
+    fadeBlackAlpha: 0,
+    readyMessageVisible: false,
+  }),
+  // Score-transition: mid-fade (alpha = 0.5) with READY blink ON.
+  // Captures the FC1 wiring at the most visually-distinct moment of
+  // the transition window, where the overlay is half-opaque and the
+  // READY sprite is in its visible-toggle phase.
+  ready: (): GameState => ({
+    player1: {
+      x: 100,
+      y: 244,
+      vx: 0,
+      vy: 0,
+      isJumping: false,
+      isDiving: false,
+      isPowerHitting: false,
+      state: 0,
+      frameNumber: 0,
+    },
+    player2: {
+      x: 332,
+      y: 244,
+      vx: 0,
+      vy: 0,
+      isJumping: false,
+      isDiving: false,
+      isPowerHitting: false,
+      state: 0,
+      frameNumber: 0,
+    },
+    ball: { x: 100, y: 100, vx: 0, vy: 0, rotation: 0 },
+    score1: 4,
+    score2: 5,
+    frame: 1500,
+    isRoundOver: true,
+    isGameEnded: false,
+    stateName: 'beforeStartOfNextRound',
+    slowMotionFramesLeft: 0,
+    fadeBlackAlpha: 0.5,
+    readyMessageVisible: true,
   }),
 }
 
 type SceneName = keyof typeof SCENES
 
 function parseScene(raw: string | null): SceneName {
-  if (raw === 'rally' || raw === 'powerhit' || raw === 'gameend') return raw
+  if (raw === 'rally' || raw === 'powerhit' || raw === 'gameend' || raw === 'ready') return raw
   return 'serve'
 }
 

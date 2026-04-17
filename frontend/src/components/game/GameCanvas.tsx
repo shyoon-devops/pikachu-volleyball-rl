@@ -94,6 +94,8 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
       state: next.player1.state,
       frameNumber: next.player1.frameNumber,
       divingDirection: next.player1.divingDirection,
+      isWinner: next.player1.isWinner,
+      gameEnded: next.player1.gameEnded,
     },
     player2: {
       x: lerp(prev.player2.x, next.player2.x, t),
@@ -106,6 +108,8 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
       state: next.player2.state,
       frameNumber: next.player2.frameNumber,
       divingDirection: next.player2.divingDirection,
+      isWinner: next.player2.isWinner,
+      gameEnded: next.player2.gameEnded,
     },
     ball: {
       x: lerp(prev.ball.x, next.ball.x, t),
@@ -137,6 +141,14 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
     isRoundOver: next.isRoundOver,
     isGameEnded: next.isGameEnded,
     gameEndFrameCounter: next.gameEndFrameCounter,
+    // Display state-machine fields are per-tick discrete signals from
+    // the engine — never interpolate. The fade alpha animation is
+    // already engine-driven (1/16 per frame), so taking `next` shows
+    // exactly the engine-authoritative value each render.
+    stateName: next.stateName,
+    slowMotionFramesLeft: next.slowMotionFramesLeft,
+    fadeBlackAlpha: next.fadeBlackAlpha,
+    readyMessageVisible: next.readyMessageVisible,
   }
 }
 
@@ -214,6 +226,14 @@ interface SpriteObjects {
   // computeGameEndOverlay math — which derives a top-left position
   // from the centre plus increments — lines up with view.js directly.
   gameEndMessage: Sprite
+  // Full-screen black fade overlay (view.js::FadeInOut). Alpha is
+  // driven by `state.fadeBlackAlpha` every frame; visibility is gated
+  // by `alpha > 0` so the overlay doesn't intercept events when idle.
+  fadeOverlay: Sprite
+  // "READY" sprite blinked during `beforeStartOfNextRound`. Toggled
+  // visible/hidden from `state.readyMessageVisible` (the BE engine
+  // already drives the 5-frame on/off cadence — pikavolley.js:443-444).
+  readyMessage: Sprite
 }
 
 function buildScoreBoard(
@@ -424,6 +444,35 @@ function buildSpriteScene(
   gameEndMessage.visible = false
   stage.addChild(gameEndMessage)
 
+  // ── READY blink (view.js:376, 605-615) ──
+  // Anchor at (0, 0), positioned at (176, 38) per view.js:413-414.
+  // Hidden by default; readyMessageVisible toggles each render frame.
+  const readyTex = textures['messages/common/ready.png']
+  const readyMessage = new Sprite(readyTex)
+  readyMessage.anchor.set(0, 0)
+  readyMessage.x = 176
+  readyMessage.y = 38
+  readyMessage.visible = false
+  stage.addChild(readyMessage)
+
+  // ── Black fade overlay (view.js::FadeInOut, 651-700) ──
+  // Stretched to cover the whole 432×304 court. Added last so it sits
+  // ABOVE every other sprite — including the gameEnd message and the
+  // READY blink. The original FadeInOut keeps the ready message
+  // visible THROUGH the fade-in (so it pulses behind a fading curtain),
+  // which works because PixiJS renders children-of-stage in insertion
+  // order; placing fadeOverlay after readyMessage matches that.
+  const blackTex = textures['objects/black.png']
+  const fadeOverlay = new Sprite(blackTex)
+  fadeOverlay.anchor.set(0, 0)
+  fadeOverlay.width = COURT_WIDTH
+  fadeOverlay.height = COURT_HEIGHT
+  fadeOverlay.x = 0
+  fadeOverlay.y = 0
+  fadeOverlay.alpha = 0
+  fadeOverlay.visible = false
+  stage.addChild(fadeOverlay)
+
   return {
     bg,
     cloudContainer,
@@ -442,6 +491,8 @@ function buildSpriteScene(
     scoreBoard1,
     scoreBoard2,
     gameEndMessage,
+    fadeOverlay,
+    readyMessage,
   }
 }
 
@@ -714,6 +765,24 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
       sprites.gameEndMessage.width = overlay.width
       sprites.gameEndMessage.height = overlay.height
     }
+
+    // ── READY blink (view.js:602-615, pikavolley.js:443-444) ──
+    // The engine flips `readyMessageVisible` every 5 ticks during
+    // `beforeStartOfNextRound`; the FE just mirrors that flag. No
+    // FE-side timing needed — the blink cadence is engine-authoritative
+    // so a refresh mid-blink picks up the same on/off phase as before.
+    sprites.readyMessage.visible = state.readyMessageVisible === true
+
+    // ── Black fade overlay (view.js::FadeInOut, pikavolley.js round
+    //     transition flow) ──
+    // BE drives `fadeBlackAlpha` in [0, 1] — 0 during active play,
+    // ramps up by 1/16 per frame during `afterEndOfRound`, ramps back
+    // down by 1/16 during `beforeStartOfNextRound`. We mirror it
+    // verbatim and gate `visible` on alpha > 0 so the overlay never
+    // intercepts pointer events when the court is fully clear.
+    const fadeAlpha = state.fadeBlackAlpha ?? 0
+    sprites.fadeOverlay.alpha = fadeAlpha
+    sprites.fadeOverlay.visible = fadeAlpha > 0
   }, [])
 
   const drawGraphics = useCallback((state: GameState) => {
