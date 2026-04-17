@@ -671,7 +671,24 @@ class PikachuVolleyball:
         Note: the original calls ``letComputerDecideUserInput`` here when
         ``player.isComputer``. We omit that branch — L1-L5 bot is an
         external policy, so inputs are always provided by the caller.
+
+        Game-end input neutralization: once ``player.game_ended`` is True
+        the player's input is force-replaced with a no-op for the rest of
+        this frame's update. The original game's RuleBasedBot effectively
+        does this on its own (it returns NOOP after the round ends via
+        the reaction_delay reset), but the RL agent and any human/external
+        controller don't — they keep issuing jump / power_hit / dive
+        actions, which the engine would otherwise honour, retriggering
+        state==1/3 transitions inside the gameEnd window and locking the
+        player out of the win/lose pose path that fires only when
+        ``player.state == 0`` at the end of this method
+        (physics.js:633-648). Neutralizing input here makes the win/lose
+        pose path reachable for both players regardless of control source
+        — the user-facing symptom was "RL 피카츄만 계속 움직임".
         """
+        if player.game_ended:
+            inp = PlayerInput(x_dir=0, y_dir=0, power_hit=False)
+
         # state === 4 (lying down) — frozen; decrement and maybe exit.
         if player.state == 4:
             player.lying_down_duration_left -= 1

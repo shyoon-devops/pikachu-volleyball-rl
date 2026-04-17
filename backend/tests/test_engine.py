@@ -896,3 +896,57 @@ class TestSlidingCooldownMatchesOriginal:
             "expected state==0 first observed on frame 18 "
             f"(12 dive + 5 lying + 1 transition), got {ready_again_at}"
         )
+
+
+class TestGameEndForcesPoseRegardlessOfInput:
+    """Once player.game_ended is True, the engine must neutralize the
+    player's input so the state==0 → state=5/6 win/lose pose transition
+    (physics.js:633-648) actually runs. Pre-fix, an external controller
+    that kept issuing jump / power_hit during the gameEnd window held
+    the player in state 1/2/3 forever — symptom: "RL 피카츄만 계속
+    움직임". The bot returned NOOP on its own via reaction_delay, so the
+    bot-controlled player snapped to the pose correctly; the gap was
+    purely on the input-handling side, not in the game_ended branch
+    itself.
+    """
+
+    def _force_game_end_with_p1_winner(self, game: PikachuVolleyball) -> None:
+        game._state.score1 = MAX_SCORE - 1
+        game._state.ball.x = NET_PILLAR_X + 100
+        game._state.ball.y = BALL_GROUND_Y - 1
+        game._state.ball.vy = 10
+        game.step(NOOP, NOOP)
+        assert game._state.is_game_ended
+
+    def test_jump_input_during_gameend_is_neutralized(self) -> None:
+        # External controller keeps spamming jump after game_ended fires.
+        # Engine must NOT honour it — without this the player would
+        # transition state 0→1 every time it touched the ground, and
+        # the win/lose pose would never lock in.
+        game = PikachuVolleyball(seed=0)
+        game.reset()
+        self._force_game_end_with_p1_winner(game)
+
+        spam_jump = PlayerInput(x_dir=0, y_dir=-1, power_hit=False)
+        # Run enough frames to land any in-flight jump and reach state==0.
+        for _ in range(40):
+            game.step(spam_jump, spam_jump)
+
+        # Both players must be in their win/lose pose (state 5 / 6).
+        assert game._state.player1.state == 5
+        assert game._state.player2.state == 6
+
+    def test_power_hit_input_during_gameend_is_neutralized(self) -> None:
+        # Spamming power_hit (action 6/7/8 in the RL action map) was the
+        # other route to a perpetual non-pose state via the dive trigger
+        # at physics.js:593-603 (state 0 + x_dir + power_hit → state=3).
+        game = PikachuVolleyball(seed=0)
+        game.reset()
+        self._force_game_end_with_p1_winner(game)
+
+        spam_power = PlayerInput(x_dir=1, y_dir=-1, power_hit=True)
+        for _ in range(40):
+            game.step(spam_power, spam_power)
+
+        assert game._state.player1.state == 5
+        assert game._state.player2.state == 6
