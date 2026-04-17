@@ -209,6 +209,43 @@ export function useTrainingStateImpl(): TrainingState {
   // Live WS wins on merge conflicts: any WS frame that arrived between
   // mount and hydration completion overwrites the REST row for that
   // step, so a brief network delay can't regress the chart.
+  // Track the last experiment id we've observed so we can detect a
+  // fresh-session boundary (V3 user report, 2026-04-18). Without this,
+  // clicking Stop → Start preserved the previous run's metrics and
+  // recentGames in the FE buffers — the chart kept the old line and
+  // the new run's first few points appeared to "join" the prior run.
+  // `undefined` (the initial value) means "we haven't observed an id
+  // yet, don't trigger a reset on first arrival"; `null` means
+  // training is idle (BE explicitly emitted no experiment).
+  const lastExperimentIdRef = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    const newId = status.experimentId
+    const prevId = lastExperimentIdRef.current
+    if (prevId === undefined) {
+      // First observation of any kind — record and stop. No clear:
+      // the metrics ring buffer is already empty on mount, and the
+      // recent-games REST seed runs separately.
+      lastExperimentIdRef.current = newId ?? null
+      return
+    }
+    if (newId && newId !== prevId) {
+      // True experiment-id transition (e.g. user stopped + restarted,
+      // or refreshed mid-session into a different running experiment).
+      // Clear the live metrics array so the chart line restarts at
+      // step 0 with no carryover, and reset the hydration gate so the
+      // /timeseries REST seed re-runs against the new experiment.
+      lastExperimentIdRef.current = newId
+      setMetrics([])
+      hydratedExpIdRef.current = null
+      return
+    }
+    if (newId !== prevId) {
+      // Transitioned to/from null without changing identity (idle
+      // toggle). Just record.
+      lastExperimentIdRef.current = newId ?? null
+    }
+  }, [status.experimentId])
+
   const hydratedExpIdRef = useRef<string | null>(null)
   useEffect(() => {
     const expId = status.experimentId
