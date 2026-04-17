@@ -112,7 +112,13 @@ export function ReplayList() {
               </tr>
             ) : (
               games.map(g => {
-                const replay = replayByGameId.get(g.id)
+                // Join on `gameId` (the UUID4 used as the replay file
+                // stem). `g.id` is the Mongo ObjectId hex — unrelated
+                // to the replay filename. Falls back to `g.id` only
+                // for legacy rows where the UUID was stored as `_id`
+                // (pre-port docs); under normal BE this is a no-op.
+                const joinKey = g.gameId ?? g.id
+                const replay = replayByGameId.get(joinKey)
                 return (
                   <tr key={g.id}>
                     <td className="text-muted">
@@ -134,8 +140,8 @@ export function ReplayList() {
                         <button
                           type="button"
                           className="replay-list-btn"
-                          onClick={() => navigate(`/replay/${g.id}`)}
-                          aria-label={`Watch replay for game ${g.id.slice(0, 8)}`}
+                          onClick={() => navigate(`/replay/${joinKey}`)}
+                          aria-label={`Watch replay for game ${joinKey.slice(0, 8)}`}
                           title={`${(replay.sizeBytes / 1024).toFixed(0)}KB`}
                         >
                           Watch

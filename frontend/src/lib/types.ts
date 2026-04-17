@@ -142,7 +142,19 @@ export interface TimeseriesPoint {
 }
 
 export interface GameRecord {
+  /** Mongo `_id` hex string. Unique row key for React. NOT the same as
+   *  the replay file stem — see `gameId` below. */
   id: string
+  /**
+   * UUID4 minted at game-end (`callbacks.py::run_demo_game`) and used
+   * as the replay `.msgpack` filename stem (`replay_service.py:30`).
+   * The unified history list joins games to replay availability on
+   * THIS field, not `id` (the Mongo ObjectId hex). Optional because
+   * pre-port replay payloads omit it; the join falls back to `id`
+   * when missing so legacy rows still resolve in the rare case the
+   * Mongo doc happened to use the UUID as `_id`.
+   */
+  gameId?: string
   timestamp: string
   /** Bot difficulty (1-5). Optional because the WS `game:result`
    *  broadcast currently omits `bot_level` — the BE enqueues a result
