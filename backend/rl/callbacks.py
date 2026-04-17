@@ -235,14 +235,17 @@ class LiveFrameCallback(BaseCallback):
         prev_ball_y = float(state.ball.y)
 
         # Keep emitting frames while the match is live OR while the engine
-        # is still holding a post-score freeze frame. Without the freeze
-        # clause, the final 14→15 scoring frame would be visible only for
-        # one frame (and any earlier scoring frame would be skipped entirely
-        # because the engine now holds the grounded state before resetting
-        # to the next serve).
+        # is still inside the post-MAX_SCORE gameEnd window (211 frames of
+        # physics running with winner/loser poses playing out — port of
+        # pikavolley.js ``frameTotal.gameEnd``). Without the second clause
+        # the final scoring moment would vanish a frame after it happens
+        # and the viewer would miss the winner pose entirely.
         while (
             state.score1 < MAX_SCORE and state.score2 < MAX_SCORE
-        ) or state.post_score_freeze_frames > 0:
+        ) or (
+            state.is_game_ended
+            and state.game_end_frame_counter < PikachuVolleyball.GAME_END_FRAMES
+        ):
             frame_data = _serialize_state(state)
             frames.append(frame_data)
             # No "type" key — handlers.frames_push_loop wraps the payload.
@@ -397,13 +400,14 @@ def _serialize_state(state: Any) -> dict[str, Any]:
         "score1": state.score1,
         "score2": state.score2,
         "frame": state.frame,
-        # Signals for the FE to render a scoring overlay / freeze treatment.
-        # Defensive getattr so older replays (pickled before these fields
-        # existed) still decode without KeyError. `is_round_over` stays True
-        # for the entire post-score freeze window; `post_score_freeze_frames`
-        # lets the FE drive progress-based effects (fade, slow-motion).
+        # Signals for the FE to render scoring / game-end overlays.
+        # Defensive getattr keeps old replays decoding without KeyError.
+        # `is_round_over` latches True from the scoring frame onward
+        # (through the gameEnd window). `is_game_ended` + counter drives
+        # the final winner/loser pose animation on the FE.
         "is_round_over": bool(getattr(state, "is_round_over", False)),
-        "post_score_freeze_frames": int(
-            getattr(state, "post_score_freeze_frames", 0)
+        "is_game_ended": bool(getattr(state, "is_game_ended", False)),
+        "game_end_frame_counter": int(
+            getattr(state, "game_end_frame_counter", 0)
         ),
     }

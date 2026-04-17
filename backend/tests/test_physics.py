@@ -520,7 +520,8 @@ class TestJumpAndDive:
     def test_dive_landing_starts_lying_down(self) -> None:
         game = PikachuVolleyball()
         game.reset()
-        game._state.player1.is_diving = True
+        # state=3 is "diving" per the port (physics.js Player.state).
+        game._state.player1.state = 3
         game._state.player1.diving_direction = 1
         game._state.player1.y = PLAYER_GROUND_Y - 3
         game._state.player1.vy = 10  # will hit ground
@@ -531,7 +532,11 @@ class TestJumpAndDive:
     def test_lying_down_blocks_movement(self) -> None:
         game = PikachuVolleyball()
         game.reset()
-        game._state.player1.lying_down_duration = 3
+        # state=4 is "lying down after diving"; lying_down_duration_left
+        # drives the internal counter that the port decrements each frame.
+        game._state.player1.state = 4
+        game._state.player1.lying_down_duration_left = 3
+        game._state.player1.sync_derived_flags()
         initial_x = game._state.player1.x
         move_right = PlayerInput(x_dir=1, y_dir=0, power_hit=False)
         game.step(move_right, NOOP)
@@ -679,7 +684,12 @@ class TestBallIsPowerHitFlag:
     def test_power_hit_collision_sets_flag_true(self) -> None:
         game = PikachuVolleyball()
         game.reset()
-        game._state.player1.is_jumping = True
+        # state=1 is "jumping" per the port. The power_hit input below
+        # then transitions state 1 → 2 inside _update_player, and the
+        # ball-player collision check keys off state==2 for the power
+        # branch (matches physics.js:709).
+        game._state.player1.state = 1
+        game._state.player1.sync_derived_flags()
         game._state.player1.y = PLAYER_GROUND_Y - 40
         game._state.ball.x = game._state.player1.x
         game._state.ball.y = game._state.player1.y
