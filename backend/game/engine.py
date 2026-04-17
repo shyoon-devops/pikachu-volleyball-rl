@@ -226,6 +226,32 @@ class GameState:
     # ``PikachuVolleyball.GAME_END_FRAMES`` the engine freezes state
     # permanently (equivalent to the original returning to the intro).
     game_end_frame_counter: int = 0
+    # ── Display state machine (port of pikavolley.js round/afterEndOfRound/
+    # beforeStartOfNextRound). Populated only when the engine was created
+    # with ``display_state_machine=True`` (replay viewer / dashboard); the
+    # RL training env keeps the default False so it never sees the slow-
+    # motion or ready-message no-op frames.
+    # state_name: 'round' (active rally), 'afterEndOfRound' (5f fade),
+    # 'beforeStartOfNextRound' (30f ready w/ message toggle), 'gameEnd'
+    # (211f winner-pose window).
+    state_name: str = "round"
+    # Frames spent in the current display state (resets on transition).
+    # Used by afterEndOfRound and beforeStartOfNextRound; gameEnd uses
+    # ``game_end_frame_counter`` instead so external consumers that latched
+    # onto that field keep working.
+    state_frame_counter: int = 0
+    # Slow-motion frames left after a mid-match score (pikavolley.js
+    # SLOW_MOTION_FRAMES_NUM=6). Counts down only when physics actually
+    # advances; the skip counter below paces it so physics runs at 1/5
+    # the normal cadence during the window.
+    slow_motion_frames_left: int = 0
+    slow_motion_skip_counter: int = 0
+    # Black-overlay alpha for the score-end fade-out / next-round fade-in
+    # (pikavolley.js fadeInOut.changeBlackAlphaBy ±1/16 per frame).
+    fade_black_alpha: float = 0.0
+    # READY message visibility — toggles every 5 frames during the
+    # beforeStartOfNextRound state (pikavolley.js:443-444).
+    ready_message_visible: bool = False
 
 
 class PlayerInput(NamedTuple):
@@ -250,15 +276,41 @@ class PikachuVolleyball:
     # engine then freezes state permanently (original: returns to intro).
     GAME_END_FRAMES: int = 211
 
-    def __init__(self, *, seed: int | None = None) -> None:
+    # Display state machine timings (port of pikavolley.js).
+    AFTER_END_OF_ROUND_FRAMES: int = 5  # frameTotal.afterEndOfRound
+    BEFORE_START_OF_NEXT_ROUND_FRAMES: int = 30  # frameTotal.beforeStartOfNextRound
+    SLOW_MOTION_FRAMES_NUM: int = 6  # SLOW_MOTION_FRAMES_NUM
+    # normalFPS / slowMotionFPS = 25 / 5: physics advances every 5th game-loop
+    # call during the slow-motion window, the other 4 are pure skips.
+    SLOW_MOTION_SKIP_RATIO: int = 5
+    # READY message blinks every 5 frames during beforeStartOfNextRound
+    # (pikavolley.js:443-444 — ``frameCounter % 5 === 0``).
+    READY_MESSAGE_TOGGLE_PERIOD: int = 5
+    # Per-frame black-alpha delta during fade in/out
+    # (pikavolley.js: ``changeBlackAlphaBy(±1/16)``).
+    FADE_DELTA: float = 1.0 / 16
+
+    def __init__(
+        self,
+        *,
+        seed: int | None = None,
+        display_state_machine: bool = False,
+    ) -> None:
         """Create a new engine instance.
 
         seed: optional seed for the engine's internal RNG. All stochastic
             physics decisions (``rand() % 3`` in ball-player collision,
             ``rand() % 5`` boldness) go through it so golden-scenario tests
             can reproduce identical frame sequences across runs.
+        display_state_machine: when True, ``step()`` runs the full
+            pikavolley.js round/afterEndOfRound/beforeStartOfNextRound
+            state machine — slow-motion on score, 5-frame fade-out, 30-
+            frame ready-message ramp, then back to round. The RL training
+            env keeps this False (default) so the agent never sees no-op
+            frames; the replay viewer / live dashboard pipeline opts in.
         """
         self._rng: random.Random = random.Random(seed)
+        self._display_sm: bool = display_state_machine
         self._state: GameState = self._create_initial_state()
         self._prev_ball_x: float = float(self._state.ball.x)
 
@@ -317,6 +369,20 @@ class PikachuVolleyball:
             freezes state permanently (equivalent to the original returning
             to ``intro``). Consumer loops should exit when
             ``is_game_ended and game_end_frame_counter >= GAME_END_FRAMES``.
+
+        Display state-machine flow (only when ``display_state_machine=True``,
+        port of pikavolley.js ``round`` / ``afterEndOfRound`` /
+        ``beforeStartOfNextRound``):
+          * Mid-match score → ``slow_motion_frames_left = 6``; physics
+            advances at 1/5 cadence for the next 30 step() calls.
+          * After slow-mo: ``state_name = 'afterEndOfRound'`` for 5 frames
+            of fade-out (no physics).
+          * Then ``state_name = 'beforeStartOfNextRound'`` for 30 frames —
+            players + ball reset on entry, fade-in, ready message blinks
+            every 5 frames (no physics).
+          * Then ``state_name = 'round'`` and physics resumes.
+          * Game-end short-circuits this entire flow (no slow-mo, no fade-
+            out/in — straight into the 211f gameEnd window).
         """
         state = self._state
 
@@ -327,6 +393,14 @@ class PikachuVolleyball:
             state.ball.punch_effect_radius = max(
                 0, state.ball.punch_effect_radius - 2
             )
+
+        # Display-mode dispatch — ``afterEndOfRound`` and
+        # ``beforeStartOfNextRound`` bypass physics entirely.
+        if self._display_sm:
+            if state.state_name == "afterEndOfRound":
+                return self._tick_after_end_of_round(state)
+            if state.state_name == "beforeStartOfNextRound":
+                return self._tick_before_start_of_next_round(state)
 
         # Match-over guard. Once the 211-frame gameEnd window has fully
         # elapsed the engine refuses to advance physics — this preserves
@@ -344,10 +418,28 @@ class PikachuVolleyball:
             # and let physics run normally below. Scoring is gated by the
             # ``grounded and not is_game_ended`` branch.
             state.game_end_frame_counter += 1
+            if self._display_sm:
+                state.state_name = "gameEnd"
         else:
-            # Live round — clear per-frame round flags.
-            state.is_round_over = False
-            state.round_ended_by_timeout = False
+            # Live round — clear per-frame round flags UNLESS we're inside
+            # the display-mode slow-motion window, which holds is_round_over
+            # True for the whole 30-step ramp.
+            if not (self._display_sm and state.slow_motion_frames_left > 0):
+                state.is_round_over = False
+                state.round_ended_by_timeout = False
+
+        # Display-mode slow-motion skip — port of pikavolley.js gameLoop()
+        # lines 124-135. Physics only advances every 5th call during the
+        # window; the other 4 are pure skips that still emit the held
+        # frame so the FE can render it without stutter.
+        if self._display_sm and state.slow_motion_frames_left > 0:
+            state.slow_motion_skip_counter += 1
+            if state.slow_motion_skip_counter % self.SLOW_MOTION_SKIP_RATIO != 0:
+                state.frame += 1
+                return state
+            state.slow_motion_skip_counter = 0
+            state.slow_motion_frames_left -= 1
+            # Fall through and advance physics one frame.
 
         state.frame += 1
         # Clear per-frame SFX flags — each physics branch that should
@@ -403,6 +495,93 @@ class PikachuVolleyball:
             self._prev_ball_x = now_ball_x
         else:
             self._prev_ball_x = float(state.ball.x)
+
+        # Display-mode: when the slow-motion window has just emptied while
+        # ``is_round_over`` is still latched (mid-match score), kick the
+        # state machine over to ``afterEndOfRound`` for the 5-frame fade.
+        # Mirrors pikavolley.js:402-408.
+        if (
+            self._display_sm
+            and state.is_round_over
+            and not state.is_game_ended
+            and state.slow_motion_frames_left == 0
+            and state.state_name == "round"
+        ):
+            state.fade_black_alpha = min(
+                1.0, state.fade_black_alpha + self.FADE_DELTA
+            )
+            state.state_name = "afterEndOfRound"
+            state.state_frame_counter = 0
+        return state
+
+    # ------------------------------------------------------------------
+    # Display state-machine ticks — port of pikavolley.js
+    # afterEndOfRound() and beforeStartOfNextRound().
+    # ------------------------------------------------------------------
+    def _tick_after_end_of_round(self, state: GameState) -> GameState:
+        """Port of pikavolley.js:411-422.
+
+        5 frames of fade-out (no physics). Ends by transitioning state to
+        ``beforeStartOfNextRound``; players + ball reset on entry there.
+        """
+        state.fade_black_alpha = min(
+            1.0, state.fade_black_alpha + self.FADE_DELTA
+        )
+        state.frame += 1
+        state.state_frame_counter += 1
+        if state.state_frame_counter >= self.AFTER_END_OF_ROUND_FRAMES:
+            state.state_frame_counter = 0
+            state.state_name = "beforeStartOfNextRound"
+        return state
+
+    def _tick_before_start_of_next_round(self, state: GameState) -> GameState:
+        """Port of pikavolley.js:425-455.
+
+        Frame 0 resets players + ball to the next-serve position with the
+        fade fully black, then 30 frames of fade-in with the READY message
+        toggling every 5 frames. End → state_name='round' and physics
+        resumes on the next step() call.
+        """
+        if state.state_frame_counter == 0:
+            # Fresh-round init: setBlackAlphaTo(1) + initialize players/ball.
+            state.fade_black_alpha = 1.0
+            state.ready_message_visible = False
+            new_p1 = PlayerState(x=PLAYER_INIT_X_P1, y=PLAYER_GROUND_Y)
+            new_p2 = PlayerState(x=PLAYER_INIT_X_P2, y=PLAYER_GROUND_Y)
+            new_p1.computer_boldness = self._rand() % 5
+            new_p2.computer_boldness = self._rand() % 5
+            new_p1.sync_derived_flags()
+            new_p2.sync_derived_flags()
+            if state.serving_player == 1:
+                new_ball = BallState(
+                    x=BALL_SERVE_X_P1, y=BALL_SERVE_Y, vy=BALL_INIT_Y_VELOCITY,
+                )
+            else:
+                new_ball = BallState(
+                    x=BALL_SERVE_X_P2, y=BALL_SERVE_Y, vy=BALL_INIT_Y_VELOCITY,
+                )
+            state.player1 = new_p1
+            state.player2 = new_p2
+            state.ball = new_ball
+            self._prev_ball_x = float(new_ball.x)
+
+        state.fade_black_alpha = max(
+            0.0, state.fade_black_alpha - self.FADE_DELTA
+        )
+        state.frame += 1
+        state.state_frame_counter += 1
+
+        if state.state_frame_counter % self.READY_MESSAGE_TOGGLE_PERIOD == 0:
+            state.ready_message_visible = not state.ready_message_visible
+
+        if state.state_frame_counter >= self.BEFORE_START_OF_NEXT_ROUND_FRAMES:
+            state.state_frame_counter = 0
+            state.ready_message_visible = False
+            state.fade_black_alpha = 0.0
+            state.is_round_over = False
+            state.round_ended_by_timeout = False
+            state.frames_since_net_crossing = 0
+            state.state_name = "round"
         return state
 
     # ==================================================================
@@ -771,11 +950,25 @@ class PikachuVolleyball:
             state.player2.is_winner = not p1_won
             state.player1.game_ended = True
             state.player2.game_ended = True
+            if self._display_sm:
+                state.state_name = "gameEnd"
             return
 
-        # Mid-match — swap to fresh serving state. Consumers see
-        # ``is_round_over=True`` on this frame and a reset ball on the next
-        # step() call. Replaces the old post-score freeze path.
+        # Mid-match path branches on display mode.
+        if self._display_sm:
+            # Display mode: arm the slow-motion window. Ball stays where it
+            # landed, physics will keep running at 1/5 cadence until
+            # slow_motion_frames_left reaches 0; the post-physics block in
+            # step() then flips state_name to 'afterEndOfRound' for the
+            # 5-frame fade-out, and beforeStartOfNextRound resets the
+            # players + ball on its first frame.
+            state.slow_motion_frames_left = self.SLOW_MOTION_FRAMES_NUM
+            state.slow_motion_skip_counter = 0
+            return
+
+        # Pure mode (RL training): swap to a fresh serving state on the
+        # same frame. Consumers see ``is_round_over=True`` on this frame
+        # and a reset ball on the next step() call.
         serving = state.serving_player
         s1, s2, frame = state.score1, state.score2, state.frame
         new = self._create_initial_state(serving_player=serving)
@@ -811,6 +1004,13 @@ class PikachuVolleyball:
             state.player2.is_winner = not p1_won
             state.player1.game_ended = True
             state.player2.game_ended = True
+            if self._display_sm:
+                state.state_name = "gameEnd"
+            return
+
+        if self._display_sm:
+            state.slow_motion_frames_left = self.SLOW_MOTION_FRAMES_NUM
+            state.slow_motion_skip_counter = 0
             return
 
         serving = state.serving_player

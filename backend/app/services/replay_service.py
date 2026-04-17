@@ -72,14 +72,20 @@ _BALL_DEFAULTS = {
 }
 # ``post_score_freeze_frames`` is kept in the back-fill defaults for legacy
 # replays pickled before the view port. Live replays no longer emit the
-# field; new fields (``is_game_ended`` / ``game_end_frame_counter``) are
-# added alongside so the frontend gets a consistent schema regardless of
-# replay vintage.
+# field; new fields (``is_game_ended`` / ``game_end_frame_counter``) plus
+# the display-state-machine fields (``state_name`` / ``slow_motion_frames_
+# left`` / ``fade_black_alpha`` / ``ready_message_visible``) added by
+# ``port(engine-state)`` are defaulted alongside so the frontend gets a
+# consistent schema regardless of replay vintage.
 _FRAME_DEFAULTS = {
     "is_round_over": False,
     "post_score_freeze_frames": 0,
     "is_game_ended": False,
     "game_end_frame_counter": 0,
+    "state_name": "round",
+    "slow_motion_frames_left": 0,
+    "fade_black_alpha": 0.0,
+    "ready_message_visible": False,
 }
 # Per-frame SFX triggers added by the be-sfx port. Legacy replays predate
 # all five flags; back-fill False so FE readers never KeyError.

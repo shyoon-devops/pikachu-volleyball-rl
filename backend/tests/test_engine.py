@@ -10,6 +10,7 @@ from backend.game.constants import (
     NET_PILLAR_X,
     PLAYER_GROUND_Y,
     PLAYER_HALF_LENGTH,
+    PLAYER_INIT_X_P1,
 )
 from backend.game.engine import (
     GameState,
@@ -576,3 +577,175 @@ class TestPunchEffectRadius:
         assert state.ball.punch_effect_radius == 0
         state = game.step(NOOP, NOOP)
         assert state.ball.punch_effect_radius == 0
+
+
+class TestDisplayStateMachine:
+    """Port-of-pikavolley.js round/afterEndOfRound/beforeStartOfNextRound flow.
+
+    These tests pin the display-mode state machine that ``port(view): gameEnd
+    211f`` left as a stub. The RL training env keeps the engine in pure mode
+    (display_state_machine=False, no slow-motion / fade / ready frames); the
+    replay viewer pipeline opts in.
+    """
+
+    def _force_ground_on_p2_side(self, game: PikachuVolleyball) -> None:
+        game._state.ball.x = NET_PILLAR_X + 100
+        game._state.ball.y = BALL_GROUND_Y - 1
+        game._state.ball.vy = 10
+
+    def test_default_state_name_is_round(self) -> None:
+        game = PikachuVolleyball(display_state_machine=True)
+        state = game.reset()
+        assert state.state_name == "round"
+        assert state.slow_motion_frames_left == 0
+        assert state.fade_black_alpha == 0.0
+        assert state.ready_message_visible is False
+
+    def test_mid_match_score_arms_slow_motion(self) -> None:
+        """Score in display mode arms 6-frame slow-mo, no immediate swap."""
+        game = PikachuVolleyball(display_state_machine=True)
+        game.reset()
+        self._force_ground_on_p2_side(game)
+        state = game.step(NOOP, NOOP)
+
+        assert state.score1 == 1
+        assert state.is_round_over is True
+        assert state.state_name == "round"  # still 'round' until slow-mo done
+        assert state.slow_motion_frames_left == game.SLOW_MOTION_FRAMES_NUM
+        # Ball stayed where it landed (no immediate swap).
+        assert state.ball.y == BALL_GROUND_Y
+
+    def test_slow_motion_skips_4_of_5_calls(self) -> None:
+        """Physics advances every 5th call during the slow-motion window."""
+        game = PikachuVolleyball(display_state_machine=True)
+        game.reset()
+        self._force_ground_on_p2_side(game)
+        game.step(NOOP, NOOP)  # scoring frame, arms slow-mo at 6
+
+        # 4 skipped calls after the score: counter ticks but frames_left stays.
+        for _ in range(4):
+            state = game.step(NOOP, NOOP)
+            assert state.slow_motion_frames_left == 6
+
+        # 5th call advances physics, decrements frames_left to 5.
+        state = game.step(NOOP, NOOP)
+        assert state.slow_motion_frames_left == 5
+
+    def test_slow_motion_into_after_end_of_round(self) -> None:
+        """After 30 step()s post-score, transitions to afterEndOfRound."""
+        game = PikachuVolleyball(display_state_machine=True)
+        game.reset()
+        self._force_ground_on_p2_side(game)
+        game.step(NOOP, NOOP)  # scoring + arm slow-mo
+
+        # 30 step()s = 6 physics frames × 5 skip ratio.
+        for _ in range(game.SLOW_MOTION_FRAMES_NUM * game.SLOW_MOTION_SKIP_RATIO):
+            state = game.step(NOOP, NOOP)
+
+        assert state.slow_motion_frames_left == 0
+        assert state.state_name == "afterEndOfRound"
+        # Fade has begun (≥ 1/16 from the post-physics block).
+        assert state.fade_black_alpha > 0
+
+    def test_after_end_of_round_holds_5_frames_then_advances(self) -> None:
+        """afterEndOfRound runs for AFTER_END_OF_ROUND_FRAMES (5) ticks."""
+        game = PikachuVolleyball(display_state_machine=True)
+        game.reset()
+        # Jump straight into afterEndOfRound for clarity.
+        game._state.state_name = "afterEndOfRound"
+        game._state.state_frame_counter = 0
+        game._state.fade_black_alpha = 0.0625
+
+        for i in range(game.AFTER_END_OF_ROUND_FRAMES - 1):
+            state = game.step(NOOP, NOOP)
+            assert state.state_name == "afterEndOfRound"
+            assert state.state_frame_counter == i + 1
+
+        # Final tick rolls into beforeStartOfNextRound.
+        state = game.step(NOOP, NOOP)
+        assert state.state_name == "beforeStartOfNextRound"
+        assert state.state_frame_counter == 0
+
+    def test_before_start_of_next_round_resets_players_and_ball(self) -> None:
+        """Frame 0 of beforeStartOfNextRound re-initializes players + ball."""
+        game = PikachuVolleyball(display_state_machine=True)
+        game.reset()
+        # Move ball + players to non-default positions.
+        game._state.ball.x = 200
+        game._state.ball.y = 100
+        game._state.ball.vy = 9
+        game._state.player1.x = 80
+        game._state.serving_player = 2
+        game._state.state_name = "beforeStartOfNextRound"
+        game._state.state_frame_counter = 0
+        game._state.fade_black_alpha = 0.5
+
+        state = game.step(NOOP, NOOP)
+
+        # Players + ball reset to serve positions for player2 serve.
+        assert state.player1.x == PLAYER_INIT_X_P1
+        assert state.player1.y == PLAYER_GROUND_Y
+        assert state.ball.y == 0  # serve y
+        # Fade alpha was forced to 1 on entry then decremented by 1/16.
+        assert state.fade_black_alpha == pytest.approx(1.0 - 1.0 / 16)
+
+    def test_ready_message_blinks_every_5_frames(self) -> None:
+        """ready_message_visible flips every READY_MESSAGE_TOGGLE_PERIOD ticks."""
+        game = PikachuVolleyball(display_state_machine=True)
+        game.reset()
+        game._state.state_name = "beforeStartOfNextRound"
+        game._state.state_frame_counter = 0
+
+        toggle_states: list[bool] = []
+        for _ in range(15):
+            state = game.step(NOOP, NOOP)
+            toggle_states.append(state.ready_message_visible)
+        # Pattern: 4 frames False (init), then toggle at frames 5, 10, 15...
+        # After init reset (visible=False), counter ticks 1..15.
+        # At counter 5: toggle → True. At 10: False. At 15: True.
+        assert toggle_states[4] is True   # frame counter == 5
+        assert toggle_states[9] is False  # frame counter == 10
+        assert toggle_states[14] is True  # frame counter == 15
+
+    def test_before_start_returns_to_round_after_30f(self) -> None:
+        """After 30 ticks, state_name flips to 'round' and physics resumes."""
+        game = PikachuVolleyball(display_state_machine=True)
+        game.reset()
+        game._state.state_name = "beforeStartOfNextRound"
+        game._state.state_frame_counter = 0
+
+        for _ in range(game.BEFORE_START_OF_NEXT_ROUND_FRAMES):
+            state = game.step(NOOP, NOOP)
+
+        assert state.state_name == "round"
+        assert state.state_frame_counter == 0
+        assert state.fade_black_alpha == 0.0
+        assert state.ready_message_visible is False
+        assert state.is_round_over is False
+
+    def test_game_end_skips_slow_motion(self) -> None:
+        """Match-winning score goes straight to gameEnd, no slow-mo / fade."""
+        game = PikachuVolleyball(display_state_machine=True)
+        game.reset()
+        game._state.score1 = MAX_SCORE - 1
+        self._force_ground_on_p2_side(game)
+        state = game.step(NOOP, NOOP)
+
+        assert state.is_game_ended is True
+        assert state.state_name == "gameEnd"
+        # No slow-motion arming on game-end (matches pikavolley.js gating).
+        assert state.slow_motion_frames_left == 0
+
+    def test_pure_mode_unchanged_default(self) -> None:
+        """Without display_state_machine, scoring still swaps immediately."""
+        game = PikachuVolleyball()  # default False
+        game.reset()
+        self._force_ground_on_p2_side(game)
+        state = game.step(NOOP, NOOP)
+
+        assert state.score1 == 1
+        # Pure mode: immediate swap to fresh serve, ball off the ground.
+        assert state.ball.y < BALL_GROUND_Y
+        # State machine fields stay at defaults.
+        assert state.slow_motion_frames_left == 0
+        assert state.state_name == "round"
