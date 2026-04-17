@@ -28,6 +28,16 @@ const BALL_RADIUS = 20
 const PLAYER_GROUND_Y = 244
 const SHADOW_Y = 273
 const NUM_CLOUDS = 10
+// Net pillar x-anchor in the original engine (view.js:785, 789).
+// Distinct from NET_X (216) which is the collision-axis centre — the
+// sprite sits 3px to the left of that centre line.
+const NET_PILLAR_X = 213
+// Ball sprite textures: 6 frames total, ball_0..4 plus ball_hyper at
+// index 5. The engine's `fine_rotation` maxes at 50, which integer-
+// divides to rotation=5 — deliberately rendering the hyper-ball frame
+// (the "hyper ball glitch" described in physics.js:410-414). We clamp
+// to [0,5] but never modulo away index 5.
+const BALL_TEXTURE_COUNT = 6
 
 // How many server ball positions to keep for the power-hit trail.
 // Original engine renders ballHyper at ball.previousX/Y (t-1) and
@@ -61,6 +71,12 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
       isJumping: next.player1.isJumping ?? false,
       isDiving: next.player1.isDiving ?? false,
       isPowerHitting: next.player1.isPowerHitting ?? false,
+      // Engine-authoritative animation fields must survive interpolation
+      // unchanged — they are discrete indices, not positions. Taking
+      // `next` pins the sprite to the latest server tick.
+      state: next.player1.state,
+      frameNumber: next.player1.frameNumber,
+      divingDirection: next.player1.divingDirection,
     },
     player2: {
       x: lerp(prev.player2.x, next.player2.x, t),
@@ -70,6 +86,9 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
       isJumping: next.player2.isJumping ?? false,
       isDiving: next.player2.isDiving ?? false,
       isPowerHitting: next.player2.isPowerHitting ?? false,
+      state: next.player2.state,
+      frameNumber: next.player2.frameNumber,
+      divingDirection: next.player2.divingDirection,
     },
     ball: {
       x: lerp(prev.ball.x, next.ball.x, t),
@@ -87,10 +106,20 @@ function lerpState(prev: GameState, next: GameState, t: number): GameState {
       previousY: next.ball.previousY,
       previousPreviousX: next.ball.previousPreviousX,
       previousPreviousY: next.ball.previousPreviousY,
+      // Punch-effect markers are per-frame authoritative (radius decays
+      // engine-side by 2/frame, view.js:502-511). Don't interpolate — the
+      // ring needs to anchor to the impact point and shrink on the
+      // engine's tick schedule.
+      punchEffectX: next.ball.punchEffectX,
+      punchEffectY: next.ball.punchEffectY,
+      punchEffectRadius: next.ball.punchEffectRadius,
     },
     score1: next.score1,
     score2: next.score2,
     frame: next.frame,
+    isRoundOver: next.isRoundOver,
+    isGameEnded: next.isGameEnded,
+    gameEndFrameCounter: next.gameEndFrameCounter,
   }
 }
 
@@ -113,6 +142,10 @@ function buildPlayerTextures(textures: Record<string, Texture>): Texture[] {
 }
 
 function buildBallTextures(textures: Record<string, Texture>): Texture[] {
+  // Index 5 is `ball_hyper.png` — rendered when `fine_rotation === 50`
+  // (the original "hyper ball" edge case, physics.js:410-414). Keep all
+  // 6 textures so the engine's rotation=5 path lights up faithfully
+  // instead of silently remapping to ball_0.
   return [
     textures['ball/ball_0.png'],
     textures['ball/ball_1.png'],
@@ -208,6 +241,10 @@ interface SpriteObjects {
   ball: AnimatedSprite
   ballHyper: Sprite
   ballTrail: Sprite
+  // Radial white "punch" ring drawn on the impact frame of a successful
+  // hit — anchored at the impact point, shrinking 2px/frame. Ported
+  // from view.js:502-511.
+  punch: Sprite
   shadowP1: Sprite
   shadowP2: Sprite
   shadowBall: Sprite
@@ -295,17 +332,19 @@ function buildSpriteScene(
     }
   }
 
-  // ── Net pillar ──
+  // ── Net pillar (1:1 from view.js:783-790) ──
+  //   top sprite at (NET_PILLAR_X, NET_TOP_Y) = (213, 176)
+  //   12 tiling pillar segments stepping 8px from y=184
   const netPillarTex = textures['objects/net_pillar.png']
   const netTopTex = textures['objects/net_pillar_top.png']
   if (netPillarTex && netTopTex) {
     const top = new Sprite(netTopTex)
-    top.x = 213
+    top.x = NET_PILLAR_X
     top.y = NET_TOP_Y
     bg.addChild(top)
     for (let j = 0; j < 12; j++) {
       const pillar = new Sprite(netPillarTex)
-      pillar.x = 213
+      pillar.x = NET_PILLAR_X
       pillar.y = 184 + j * 8
       bg.addChild(pillar)
     }
@@ -388,6 +427,16 @@ function buildSpriteScene(
   ball.anchor.set(0.5)
   stage.addChild(ball)
 
+  // ── Punch ring (above ball, view.js:398) ──
+  // Added AFTER ball so the ring sits in front of it — matches
+  // `container.addChild(this.punch)` ordering after the ball in the
+  // original. Starts hidden; `drawSprites` toggles on punchEffectRadius.
+  const punchTex = textures['ball/ball_punch.png']
+  const punch = new Sprite(punchTex)
+  punch.anchor.set(0.5)
+  punch.visible = false
+  stage.addChild(punch)
+
   // ── Score boards ──
   const numberTextures = buildNumberTextures(textures)
   const scoreBoard1 = buildScoreBoard(numberTextures)
@@ -409,6 +458,7 @@ function buildSpriteScene(
     ball,
     ballHyper,
     ballTrail,
+    punch,
     shadowP1,
     shadowP2,
     shadowBall,
@@ -576,10 +626,12 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
       sprites.waveContainer.children[i].y = wave.yCoords[i] ?? 314
     }
 
-    // ── Player 1 ──
+    // ── Player 1 (view.js:467-474) ──
+    //   scale.x flips for diving/lying states per `divingDirection`;
+    //   otherwise +1 (facing right, native sheet orientation).
     sprites.player1.x = state.player1.x
     sprites.player1.y = state.player1.y
-    sprites.player1.scale.x = 1
+    sprites.player1.scale.x = resolvePlayerScaleX(state.player1, 1)
     const p1Frame = inferPlayerFrame(state.player1, fc)
     sprites.player1.gotoAndStop(Math.min(p1Frame, sprites.player1.totalFrames - 1))
     sprites.shadowP1.x = state.player1.x
@@ -589,21 +641,43 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
     // not diving so idle/jump frames stay crisp.
     updateDiveAfterimage(sprites.afterimageP1, state.player1, p1Frame, 1)
 
-    // ── Player 2 ──
+    // ── Player 2 (view.js:476-483) ──
+    //   P2 mirrors horizontally by default (scale.x = -1). Dive flips
+    //   only when `divingDirection === 1` (dive toward own side).
     sprites.player2.x = state.player2.x
     sprites.player2.y = state.player2.y
-    sprites.player2.scale.x = -1
+    sprites.player2.scale.x = resolvePlayerScaleX(state.player2, -1)
     const p2Frame = inferPlayerFrame(state.player2, fc)
     sprites.player2.gotoAndStop(Math.min(p2Frame, sprites.player2.totalFrames - 1))
     sprites.shadowP2.x = state.player2.x
     updateDiveAfterimage(sprites.afterimageP2, state.player2, p2Frame, -1)
 
-    // ── Ball ──
+    // ── Ball (view.js:496-499) ──
+    // Full 0-5 rotation index. Clamp instead of modulo so rotation=5
+    // lights up ball_hyper (physics.js:410-414 "hyper ball glitch")
+    // instead of being aliased back to ball_0.
     sprites.ball.x = state.ball.x
     sprites.ball.y = state.ball.y
-    const ballFrame = Math.abs(Math.floor(state.ball.rotation ?? 0)) % 5
+    const rawRot = Math.floor(state.ball.rotation ?? 0)
+    const ballFrame = Math.max(0, Math.min(BALL_TEXTURE_COUNT - 1, rawRot))
     sprites.ball.gotoAndStop(Math.min(ballFrame, sprites.ball.totalFrames - 1))
     sprites.shadowBall.x = state.ball.x
+
+    // ── Punch ring (view.js:501-511) ──
+    // BE decrements punchEffectRadius by 2/frame; the FE just reads the
+    // authoritative value. Visible only while radius > 0. Width/height
+    // are 2×radius so the sprite's natural size is irrelevant to the
+    // on-screen ring size.
+    const punchRadius = state.ball.punchEffectRadius ?? 0
+    if (punchRadius > 0) {
+      sprites.punch.visible = true
+      sprites.punch.x = state.ball.punchEffectX ?? state.ball.x
+      sprites.punch.y = state.ball.punchEffectY ?? state.ball.y
+      sprites.punch.width = 2 * punchRadius
+      sprites.punch.height = 2 * punchRadius
+    } else {
+      sprites.punch.visible = false
+    }
 
     // ── Ball power-hit effects (authoritative: BE `is_power_hit`) ──
     // Trail sprite positions come from the pure helper so the logic
@@ -714,6 +788,43 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
 }
 
 // ── Helpers ──
+
+/**
+ * Port of view.js:467-483 scale.x branch.
+ *
+ * `defaultFacing` is +1 for P1 (native sprite orientation) and -1 for
+ * P2 (mirrored, since the sheet only stores right-facing poses).
+ *
+ * During a dive or lie (state 3 / 4), the sheet's single diving pose
+ * must be flipped to match which direction the player is diving — the
+ * original engine encodes that in `divingDirection`:
+ *   P1: scale.x = (divingDirection === -1) ? -1 : 1
+ *   P2: scale.x = (divingDirection ===  1) ? 1 : -1
+ * These two rules collapse to `divingDirection * sign` when
+ * `divingDirection` is signed, which is what the port emits.
+ *
+ * Fallback when `divingDirection` is absent (pre-port frames or flag-
+ * only payloads): use the player's `vx` sign so the dive still faces
+ * forward instead of locking to the default facing.
+ */
+function resolvePlayerScaleX(
+  p: { state?: number; isDiving: boolean; vx: number; divingDirection?: number },
+  defaultFacing: 1 | -1,
+): number {
+  const inDiveLike = p.state === 3 || p.state === 4 || p.isDiving
+  if (!inDiveLike) return defaultFacing
+
+  const dir = p.divingDirection
+  if (dir === 1) return 1
+  if (dir === -1) return -1
+
+  // No authoritative direction → fall back to velocity sign. `vx > 0`
+  // means moving right → face right, same as default for P1 and the
+  // mirrored case for P2.
+  if (p.vx > 0) return 1
+  if (p.vx < 0) return -1
+  return defaultFacing
+}
 
 /**
  * Motion-blur afterimage used for the dive/slide pose. Placed a few

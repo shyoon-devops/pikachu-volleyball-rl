@@ -6,6 +6,21 @@ export interface PlayerState {
   isJumping: boolean
   isDiving: boolean
   isPowerHitting: boolean
+  /**
+   * Authoritative animation inputs from the ported physics engine
+   * (`backend/game/engine.py::Player.state` / `.frame_number`), matching
+   * the original `physics.js::Player.state` field at 0xC0. Optional —
+   * pre-port WS payloads and older replays omit them, in which case the
+   * FE falls back to the boolean-flag heuristic in `inferPlayerFrame`.
+   * `state` values 0-6 map to:
+   *   0 idle · 1 jumping · 2 power-hitting · 3 diving (2 frames) ·
+   *   4 lying · 5 winning · 6 losing.
+   * `divingDirection` (-1 | 0 | 1) flips the sprite while diving/lying,
+   * mirroring `view.js::drawPlayersAndBall`'s scale.x branch.
+   */
+  state?: number
+  frameNumber?: number
+  divingDirection?: number
 }
 
 export interface BallState {
@@ -57,6 +72,21 @@ export interface GameState {
   score1: number
   score2: number
   frame: number
+  /**
+   * Top-level scoring/gameEnd signals emitted by the ported engine
+   * (`backend/game/engine.py`, serialized at
+   * `backend/rl/callbacks.py::_serialize_state`). Optional for
+   * compatibility with frames predating the port.
+   *
+   * - `isRoundOver` latches True from the scoring frame through the
+   *   gameEnd window — used to freeze the score overlay.
+   * - `isGameEnded` flips True once either score hits MAX_SCORE, and
+   *   `gameEndFrameCounter` counts the 211-frame winner/loser pose +
+   *   intro-return animation (`pikavolley.js::frameTotal.gameEnd`).
+   */
+  isRoundOver?: boolean
+  isGameEnded?: boolean
+  gameEndFrameCounter?: number
 }
 
 export interface TrainingMetrics {
