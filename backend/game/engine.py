@@ -124,6 +124,16 @@ class PlayerState:
     is_diving: bool = False
     is_power_hitting: bool = False
     lying_down_duration: int = 0
+    # Per-frame SFX trigger flags (port of physics.js Player.sound, lines
+    # 162-166). Each flag is set True in the same physics branch the
+    # original plays the sound in (jump / power-hit / dive / winner) and
+    # cleared back to False at the start of the next step(). FE (or any
+    # audio consumer) reads the aggregated `sounds` dict in the serialized
+    # frame. Play sites: pika L592 (state 1→2 power hit), chu L558 (jump) /
+    # L602 (state 0→3 dive), pipikachu L640 (state 0→5 winner transition).
+    sound_pika: bool = False
+    sound_chu: bool = False
+    sound_pipikachu: bool = False
 
     def sync_derived_flags(self) -> None:
         """Keep ``is_*`` / ``lying_down_duration`` in sync with ``state``."""
@@ -178,7 +188,10 @@ class BallState:
     # True on the frame of a power-hit collision; drives the hyper-ball /
     # trail sprite (original view.js:513). Cleared on any non-power collision.
     is_power_hit: bool = False
-    # Original stereo-sound flags (fired on event; FE clears on consume).
+    # Per-frame SFX trigger flags (port of physics.js Ball.sound, lines
+    # 263-266). Reset each step(), set True in the same physics branch
+    # the original plays the sound in: power_hit L723 (power-hit
+    # collision), ball_touches_ground L472 (ground-touch bounce).
     sound_power_hit: bool = False
     sound_ball_touches_ground: bool = False
 
@@ -337,6 +350,18 @@ class PikachuVolleyball:
             state.round_ended_by_timeout = False
 
         state.frame += 1
+        # Clear per-frame SFX flags — each physics branch that should
+        # re-fire a sound below sets its flag back to True this step.
+        # Mirrors the original (pikavolley.js:465-498) where the audio
+        # loop reads then immediately clears `sound.*` after playback.
+        state.player1.sound_pika = False
+        state.player1.sound_chu = False
+        state.player1.sound_pipikachu = False
+        state.player2.sound_pika = False
+        state.player2.sound_chu = False
+        state.player2.sound_pipikachu = False
+        state.ball.sound_power_hit = False
+        state.ball.sound_ball_touches_ground = False
         prev_ball_x = self._prev_ball_x
 
         grounded = self._update_ball_and_world(state.ball)
@@ -510,6 +535,8 @@ class PikachuVolleyball:
             player.vy = PLAYER_JUMP_VELOCITY
             player.state = 1
             player.frame_number = 0
+            # physics.js:558 — jump triggers the "chu" vocalization.
+            player.sound_chu = True
 
         # Gravity + landing — unconditional y advance (physics.js:562-579).
         future_player_y = player.y + player.vy
@@ -532,16 +559,20 @@ class PikachuVolleyball:
         # Power-hit / dive trigger (physics.js:581-604).
         if inp.power_hit:
             if player.state == 1:
-                # Jumping → power hit.
+                # Jumping → power hit. physics.js:592 fires "pika" on the
+                # state=1→2 transition frame.
                 player.delay_before_next_frame = 5
                 player.frame_number = 0
                 player.state = 2
+                player.sound_pika = True
             elif player.state == 0 and inp.x_dir != 0:
-                # Grounded + horizontal input → dive.
+                # Grounded + horizontal input → dive. physics.js:602 also
+                # fires "chu" on the state=0→3 transition.
                 player.state = 3
                 player.frame_number = 0
                 player.diving_direction = inp.x_dir
                 player.vy = PLAYER_DIVE_VELOCITY
+                player.sound_chu = True
 
         # Animation frame_number updates (physics.js:606-631). Only state=2
         # affects physics (the power-hit dwell window within which a ball
@@ -573,10 +604,12 @@ class PikachuVolleyball:
                 )
 
         # Game-end win/lose-pose transitions and their frame advance.
+        # physics.js:633-640 fires "pipikachu" on the state=0→5 transition.
         if player.game_ended:
             if player.state == 0:
                 if player.is_winner:
                     player.state = 5
+                    player.sound_pipikachu = True
                 else:
                     player.state = 6
                 player.delay_before_next_frame = 0
@@ -654,6 +687,8 @@ class PikachuVolleyball:
             # zeros vy (flat drive).
             ball.vy = abs(ball.vy) * inp.y_dir * 2
             ball.punch_effect_radius = BALL_RADIUS
+            # physics.js:723 — power hit fires the "powerHit" SFX. Single
+            # frame trigger; cleared at top of next step().
             ball.sound_power_hit = True
             ball.is_power_hit = True
         else:
@@ -725,7 +760,9 @@ class PikachuVolleyball:
         # When a player reaches MAX_SCORE we flip the gameEnd flags on both
         # sides and DO NOT swap in a new serving state — the ball stays
         # where it grounded and physics continues running through the next
-        # GAME_END_FRAMES calls so winner/loser poses play out.
+        # GAME_END_FRAMES calls so winner/loser poses play out. The
+        # `sound_pipikachu` SFX is fired from `_update_player` on the
+        # state=0→5 winner-pose transition (physics.js:633-640), not here.
         if state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE:
             state.is_game_ended = True
             state.game_end_frame_counter = 0

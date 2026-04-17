@@ -183,6 +183,44 @@ class TestSerializeState:
             "is_round_over",
             "is_game_ended",
             "game_end_frame_counter",
+            "sounds",
+        }
+
+    def test_serialize_state_sounds_has_five_keys(self) -> None:
+        # Schema contract: `sounds` holds the 5 physics-layer flags.
+        # `pi` / `pikachu` are menu sounds and intentionally NOT emitted.
+        state = GameState(
+            player1=PlayerState(x=0, y=0),
+            player2=PlayerState(x=0, y=0),
+            ball=BallState(x=0, y=0),
+        )
+        result = _serialize_state(state)
+        assert set(result["sounds"].keys()) == {
+            "pika",
+            "chu",
+            "pipikachu",
+            "power_hit",
+            "ball_touches_ground",
+        }
+        assert all(v is False for v in result["sounds"].values())
+
+    def test_serialize_state_sounds_or_across_players(self) -> None:
+        # Player-side flags are OR'd so a single True from either player
+        # bubbles up. Ball-side flags come directly from the ball.
+        state = GameState(
+            player1=PlayerState(x=0, y=0, sound_chu=True),
+            player2=PlayerState(x=0, y=0, sound_pika=True, sound_pipikachu=True),
+            ball=BallState(
+                x=0, y=0, sound_power_hit=True, sound_ball_touches_ground=True
+            ),
+        )
+        result = _serialize_state(state)
+        assert result["sounds"] == {
+            "pika": True,
+            "chu": True,
+            "pipikachu": True,
+            "power_hit": True,
+            "ball_touches_ground": True,
         }
 
     def test_serialize_state_emits_diving_direction(self) -> None:

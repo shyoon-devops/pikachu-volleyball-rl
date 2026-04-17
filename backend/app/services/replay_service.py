@@ -81,6 +81,15 @@ _FRAME_DEFAULTS = {
     "is_game_ended": False,
     "game_end_frame_counter": 0,
 }
+# Per-frame SFX triggers added by the be-sfx port. Legacy replays predate
+# all five flags; back-fill False so FE readers never KeyError.
+_SOUNDS_DEFAULTS = {
+    "pika": False,
+    "chu": False,
+    "pipikachu": False,
+    "power_hit": False,
+    "ball_touches_ground": False,
+}
 
 
 def _backfill_frame(frame: dict[str, Any]) -> dict[str, Any]:
@@ -94,4 +103,7 @@ def _backfill_frame(frame: dict[str, Any]) -> dict[str, Any]:
             frame["ball"].setdefault(field, default)
     for field, default in _FRAME_DEFAULTS.items():
         frame.setdefault(field, default)
+    sounds = frame.setdefault("sounds", {})
+    for field, default in _SOUNDS_DEFAULTS.items():
+        sounds.setdefault(field, default)
     return frame
