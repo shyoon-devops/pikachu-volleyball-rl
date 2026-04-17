@@ -66,9 +66,12 @@ class TestEngineDiving:
     def test_diving_landing_sets_lying_down(self) -> None:
         game = PikachuVolleyball()
         game.reset()
-        # Force player1 into diving state at ground level
-        game._state.player1.is_diving = True
-        game._state.player1.is_jumping = False
+        # Force player1 into diving state at ground level. state=3 is
+        # "diving" per the port; sync_derived_flags propagates to
+        # is_diving/is_jumping compat views.
+        game._state.player1.state = 3
+        game._state.player1.diving_direction = 0
+        game._state.player1.sync_derived_flags()
         game._state.player1.y = PLAYER_GROUND_Y - 5
         game._state.player1.vy = 10  # will reach ground
 

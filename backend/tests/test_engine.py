@@ -528,7 +528,11 @@ class TestPunchEffectRadius:
     ) -> None:
         game.reset()
         # Place player 1 jumping + ball on top of them + power input.
-        game._state.player1.is_jumping = True
+        # state=1 is "jumping"; _update_player transitions state 1→2 when
+        # the power_hit input fires, and the collision branch keys off
+        # state==2 (matches physics.js:709).
+        game._state.player1.state = 1
+        game._state.player1.sync_derived_flags()
         game._state.player1.y = PLAYER_GROUND_Y - 40
         game._state.ball.x = game._state.player1.x
         game._state.ball.y = game._state.player1.y

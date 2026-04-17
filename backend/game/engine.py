@@ -1,12 +1,30 @@
-"""Pikachu Volleyball game engine — pure Python, no I/O.
+"""Pikachu Volleyball game engine — pure Python port of physics.js.
 
-Physics ported from the original game source
-(gorisanson/pikachu-volleyball: src/resources/js/physics.js).
+Physics ported frame-accurately from the original game source
+(gorisanson/pikachu-volleyball: src/resources/js/physics.js, MIT-licensed).
 Function-level comments reference the original JS function name.
+
+This module implements ONLY the physics engine equivalent of physics.js.
+The pikavolley.js state machine (intro / menu / startOfNewGame / round /
+gameEnd / afterEndOfRound etc.) is layered on top via this module's scoring
+wrapper and is being progressively aligned with the original — see commit
+`port(view): gameEnd 211f intro 복귀 플로우`.
+
+Design notes:
+  * Back-compat flags (``PlayerState.is_jumping`` etc.) are kept as derived
+    views of ``PlayerState.state`` so existing consumers (bot.py, env.py)
+    keep working. New code should read ``state`` directly.
+  * Stochastic decisions (the original's ``rand() % 3`` zero-velocity
+    tiebreak in ball-player collision; ``rand() % 5`` computer boldness)
+    go through ``self._rand`` so the whole engine can be seeded for
+    deterministic golden tests.
+  * Integer ops use ``_trunc_div`` where the original JS used ``(a / b) | 0``;
+    Python ``//`` floors toward ``-inf`` and diverges on negatives.
 """
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -37,49 +55,124 @@ from backend.game.constants import (
     PLAYER_SPEED,
 )
 
+# Matches INFINITE_LOOP_LIMIT in physics.js — safety cap on the two
+# trajectory-simulation loops (expected-landing-point and its power-hit
+# variant). The original JS has the same cap for the same reason.
+INFINITE_LOOP_LIMIT: int = 1000
+
+
+def _trunc_div(a: int | float, b: int | float) -> int:
+    """JS-style truncating integer division matching ``(a / b) | 0``.
+
+    Python ``//`` floors (``-5 // 2 == -3``); the original JS bitwise ``| 0``
+    truncates toward zero (``(-5 / 2) | 0 == -2``). Several physics paths
+    (``fine_rotation`` advance, ball-player collision base vx, expected-
+    landing-point trajectory) need the truncating semantics to produce the
+    same frame sequence as the original.
+    """
+    return int(a / b)
+
 
 @dataclass
 class PlayerState:
+    """Port of physics.js ``Player``.
+
+    Internal source of truth is ``state`` (0-6, matches original Player.state
+    at offset 0xC0). Back-compat boolean flags (``is_jumping``, ``is_diving``,
+    ``is_power_hitting``, ``lying_down_duration``) are kept in sync via
+    :meth:`sync_derived_flags` and exist solely so bot.py / env.py and older
+    tests can keep reading the engine without a breaking API change.
+    """
+
     x: int
     y: int
     vx: int = 0
     vy: int = 0
+    # 0: normal, 1: jumping, 2: jumping_and_power_hitting, 3: diving,
+    # 4: lying_down_after_diving, 5: win, 6: lost — matches physics.js
+    # Player.state at 0xC0 exactly.
+    state: int = 0
+    frame_number: int = 0
+    delay_before_next_frame: int = 0
+    normal_status_arm_swing_direction: int = 1
+    # Original ``lyingDownDurationLeft`` at 0xB8. Sentinel value ``-1`` means
+    # "not lying down"; on dive-landing it is set to 3 and decremented each
+    # frame; when it drops below ``-1`` the state transitions back to 0.
+    lying_down_duration_left: int = -1
+    diving_direction: int = 0
+    # Original ``isCollisionWithBallHappened`` at 0xBC. Prevents collision
+    # from re-firing while the ball is still inside the 32px box; cleared
+    # when the ball exits the box.
+    is_collision_with_ball_happened: bool = False
+    is_winner: bool = False
+    game_ended: bool = False
+    # Built-in-AI knobs. Our L1-L5 bot (backend/game/bot.py) is an external
+    # policy and does not consult these, but they are populated at
+    # round-start for 1:1 fidelity with the original.
+    computer_boldness: int = 0
+    computer_where_to_stand_by: int = 0
+    # ── Back-compat derived views (see sync_derived_flags). ──
     is_jumping: bool = False
     is_diving: bool = False
     is_power_hitting: bool = False
     lying_down_duration: int = 0
-    diving_direction: int = 0  # -1 left, 0 none, 1 right
-    # Per original physics.js (Player.isCollisionWithBallHappened, 0xBC):
-    # Prevents collision from re-firing while the ball is still within the
-    # 32px box across frames. Cleared when the ball leaves the box.
-    is_collision_with_ball_happened: bool = False
+
+    def sync_derived_flags(self) -> None:
+        """Keep ``is_*`` / ``lying_down_duration`` in sync with ``state``."""
+        self.is_jumping = self.state in (1, 2)
+        self.is_diving = self.state == 3
+        self.is_power_hitting = self.state == 2
+        # Legacy "remaining frames" view: the old direct-field semantics
+        # counted 3→2→1→0 and treated >0 as "still down". The original
+        # ``lyingDownDurationLeft`` counts one beyond that (3→2→1→0→-1,
+        # then state=0 on the next decrement), so the legacy view clips
+        # negatives to 0 and otherwise mirrors lying_down_duration_left.
+        if self.state == 4:
+            self.lying_down_duration = max(0, self.lying_down_duration_left)
+        else:
+            self.lying_down_duration = 0
 
 
 @dataclass
 class BallState:
+    """Port of physics.js ``Ball``.
+
+    All sprite-adjacent fields (``fine_rotation``, ``punch_effect_*``,
+    ``previous_*``) are carried on the state so renderers stay stateless.
+    """
+
     x: int
     y: int
     vx: int = 0
     vy: int = 0
+    # Sprite-frame index (0-5). Derived from fine_rotation on each ball-world
+    # update. NOTE: the pre-port engine exposed ``rotation`` as degrees
+    # (0-360); the port switches to the original 0-5 sprite-frame semantics.
     rotation: int = 0
-    # punch_effect_x/y/radius are graphic markers only (per original).
-    # They are NOT added to position — ball movement uses (vx, vy) only.
-    # Radius is SET to BALL_RADIUS on each trigger (ground touch or
-    # power-hit collision) and decays by 2 per frame thereafter, matching
-    # the original's render-loop shrink (view.js:502-507). Shrinking is
-    # centralised in the engine so FE renderers just draw whatever
-    # radius the server reports and don't need their own animation state.
+    # Original ``fineRotation`` at 0x48. Advanced by ``(vx / 2) | 0`` per
+    # frame and wrapped to [0, 50]. When pinned at 50 the "hyper ball glitch"
+    # fires in the original (sprite 5 drawn continuously). We replicate the
+    # wrap but without the glitch path.
+    fine_rotation: int = 0
     punch_effect_x: int = 0
     punch_effect_y: int = 0
     punch_effect_radius: int = 0
-    # True on frames where the most recent ball–player collision was a
-    # power hit (player was jumping + power_hit pressed). Drives the
-    # hyper-ball / trail sprite effect in the original view.js:513 and
-    # is the single-frame signal FE needs to render "강타" visually.
-    # Semantics match original physics.js: set true in the power-hit
-    # branch of processCollisionBetweenBallAndPlayer, set false in any
-    # other collision. Persists between collisions until flipped.
+    # Trail-effect anchors (physics.js:402-405). Updated every world step
+    # regardless of whether the ball touches the ground.
+    previous_x: int = 0
+    previous_y: int = 0
+    previous_previous_x: int = 0
+    previous_previous_y: int = 0
+    # Ball's expected landing x — recomputed after every ball-player collision
+    # (physics.js:730) so the built-in AI and any external consumer share the
+    # same "where will this end up" prediction the engine itself uses.
+    expected_landing_point_x: int = 0
+    # True on the frame of a power-hit collision; drives the hyper-ball /
+    # trail sprite (original view.js:513). Cleared on any non-power collision.
     is_power_hit: bool = False
+    # Original stereo-sound flags (fired on event; FE clears on consume).
+    sound_power_hit: bool = False
+    sound_ball_touches_ground: bool = False
 
 
 @dataclass
@@ -93,20 +186,19 @@ class GameState:
     is_round_over: bool = False
     frame: int = 0
     # Frames since the ball last crossed the net. Used as a safety valve
-    # against infinite self-toss rallies — see `PikachuVolleyball.step`.
+    # against infinite self-toss rallies — see ``PikachuVolleyball.step``.
     # Resets to 0 on net crossing and at round start.
     frames_since_net_crossing: int = 0
-    # True when this round ended because `frames_since_net_crossing` exceeded
-    # `PikachuVolleyball.RALLY_MAX_FRAMES` (and NOT because the ball grounded).
-    # The concede is awarded to the side currently holding the ball. Consumers
-    # can distinguish timeout concedes from normal concedes via this flag.
+    # True when this round ended because ``frames_since_net_crossing`` exceeded
+    # ``PikachuVolleyball.RALLY_MAX_FRAMES`` (and NOT because the ball
+    # grounded). The concede is awarded to the side currently holding the
+    # ball. Consumers can distinguish timeout concedes via this flag.
     round_ended_by_timeout: bool = False
-    # Countdown of remaining "freeze" frames after a scoring event. While
-    # this is > 0 the engine holds the grounded-ball state unchanged so that
-    # viewers (and replay FE) get to see the final scoring moment. Expires
-    # into a fresh serving state, or stays at 0 when the match has ended.
-    # Mirrors the original game's slow-motion + fade-out pause after each
-    # round (pikavolley.js: SLOW_MOTION_FRAMES_NUM + afterEndOfRound).
+    # Countdown of remaining "freeze" frames after a scoring event. While > 0
+    # the engine holds the grounded-ball state unchanged so viewers see the
+    # final scoring moment. NOTE: slated for removal in the upcoming
+    # ``port(view): gameEnd 211f`` commit — the original has no freeze, it
+    # lets physics continue running inside the ``gameEnd`` state.
     post_score_freeze_frames: int = 0
 
 
@@ -117,43 +209,57 @@ class PlayerInput(NamedTuple):
 
 
 class PikachuVolleyball:
-    """Deterministic Pikachu Volleyball engine, port of original physics.js."""
+    """Deterministic Pikachu Volleyball engine — port of physics.js."""
 
     # Safety valve: force-end the round if the ball hasn't crossed the net
-    # for this many consecutive frames. Prevents infinite self-toss loops
-    # from wedging the match (e.g., a weak RL policy bouncing the ball to
-    # itself forever on its own court). NOT present in the original game —
-    # added here because non-interactive play (RL training, replays,
-    # headless bot-vs-bot) has no user available to forfeit the round.
+    # for this many consecutive frames. Prevents infinite self-toss loops.
+    # NOT in the original — added here because non-interactive play (RL
+    # training, replays, headless bot-vs-bot) has no user available to
+    # forfeit the round.
     RALLY_MAX_FRAMES: int = 600
 
-    # Freeze-frame duration after a scoring event. The grounded ball state
-    # is held for this many frames so viewers can see the scoring moment
-    # (the user-reported "14→15 득점 순간 안 보이는" bug). ~0.33s at 60fps,
-    # roughly matches the original game's SLOW_MOTION_FRAMES_NUM (6 slow
-    # frames ≈ 14 real frames) + afterEndOfRound (5 frames) combined pause.
+    # Freeze-frame duration after a scoring event. Held so viewers can see
+    # the final grounded-ball moment. Slated for removal in the view port.
     POST_SCORE_FREEZE_FRAMES: int = 20
 
-    def __init__(self, *, post_score_freeze: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        post_score_freeze: bool = True,
+        seed: int | None = None,
+    ) -> None:
         """Create a new engine instance.
 
         post_score_freeze: when True (default), every scoring event triggers
-            a POST_SCORE_FREEZE_FRAMES-long hold of the grounded-ball state
-            before the next serve. Disable for RL training where the agent
-            shouldn't waste steps on no-op frames; the training env uses
-            `post_score_freeze=False` to keep legacy immediate-reset
-            behavior. Headless replay rendering, human/bot playback, and
-            the diagnostic script leave it enabled.
+            a POST_SCORE_FREEZE_FRAMES-long hold. Disable for RL training so
+            the agent isn't forced to no-op during the hold.
+        seed: optional seed for the engine's internal RNG. All stochastic
+            physics decisions (``rand() % 3`` in ball-player collision,
+            ``rand() % 5`` boldness) go through it so golden-scenario tests
+            can reproduce identical frame sequences across runs.
         """
         self._post_score_freeze: bool = post_score_freeze
+        self._rng: random.Random = random.Random(seed)
         self._state: GameState = self._create_initial_state()
         self._prev_ball_x: float = float(self._state.ball.x)
 
+    # ------------------------------------------------------------------
+    # RNG — matches rand.js semantics: integer in [0, 32767].
+    # ------------------------------------------------------------------
+    def _rand(self) -> int:
+        """Port of ``rand()`` in rand.js. Returns int in [0, 32767]."""
+        return self._rng.randint(0, 32767)
+
     def _create_initial_state(self, serving_player: int = 1) -> GameState:
-        # Original: player1.x = 36, player2.x = GROUND_WIDTH - 36 (= 396)
+        # physics.js: player1.x = 36, player2.x = GROUND_WIDTH - 36 (= 396)
         p1 = PlayerState(x=PLAYER_INIT_X_P1, y=PLAYER_GROUND_Y)
         p2 = PlayerState(x=PLAYER_INIT_X_P2, y=PLAYER_GROUND_Y)
-        # Original: ball.x = 56 (p1 serve) or GROUND_WIDTH - 56 = 376, y = 0, vy = 1
+        # Original ``computerBoldness = _rand() % 5`` on every round start.
+        p1.computer_boldness = self._rand() % 5
+        p2.computer_boldness = self._rand() % 5
+        p1.sync_derived_flags()
+        p2.sync_derived_flags()
+        # physics.js: ball.x = 56 (p1 serve) or 376, y = 0, vy = 1
         if serving_player == 1:
             ball = BallState(x=BALL_SERVE_X_P1, y=BALL_SERVE_Y, vy=BALL_INIT_Y_VELOCITY)
         else:
@@ -171,22 +277,19 @@ class PikachuVolleyball:
         return self._state
 
     def step(self, p1_input: PlayerInput, p2_input: PlayerInput) -> GameState:
-        """Advance one frame.
+        """Advance one frame. Order matches physics.js ``physicsEngine`` (FUN_00403dd0).
 
-        Order matches original physicsEngine (FUN_00403dd0):
-          1. processCollisionBetweenBallAndWorldAndSetBallPosition (FUN_00402dc0)
-             — ball boundary / ceiling / net / ground, then move + gravity last.
-          2. processPlayerMovementAndSetPlayerPosition for both players (FUN_00401fc0).
-          3. isCollisionBetweenBallAndPlayerHappened + processCollisionBetweenBallAndPlayer
-             — detect and set ball velocity for next frame.
+        1. ``processCollisionBetweenBallAndWorldAndSetBallPosition`` — ball
+           boundary / ceiling / net / ground, then move + gravity last.
+        2. ``processPlayerMovementAndSetPlayerPosition`` for both players.
+        3. ``isCollisionBetweenBallAndPlayerHappened`` +
+           ``processCollisionBetweenBallAndPlayer`` for both players.
 
         After the original-faithful update, one extension runs:
-          4. Rally-timeout safety valve (not in original). If the ball has
-             not crossed the net for RALLY_MAX_FRAMES frames, force-end the
-             round; the side currently holding the ball concedes the point.
+          * Rally-timeout safety valve (not in original).
 
         Post-score freeze (when enabled): if the previous frame ended the
-        round, subsequent calls tick down `post_score_freeze_frames` without
+        round, subsequent calls tick ``post_score_freeze_frames`` without
         advancing physics. The freeze tick ALWAYS runs — even on the
         match-winning point — so consumer loops can rely on freeze expiry
         to signal "replay done". When the counter reaches zero the engine
@@ -196,26 +299,17 @@ class PikachuVolleyball:
         state = self._state
 
         # Decay the graphic punch-effect radius every frame (mirrors
-        # view.js:502-507 in the original where the client decremented by
-        # 2 per render tick). Centralising the shrink in the engine keeps
-        # FE renderers stateless for this effect. Match-over guard below
-        # returns early — the decay still runs so any lingering punch
-        # effect from the final ground touch fades cleanly.
+        # view.js:502-507 where the client decrements by 2 per render tick).
+        # Centralising the shrink in the engine keeps FE renderers stateless.
         if state.ball.punch_effect_radius > 0:
             state.ball.punch_effect_radius = max(
                 0, state.ball.punch_effect_radius - 2
             )
 
-        # Freeze-frame pass-through. MUST run BEFORE the match-over guard
-        # below so the hold also ticks down on the match-winning point —
-        # otherwise the guard returns early every frame and freeze stays
-        # pinned at POST_SCORE_FREEZE_FRAMES forever, wedging any consumer
-        # loop that relies on freeze expiry to exit (e.g. the play-and-save
-        # callback in backend/rl/callbacks.py). Runs BEFORE the per-frame
-        # clearing of round-over flags so viewers see `is_round_over=True`
-        # for the whole freeze window. Physics / inputs are intentionally
-        # ignored; the grounded ball position stays pinned until the hold
-        # ends.
+        # Freeze-frame pass-through. MUST run BEFORE the match-over guard so
+        # the hold also ticks down on the match-winning point — otherwise the
+        # guard returns early every frame and freeze stays pinned forever,
+        # wedging any consumer loop that relies on freeze expiry.
         if state.post_score_freeze_frames > 0:
             state.post_score_freeze_frames -= 1
             state.frame += 1
@@ -230,22 +324,17 @@ class PikachuVolleyball:
                 new.score1 = s1
                 new.score2 = s2
                 new.frame = frame
-                # new.is_round_over / round_ended_by_timeout default to False.
                 self._state = new
                 self._prev_ball_x = float(new.ball.x)
                 return new
-            # When freeze expires at MAX_SCORE, fall through on the NEXT
-            # step() call to the match-over guard below, which will then
-            # hold the final state permanently.
             return state
 
         # Match-over guard. Once freeze has fully expired and either player
-        # has reached MAX_SCORE the engine refuses to advance physics —
-        # this preserves the final grounded-ball scene for the replay
-        # viewer and makes repeated step() calls after termination a no-op
-        # (same contract the original game enforces via its `gameEnd`
-        # state). Consumer loops that want to end cleanly at match-end
-        # should exit when `score >= MAX_SCORE and freeze == 0`.
+        # has reached MAX_SCORE, the engine refuses to advance physics —
+        # preserves the final grounded-ball scene and makes repeated step()
+        # calls a no-op (same contract as the original's ``gameEnd`` state).
+        # Consumer loops that want to end cleanly at match-end should exit
+        # when ``score >= MAX_SCORE and freeze == 0``.
         if state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE:
             state.is_round_over = True
             return state
@@ -258,18 +347,14 @@ class PikachuVolleyball:
         grounded = self._update_ball_and_world(state.ball)
         if grounded:
             self._handle_scoring(state)
-            # GameState may have been replaced by a fresh serving state.
             self._prev_ball_x = float(self._state.ball.x)
             return self._state
 
-        self._update_player(state.player1, p1_input, is_player2=False)
-        self._update_player(state.player2, p2_input, is_player2=True)
+        self._update_player(state.player1, p1_input, is_player2=False, ball=state.ball, other=state.player2)
+        self._update_player(state.player2, p2_input, is_player2=True, ball=state.ball, other=state.player1)
 
         self._check_ball_player_collision(state.ball, state.player1, p1_input)
         self._check_ball_player_collision(state.ball, state.player2, p2_input)
-
-        # Rotation (graphic) — original uses fineRotation; we approximate with degrees
-        state.ball.rotation = (state.ball.rotation + state.ball.vx) % 360
 
         # Net-crossing counter (extension — safety valve, not in original).
         now_ball_x = float(state.ball.x)
@@ -284,45 +369,59 @@ class PikachuVolleyball:
 
         if state.frames_since_net_crossing >= self.RALLY_MAX_FRAMES:
             self._handle_rally_timeout(state)
-            # _handle_rally_timeout may swap in a fresh serving state.
             self._prev_ball_x = float(self._state.ball.x)
             return self._state
 
         self._prev_ball_x = now_ball_x
         return state
 
-    # ------------------------------------------------------------------
-    # Ball world update — port of processCollisionBetweenBallAndWorldAndSetBallPosition
-    # ------------------------------------------------------------------
-    def _update_ball_and_world(self, ball: BallState) -> bool:
-        """Handle ball world collisions and move the ball.
+    # ==================================================================
+    # Physics subroutines — 1:1 port of physics.js.
+    # ==================================================================
 
-        Returns True if the ball touched the ground this frame.
-        Mirrors the original function exactly, including its known asymmetry
-        for the right wall (futureBallX > GROUND_WIDTH, not GROUND_WIDTH - BALL_RADIUS).
+    def _update_ball_and_world(self, ball: BallState) -> bool:
+        """Port of ``processCollisionBetweenBallAndWorldAndSetBallPosition``.
+
+        Returns True if the ball touched the ground this frame. Order and
+        integer-truncation behavior match physics.js:398-486 exactly,
+        including the documented right-wall asymmetry (``> GROUND_WIDTH``,
+        not ``> GROUND_WIDTH - BALL_RADIUS``) and the ``fine_rotation``
+        advance that produces the hyper-ball sprite glitch at fine==50.
         """
+        # Save trail positions (physics.js:402-405).
+        ball.previous_previous_x = ball.previous_x
+        ball.previous_previous_y = ball.previous_y
+        ball.previous_x = ball.x
+        ball.previous_y = ball.y
+
+        # fine_rotation advance — matches physics.js:408-421 with JS-trunc.
+        future_fine_rotation = ball.fine_rotation + _trunc_div(ball.vx, 2)
+        if future_fine_rotation < 0:
+            future_fine_rotation += 50
+        elif future_fine_rotation > 50:
+            future_fine_rotation -= 50
+        ball.fine_rotation = future_fine_rotation
+        ball.rotation = _trunc_div(ball.fine_rotation, 10)
+
         future_x = ball.x + ball.vx
         # Left-right world bounds — original is asymmetric on purpose.
-        # Known quirk documented in original source.
         if future_x < BALL_RADIUS or future_x > GROUND_WIDTH:
             ball.vx = -ball.vx
 
         future_y = ball.y + ball.vy
-        # Ceiling — if ball would go above top of world, force downward.
+        # Ceiling — if ball would go above top, force downward.
         if future_y < 0:
             ball.vy = 1
 
-        # Net collision — original splits top-of-pillar vs side-of-pillar.
+        # Net collision — top of pillar vs side of pillar.
         if (
             abs(ball.x - NET_PILLAR_X) < NET_PILLAR_HALF_WIDTH
             and ball.y > NET_PILLAR_TOP_Y
         ):
             if ball.y <= NET_PILLAR_TOP_BOTTOM_Y:
-                # On top of net pillar — bounce up if moving down.
                 if ball.vy > 0:
                     ball.vy = -ball.vy
             else:
-                # Side of net pillar — reflect horizontally away from net.
                 if ball.x < NET_PILLAR_X:
                     ball.vx = -abs(ball.vx)
                 else:
@@ -330,109 +429,181 @@ class PikachuVolleyball:
 
         future_y = ball.y + ball.vy
         if future_y > BALL_GROUND_Y:
-            # Ball touches ground — bounce + record punch-effect markers.
-            # Matches original physics.js:472-478: radius starts at
-            # BALL_RADIUS; FE / engine shrink decays it back to 0.
+            ball.sound_ball_touches_ground = True
             ball.vy = -ball.vy
             ball.punch_effect_x = ball.x
             ball.y = BALL_GROUND_Y
-            ball.punch_effect_y = BALL_GROUND_Y + BALL_RADIUS
             ball.punch_effect_radius = BALL_RADIUS
+            ball.punch_effect_y = BALL_GROUND_Y + BALL_RADIUS
             return True
 
-        # Move + gravity applied LAST (matches original ordering).
         ball.y = future_y
         ball.x = ball.x + ball.vx
         ball.vy += GRAVITY
         return False
 
-    # ------------------------------------------------------------------
-    # Player update — port of processPlayerMovementAndSetPlayerPosition
-    # ------------------------------------------------------------------
     def _update_player(
-        self, player: PlayerState, inp: PlayerInput, *, is_player2: bool
+        self,
+        player: PlayerState,
+        inp: PlayerInput,
+        *,
+        is_player2: bool,
+        ball: BallState,
+        other: PlayerState,
     ) -> None:
-        # Lying down after dive — frozen for LYING_DOWN_DURATION frames.
-        if player.lying_down_duration > 0:
-            player.lying_down_duration -= 1
-            if player.lying_down_duration <= 0:
-                player.lying_down_duration = 0
+        """Port of ``processPlayerMovementAndSetPlayerPosition`` (physics.js:496-649).
+
+        Uses ``player.state`` (0-6) as the source of truth. The derived
+        ``is_jumping`` / ``is_diving`` / ``is_power_hitting`` / legacy
+        ``lying_down_duration`` flags are resynced at the end via
+        :meth:`PlayerState.sync_derived_flags` for consumers that haven't
+        migrated to ``state``.
+
+        Note: the original calls ``letComputerDecideUserInput`` here when
+        ``player.isComputer``. We omit that branch — L1-L5 bot is an
+        external policy, so inputs are always provided by the caller.
+        """
+        # state === 4 (lying down) — frozen; decrement and maybe exit.
+        if player.state == 4:
+            player.lying_down_duration_left -= 1
+            if player.lying_down_duration_left < -1:
+                player.state = 0
+            player.sync_derived_flags()
             return
 
-        # Horizontal velocity
-        if player.is_diving:
-            vel_x = player.diving_direction * PLAYER_DIVE_SPEED
-        else:
-            vel_x = inp.x_dir * PLAYER_SPEED
-        player.vx = vel_x
-        player.x += vel_x
+        # Horizontal velocity — matches physics.js:516-524.
+        player_velocity_x = 0
+        if player.state < 5:
+            if player.state < 3:
+                player_velocity_x = inp.x_dir * PLAYER_SPEED
+            else:
+                # state == 3 (diving) — x driven by diving_direction.
+                player_velocity_x = player.diving_direction * PLAYER_DIVE_SPEED
 
-        # Clamp to court half — original allows up to GROUND_HALF_WIDTH ± PLAYER_HALF_LENGTH.
-        if is_player2:
-            left_bound = NET_PILLAR_X + PLAYER_HALF_LENGTH
-            right_bound = GROUND_WIDTH - PLAYER_HALF_LENGTH
-        else:
-            left_bound = PLAYER_HALF_LENGTH
-            right_bound = NET_PILLAR_X - PLAYER_HALF_LENGTH
-        player.x = max(left_bound, min(player.x, right_bound))
+        player.vx = player_velocity_x
+        future_player_x = player.x + player_velocity_x
+        player.x = future_player_x
 
-        # Jump — only when grounded and not diving.
+        # Court-half clamp (physics.js:530-544).
+        if not is_player2:
+            if future_player_x < PLAYER_HALF_LENGTH:
+                player.x = PLAYER_HALF_LENGTH
+            elif future_player_x > NET_PILLAR_X - PLAYER_HALF_LENGTH:
+                player.x = NET_PILLAR_X - PLAYER_HALF_LENGTH
+        else:
+            if future_player_x < NET_PILLAR_X + PLAYER_HALF_LENGTH:
+                player.x = NET_PILLAR_X + PLAYER_HALF_LENGTH
+            elif future_player_x > GROUND_WIDTH - PLAYER_HALF_LENGTH:
+                player.x = GROUND_WIDTH - PLAYER_HALF_LENGTH
+
+        # Jump — only from state < 3 at grounded y with up input.
         if (
-            not player.is_jumping
-            and not player.is_diving
+            player.state < 3
             and inp.y_dir == -1
             and player.y == PLAYER_GROUND_Y
         ):
             player.vy = PLAYER_JUMP_VELOCITY
-            player.is_jumping = True
+            player.state = 1
+            player.frame_number = 0
 
-        # Gravity + landing
-        if player.is_jumping or player.is_diving:
-            player.y += player.vy
-            if player.y < PLAYER_GROUND_Y:
-                player.vy += GRAVITY
-            elif player.y >= PLAYER_GROUND_Y:
-                player.y = PLAYER_GROUND_Y
-                player.vy = 0
-                if player.is_diving:
-                    player.is_diving = False
-                    player.diving_direction = 0
-                    player.lying_down_duration = LYING_DOWN_DURATION
-                player.is_jumping = False
+        # Gravity + landing — unconditional y advance (physics.js:562-579).
+        future_player_y = player.y + player.vy
+        player.y = future_player_y
+        if future_player_y < PLAYER_GROUND_Y:
+            player.vy += GRAVITY
+        elif future_player_y > PLAYER_GROUND_Y:
+            # Landing — snap to ground and clear vy.
+            player.vy = 0
+            player.y = PLAYER_GROUND_Y
+            player.frame_number = 0
+            if player.state == 3:
+                # Diving → lying down.
+                player.state = 4
+                player.frame_number = 0
+                player.lying_down_duration_left = LYING_DOWN_DURATION
+            else:
+                player.state = 0
 
-        # Dive trigger — power hit while grounded + xDir != 0 starts a dive.
-        if (
-            inp.power_hit
-            and not player.is_jumping
-            and not player.is_diving
-            and player.y == PLAYER_GROUND_Y
-            and inp.x_dir != 0
-        ):
-            player.is_diving = True
-            player.diving_direction = inp.x_dir
-            player.vy = PLAYER_DIVE_VELOCITY
+        # Power-hit / dive trigger (physics.js:581-604).
+        if inp.power_hit:
+            if player.state == 1:
+                # Jumping → power hit.
+                player.delay_before_next_frame = 5
+                player.frame_number = 0
+                player.state = 2
+            elif player.state == 0 and inp.x_dir != 0:
+                # Grounded + horizontal input → dive.
+                player.state = 3
+                player.frame_number = 0
+                player.diving_direction = inp.x_dir
+                player.vy = PLAYER_DIVE_VELOCITY
 
-        # Power-hit flag (true when jumping + power_hit pressed).
-        player.is_power_hitting = inp.power_hit and player.is_jumping
+        # Animation frame_number updates (physics.js:606-631). Only state=2
+        # affects physics (the power-hit dwell window within which a ball
+        # collision is treated as a power hit); other branches are purely
+        # render-state but we mirror them for 1:1 fidelity.
+        if player.state == 1:
+            player.frame_number = (player.frame_number + 1) % 3
+        elif player.state == 2:
+            if player.delay_before_next_frame < 1:
+                player.frame_number += 1
+                if player.frame_number > 4:
+                    player.frame_number = 0
+                    player.state = 1
+            else:
+                player.delay_before_next_frame -= 1
+        elif player.state == 0:
+            player.delay_before_next_frame += 1
+            if player.delay_before_next_frame > 3:
+                player.delay_before_next_frame = 0
+                future_frame_number = (
+                    player.frame_number + player.normal_status_arm_swing_direction
+                )
+                if future_frame_number < 0 or future_frame_number > 4:
+                    player.normal_status_arm_swing_direction = (
+                        -player.normal_status_arm_swing_direction
+                    )
+                player.frame_number = (
+                    player.frame_number + player.normal_status_arm_swing_direction
+                )
 
-    # ------------------------------------------------------------------
-    # Ball-player collision — port of
-    # isCollisionBetweenBallAndPlayerHappened + processCollisionBetweenBallAndPlayer
-    # ------------------------------------------------------------------
+        # Game-end win/lose-pose transitions and their frame advance.
+        if player.game_ended:
+            if player.state == 0:
+                if player.is_winner:
+                    player.state = 5
+                else:
+                    player.state = 6
+                player.delay_before_next_frame = 0
+                player.frame_number = 0
+            self._process_game_end_frame_for(player)
+
+        player.sync_derived_flags()
+
+    @staticmethod
+    def _process_game_end_frame_for(player: PlayerState) -> None:
+        """Port of ``processGameEndFrameFor`` (physics.js:656-664).
+
+        Advances ``frame_number`` up to 4 with a 4-frame dwell between
+        increments. Used for the winner/loser victory/defeat motions after
+        the match has ended.
+        """
+        if player.game_ended and player.frame_number < 4:
+            player.delay_before_next_frame += 1
+            if player.delay_before_next_frame > 4:
+                player.delay_before_next_frame = 0
+                player.frame_number += 1
+
     def _check_ball_player_collision(
         self, ball: BallState, player: PlayerState, inp: PlayerInput
     ) -> None:
-        """Detect collision and set ball velocity for next frame.
+        """Port of ``isCollisionBetweenBallAndPlayerHappened`` +
+        ``processCollisionBetweenBallAndPlayer`` (physics.js:381-731).
 
-        Detection distance matches original exactly: PLAYER_HALF_LENGTH (32px)
-        on both x and y axes. Collision does NOT move the ball; it only updates
-        (vx, vy) which take effect on the next _update_ball_and_world call.
-
-        Per original (physicsEngine, FUN_00403dd0): if the ball stays within
-        the 32px box across multiple frames, the collision is only processed
-        on the FIRST frame. The flag resets when the ball exits the box.
-        Without this gate, a slowly moving / tangential ball would retrigger
-        the velocity reflection every frame and produce chaotic physics.
+        Detection distance: 32px (PLAYER_HALF_LENGTH) on both axes. Uses
+        the ``is_collision_with_ball_happened`` gate so tangential /
+        slow-moving balls that stay in the box across frames only trigger
+        a single collision.
         """
         dx_signed = ball.x - player.x
         dy_signed = ball.y - player.y
@@ -444,52 +615,96 @@ class PikachuVolleyball:
             player.is_collision_with_ball_happened = False
             return
         if player.is_collision_with_ball_happened:
-            # Still in the box from a prior collision — don't re-fire.
             return
         player.is_collision_with_ball_happened = True
 
-        # Base horizontal velocity — signed integer division by 3.
-        if dx_signed < 0:
-            ball.vx = -(abs(dx_signed) // 3)
-        elif dx_signed > 0:
-            ball.vx = abs(dx_signed) // 3
-        else:
-            # Original picks rand() % 3 - 1 (= -1/0/1); we pick 0 for determinism.
-            ball.vx = 0
+        # Base horizontal velocity — physics.js:688-699 with JS-trunc.
+        if ball.x < player.x:
+            ball.vx = -_trunc_div(abs(dx_signed), 3)
+        elif ball.x > player.x:
+            ball.vx = _trunc_div(abs(dx_signed), 3)
+        # else: vx unchanged from its prior value at this point — the
+        # zero-check below handles the "exactly aligned" case.
+        if ball.vx == 0:
+            # Original: ``(rand() % 3) - 1`` → -1, 0, or 1.
+            ball.vx = (self._rand() % 3) - 1
 
         # Base vertical velocity — reflect and clamp magnitude to 15.
-        # Original: vy = -|vy|; if |vy| < 15 then vy = -15.
-        abs_vy = abs(ball.vy)
-        ball.vy = -abs_vy if abs_vy >= BALL_MIN_REFLECT_VY_ABS else -BALL_MIN_REFLECT_VY_ABS
+        ball_abs_vy = abs(ball.vy)
+        ball.vy = -ball_abs_vy
+        if ball_abs_vy < BALL_MIN_REFLECT_VY_ABS:
+            ball.vy = -BALL_MIN_REFLECT_VY_ABS
 
-        # Power hit — overrides vx/vy. Direction determined by which half of
-        # the court the ball is in, NOT by player side.
-        if inp.power_hit and player.is_jumping:
+        # Power-hit branch — triggered by state == 2 (the dwell window
+        # started when the player pressed power_hit while jumping).
+        if player.state == 2:
             x_magnitude = (abs(inp.x_dir) + 1) * 10
             if ball.x < NET_PILLAR_X:
                 ball.vx = x_magnitude
             else:
                 ball.vx = -x_magnitude
-            # Original: vy = |vy| * yDirection * 2. If yDir == 0 this zeros vy.
-            ball.vy = abs(ball.vy) * inp.y_dir * 2
-            # Record graphic markers only — do NOT add to position.
-            # Matches physics.js:715-719 — the white radial "smash" ring
-            # is triggered at BALL_RADIUS and decays each frame.
             ball.punch_effect_x = ball.x
             ball.punch_effect_y = ball.y
+            # Original: ``vy = |vy| * yDirection * 2``. If y_dir == 0 this
+            # zeros vy (flat drive).
+            ball.vy = abs(ball.vy) * inp.y_dir * 2
             ball.punch_effect_radius = BALL_RADIUS
-            # Flag this collision as a power hit so FE can render the
-            # hyper-ball / trail sprite (original view.js:513).
+            ball.sound_power_hit = True
             ball.is_power_hit = True
         else:
-            # Non-power collision — clear the flag so the trail stops
-            # (original physics.js:727).
             ball.is_power_hit = False
 
-    # ------------------------------------------------------------------
-    # Scoring — not in original engine (it returns isBallTouchingGround
-    # and caller handles scoring). Preserved from our earlier implementation.
-    # ------------------------------------------------------------------
+        self._calculate_expected_landing_point_x(ball)
+
+    def _calculate_expected_landing_point_x(self, ball: BallState) -> None:
+        """Port of ``calculateExpectedLandingPointXFor`` (physics.js:738-788).
+
+        Simulates the ball trajectory on a copy until it would touch the
+        ground (or ``INFINITE_LOOP_LIMIT`` is hit as a safety cap), then
+        writes the final x to ``ball.expected_landing_point_x``. This is
+        a read-only prediction — the real ball is not mutated.
+        """
+        bx = ball.x
+        by = ball.y
+        bvx = ball.vx
+        bvy = ball.vy
+        loop_counter = 0
+        while True:
+            loop_counter += 1
+            future_bx = bvx + bx
+            if future_bx < BALL_RADIUS or future_bx > GROUND_WIDTH:
+                bvx = -bvx
+            if by + bvy < 0:
+                bvy = 1
+
+            if (
+                abs(bx - NET_PILLAR_X) < NET_PILLAR_HALF_WIDTH
+                and by > NET_PILLAR_TOP_Y
+            ):
+                # Note: original uses ``<`` here (not ``<=``) — documented
+                # upstream as a likely mistake by the original author, but
+                # mirroring for frame-accurate reproduction.
+                if by < NET_PILLAR_TOP_BOTTOM_Y:
+                    if bvy > 0:
+                        bvy = -bvy
+                else:
+                    if bx < NET_PILLAR_X:
+                        bvx = -abs(bvx)
+                    else:
+                        bvx = abs(bvx)
+
+            by = by + bvy
+            if by > BALL_GROUND_Y or loop_counter >= INFINITE_LOOP_LIMIT:
+                break
+            bx = bx + bvx
+            bvy += 1
+        ball.expected_landing_point_x = bx
+
+    # ==================================================================
+    # Scoring wrapper — NOT in physics.js (original defers to pikavolley.js).
+    # Preserved until the view port commit switches to gameEnd 211f flow.
+    # ==================================================================
+
     def _handle_scoring(self, state: GameState) -> None:
         ball = state.ball
         state.is_round_over = True
@@ -501,15 +716,9 @@ class PikachuVolleyball:
             state.serving_player = 1
 
         if self._post_score_freeze:
-            # Freeze-frame path: hold the grounded-ball state for
-            # POST_SCORE_FREEZE_FRAMES. The next-serve swap happens in
-            # step() when the counter expires (or never, if the match
-            # just ended). Do NOT swap _state here.
             state.post_score_freeze_frames = self.POST_SCORE_FREEZE_FRAMES
             return
 
-        # Legacy immediate-reset path (RL training env opts out of freeze
-        # so the agent isn't forced to no-op during the hold).
         if state.score1 < MAX_SCORE and state.score2 < MAX_SCORE:
             serving = state.serving_player
             s1, s2, frame = state.score1, state.score2, state.frame
@@ -523,10 +732,9 @@ class PikachuVolleyball:
     def _handle_rally_timeout(self, state: GameState) -> None:
         """Force-end the round when the rally stalls past RALLY_MAX_FRAMES.
 
-        Concede goes to the side currently holding the ball (ball.x side).
-        Matches `_handle_scoring` semantics so downstream consumers treat a
-        timeout like a grounded-ball concede, except `round_ended_by_timeout`
-        is set so RL / UI layers can distinguish the two.
+        Concede goes to the side currently holding the ball.
+        ``round_ended_by_timeout`` is set so RL / UI can distinguish from
+        a grounded-ball concede.
         """
         ball = state.ball
         state.is_round_over = True
@@ -539,9 +747,6 @@ class PikachuVolleyball:
             state.serving_player = 1
 
         if self._post_score_freeze:
-            # See _handle_scoring for rationale. The freeze pass-through
-            # in step() will preserve `round_ended_by_timeout=True` for the
-            # whole hold, then swap in a fresh serving state on expiry.
             state.post_score_freeze_frames = self.POST_SCORE_FREEZE_FRAMES
             return
 
