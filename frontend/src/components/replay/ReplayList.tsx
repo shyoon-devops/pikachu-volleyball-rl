@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { getGames, getAvailableReplays } from '../../lib/api'
 import type { GameRecord, ReplayInfo } from '../../lib/types'
 import { formatBotLevel } from '../../lib/formatGame'
+import { formatKstDateTime } from '../../lib/formatTime'
 import './ReplayList.css'
 
 const PAGE_LIMIT = 20
@@ -122,7 +123,7 @@ export function ReplayList() {
                 return (
                   <tr key={g.id}>
                     <td className="text-muted">
-                      {new Date(g.timestamp).toLocaleString()}
+                      {formatKstDateTime(g.timestamp)}
                     </td>
                     <td>{formatBotLevel(g.botLevel)}</td>
                     <td>
