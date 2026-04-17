@@ -683,26 +683,32 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
     //   otherwise +1 (facing right, native sheet orientation).
     sprites.player1.x = state.player1.x
     sprites.player1.y = state.player1.y
-    sprites.player1.scale.x = resolvePlayerScaleX(state.player1, 1)
+    const p1ScaleX = resolvePlayerScaleX(state.player1, 1)
+    sprites.player1.scale.x = p1ScaleX
     const p1Frame = inferPlayerFrame(state.player1, fc)
     sprites.player1.gotoAndStop(Math.min(p1Frame, sprites.player1.totalFrames - 1))
     sprites.shadowP1.x = state.player1.x
     // Dive afterimage: second sprite copy trailing behind player along
     // velocity vector, reduced alpha. Mirrors view.js's motion-blur look
     // for a slide without shipping a dedicated dust asset. Hidden when
-    // not diving so idle/jump frames stay crisp.
-    updateDiveAfterimage(sprites.afterimageP1, state.player1, p1Frame, 1)
+    // not diving so idle/jump frames stay crisp. Pass the resolved
+    // dive-aware scale, NOT the default +1 — otherwise a left dive
+    // (divingDirection=-1) flips the player but leaves the afterimage
+    // facing right, producing a visible mirror artifact (V1 user
+    // report, 2026-04-18).
+    updateDiveAfterimage(sprites.afterimageP1, state.player1, p1Frame, p1ScaleX)
 
     // ── Player 2 (view.js:476-483) ──
     //   P2 mirrors horizontally by default (scale.x = -1). Dive flips
     //   only when `divingDirection === 1` (dive toward own side).
     sprites.player2.x = state.player2.x
     sprites.player2.y = state.player2.y
-    sprites.player2.scale.x = resolvePlayerScaleX(state.player2, -1)
+    const p2ScaleX = resolvePlayerScaleX(state.player2, -1)
+    sprites.player2.scale.x = p2ScaleX
     const p2Frame = inferPlayerFrame(state.player2, fc)
     sprites.player2.gotoAndStop(Math.min(p2Frame, sprites.player2.totalFrames - 1))
     sprites.shadowP2.x = state.player2.x
-    updateDiveAfterimage(sprites.afterimageP2, state.player2, p2Frame, -1)
+    updateDiveAfterimage(sprites.afterimageP2, state.player2, p2Frame, p2ScaleX)
 
     // ── Ball (view.js:496-499) ──
     // Full 0-5 rotation index. Clamp instead of modulo so rotation=5
@@ -919,8 +925,11 @@ function resolvePlayerScaleX(
  * ghost, not a second pikachu. Alpha is low so the main sprite stays
  * visually dominant.
  *
- * `scaleX` matches the owning player's facing direction (+1 for P1,
- * -1 for P2) so the afterimage mirrors the same pose orientation.
+ * `scaleX` is whatever `resolvePlayerScaleX` returned for the owning
+ * player this frame — already accounts for `divingDirection` so the
+ * afterimage faces the same way the player does (V1 fix). Used both
+ * to mirror the sprite and as a fallback offset direction when
+ * velocity is zero.
  */
 const DIVE_AFTERIMAGE_OFFSET_PX = 16
 const DIVE_AFTERIMAGE_ALPHA = 0.4
@@ -929,7 +938,7 @@ function updateDiveAfterimage(
   sprite: AnimatedSprite,
   player: { x: number; y: number; vx: number; vy: number; isDiving: boolean },
   frame: number,
-  scaleX: 1 | -1,
+  scaleX: number,
 ): void {
   if (!player.isDiving) {
     sprite.visible = false
@@ -938,8 +947,9 @@ function updateDiveAfterimage(
   const speed = Math.hypot(player.vx, player.vy)
   // Avoid divide-by-zero on the exact frame a dive begins (vx=vy=0 is
   // unusual but possible between ticks). Fall back to a facing-aligned
-  // offset so the afterimage still renders behind the player.
-  const dirX = speed > 0 ? -player.vx / speed : -scaleX
+  // offset so the afterimage still renders behind the player. Sign is
+  // inverted from the facing scale so the ghost trails BEHIND.
+  const dirX = speed > 0 ? -player.vx / speed : -Math.sign(scaleX)
   const dirY = speed > 0 ? -player.vy / speed : 0
   sprite.visible = true
   sprite.x = player.x + dirX * DIVE_AFTERIMAGE_OFFSET_PX
