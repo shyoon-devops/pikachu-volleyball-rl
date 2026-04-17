@@ -59,8 +59,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app,
-        requests_per_minute: int = 60,
-        burst: int = 20,
+        requests_per_minute: int = 300,
+        burst: int = 100,
     ) -> None:
         super().__init__(app)
         self._rate = requests_per_minute / 60.0  # tokens per second

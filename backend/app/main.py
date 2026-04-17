@@ -116,8 +116,15 @@ app.add_middleware(
 
 app.add_middleware(
     RateLimitMiddleware,
-    requests_per_minute=int(os.getenv("RATE_LIMIT_RPM", "60")),
-    burst=int(os.getenv("RATE_LIMIT_BURST", "20")),
+    # Defaults raised 2026-04-18 after dev users hit "Too many requests"
+    # during normal SPA navigation. The frontend fires 5–10 GETs in
+    # parallel on every panel switch (status + games + replays + models +
+    # metrics), so the previous 60 rpm / 20-token burst was tripping a
+    # 429 on the second tab change. New defaults give one user ~5 req/s
+    # sustained with a 100-request burst window, still bounded enough
+    # that a real attacker burns through their bucket within seconds.
+    requests_per_minute=int(os.getenv("RATE_LIMIT_RPM", "300")),
+    burst=int(os.getenv("RATE_LIMIT_BURST", "100")),
 )
 
 # Correlation ID middleware is added last so it runs first in the Starlette
