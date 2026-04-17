@@ -210,7 +210,31 @@ export function MetricsChart({ data, dataKey, xKey = 'step', color, label, curre
           onMouseUp={handleMouseUp}
         >
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey={xKey} tickLine={false} />
+          {/*
+            Anchor the unzoomed x-axis at step 0 so the chart's left
+            edge stays put across page refreshes (F3 user report,
+            2026-04-18). Recharts' default `[dataMin, dataMax]` domain
+            drifts forward whenever the FE ring buffer
+            (MAX_METRICS_POINTS=1000) rolls or the BE timeseries
+            response trims older samples — making the chart look like
+            it "jumps" between sessions even though the same
+            experiment is still running. Pinning to 0 makes the x-axis
+            an honest "training step since experiment start" axis.
+
+            When the user drags to zoom we revert to `dataMin/dataMax`
+            on the visible (already-filtered) slice so the zoom box
+            isn't padded with empty space back to step 0.
+
+            `type='number'` is required for `domain` to take effect —
+            XAxis defaults to 'category' which ignores the prop.
+          */}
+          <XAxis
+            dataKey={xKey}
+            type="number"
+            domain={isZoomed ? ['dataMin', 'dataMax'] : [0, 'dataMax']}
+            allowDataOverflow={false}
+            tickLine={false}
+          />
           <YAxis tickLine={false} width={48} />
           <Tooltip />
 
