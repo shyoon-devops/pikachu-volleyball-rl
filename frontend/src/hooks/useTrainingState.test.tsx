@@ -128,6 +128,9 @@ function Probe() {
       <span data-testid="conn">{connectionState}</span>
       <span data-testid="metrics-count">{metrics.length}</span>
       <span data-testid="games-count">{recentGames.length}</span>
+      <span data-testid="latest-game-timestamp">
+        {recentGames[0]?.timestamp ?? ''}
+      </span>
       <button onClick={() => send('training:stop')}>Stop</button>
       <button onClick={() => send('training:pause')}>Pause</button>
       <button onClick={() => send('training:resume')}>Resume</button>
@@ -955,5 +958,97 @@ describe('useTrainingState — clear chart on experiment_id transition (V3, 2026
     })
 
     expect(screen.getByTestId('metrics-count').textContent).toBe('1')
+  })
+})
+
+describe('useTrainingState — game:result timestamp fallback (R1, 2026-04-18)', () => {
+  // BE enqueues `game:result` payloads without `timestamp` (the field
+  // is added later by Pydantic when the GameRecord is constructed for
+  // Mongo save). FE must fall back to client-now so the live row
+  // doesn't render "undefined" until the next REST hydration.
+  function setupRoutes() {
+    return installFetchRouter(url => {
+      if (url.startsWith('/api/training/status')) {
+        return {
+          ok: true,
+          payload: { state: 'running', current_step: 0, current_episode: 0 },
+        }
+      }
+      if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
+      if (url.startsWith('/api/training/timeseries')) {
+        return { ok: true, payload: { data: [] } }
+      }
+      const side = matchSideEffectRoute(url, {})
+      if (side) return side
+      return { ok: false, status: 404, payload: {} }
+    })
+  }
+
+  it('fills timestamp with client-now when WS payload omits it', async () => {
+    setupRoutes()
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1))
+    await act(async () => { MockWebSocket.instances[0]?.simulateOpen() })
+
+    const before = Date.now()
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('game:result', {
+        // Mirrors the BE LiveFrameCallback enqueue dict (no timestamp).
+        game_id: 'uuid-fresh',
+        experiment_id: 'exp-A',
+        bot_level: 3,
+        score1: 15,
+        score2: 7,
+        winner: 1,
+        duration_frames: 4500,
+        rally_count: 9,
+      })
+    })
+    const after = Date.now()
+
+    await waitFor(() => expect(screen.getByTestId('games-count').textContent).toBe('1'))
+    const ts = screen.getByTestId('latest-game-timestamp').textContent
+    expect(ts).toBeTruthy()
+    // Parsed back, the fallback timestamp should sit inside the test's
+    // observed window (allowing for some scheduler jitter).
+    const t = new Date(ts!).getTime()
+    expect(t).toBeGreaterThanOrEqual(before - 50)
+    expect(t).toBeLessThanOrEqual(after + 50)
+  })
+
+  it('preserves the BE-provided timestamp when present (forward-compat)', async () => {
+    // Once BE adds `timestamp` to the enqueued dict, the fallback must
+    // step aside — we keep the BE-authoritative value.
+    setupRoutes()
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1))
+    await act(async () => { MockWebSocket.instances[0]?.simulateOpen() })
+
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('game:result', {
+        game_id: 'uuid-with-ts',
+        experiment_id: 'exp-A',
+        bot_level: 2,
+        score1: 14,
+        score2: 15,
+        winner: 2,
+        duration_frames: 5200,
+        rally_count: 11,
+        timestamp: '2026-04-18T01:00:00Z',
+      })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('games-count').textContent).toBe('1'))
+    expect(screen.getByTestId('latest-game-timestamp').textContent).toBe(
+      '2026-04-18T01:00:00Z',
+    )
   })
 })

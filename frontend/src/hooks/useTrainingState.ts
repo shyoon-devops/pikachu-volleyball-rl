@@ -22,7 +22,23 @@ import type {
   WSMessage,
 } from '../lib/types'
 
-const MAX_METRICS_POINTS = 1000
+/**
+ * Cap on the live metrics ring buffer.
+ *
+ * Bumped from 1000 → 10000 (R3 user report, 2026-04-18): the previous
+ * cap covered only ~256k training steps at MetricsCallback's
+ * log_interval=256, so a refresh mid-run on a long session showed the
+ * chart starting at step ~150k+ with the leading 37% blank — the FE
+ * had silently dropped the older samples on the way up. 10000 matches
+ * the BE `/api/training/timeseries` upper bound (BE-7) and covers
+ * 2.56M steps of training, far beyond a typical 1M-step run.
+ *
+ * Memory cost is modest: 10000 × ~48 bytes (TrainingMetrics fields) =
+ * ~480 KB on the heap, well below the chart-render budget.
+ */
+const MAX_METRICS_POINTS = 10000
+/** Matches BE `/api/training/timeseries` `limit` ceiling. */
+const TIMESERIES_HYDRATION_LIMIT = 10000
 const MAX_RECENT_GAMES = 100
 /**
  * How many completed games to pull on mount/reconnect. The hook
@@ -107,6 +123,28 @@ export function useTrainingStateImpl(): TrainingState {
 
   const handleGameResult = useCallback((msg: WSMessage) => {
     const record = snakeToCamel<GameRecord>(msg.payload)
+    // R1 fallback (2026-04-18): WS `game:result` payloads ship without
+    // `timestamp` because BE enqueues a raw result dict in
+    // `LiveFrameCallback._on_step` (callbacks.py:304-316) — the field
+    // only gets populated when GameRecord is constructed for Mongo
+    // save (handlers.py:332-341 → schemas.py default_factory). The
+    // dispatcher then broadcasts the original `data` dict, NOT the
+    // saved record, so live FE rows arrive with `timestamp:undefined`
+    // and rendered "undefined" in the History column until refresh
+    // re-hydrated via REST. Falling back to `Date.now()` here is
+    // accurate within ~1s of the actual game-end (the WS push happens
+    // immediately after the engine reports the final score), which
+    // matches REST's `datetime.utcnow()` semantics close enough.
+    //
+    // [BE-WAITING] When BE adds `timestamp` to the enqueued result
+    // dict (e.g. `result["timestamp"] = datetime.utcnow().isoformat()`
+    // in callbacks.py before `_safe_enqueue`), the BE-authoritative
+    // value will overwrite this fallback on the next REST hydration.
+    // The shim is safe to keep across that fix — `record.timestamp ??`
+    // uses BE value when present.
+    if (!record.timestamp) {
+      record.timestamp = new Date().toISOString()
+    }
     setRecentGames(prev => {
       const next = [record, ...prev]
       return next.length > MAX_RECENT_GAMES ? next.slice(0, MAX_RECENT_GAMES) : next
@@ -255,10 +293,10 @@ export function useTrainingStateImpl(): TrainingState {
 
     let cancelled = false
     Promise.all([
-      getTimeseries('reward', 1000, expId).catch(() => []),
-      getTimeseries('win_rate', 1000, expId).catch(() => []),
-      getTimeseries('policy_loss', 1000, expId).catch(() => []),
-      getTimeseries('value_loss', 1000, expId).catch(() => []),
+      getTimeseries('reward', TIMESERIES_HYDRATION_LIMIT, expId).catch(() => []),
+      getTimeseries('win_rate', TIMESERIES_HYDRATION_LIMIT, expId).catch(() => []),
+      getTimeseries('policy_loss', TIMESERIES_HYDRATION_LIMIT, expId).catch(() => []),
+      getTimeseries('value_loss', TIMESERIES_HYDRATION_LIMIT, expId).catch(() => []),
     ])
       .then(([reward, winRate, policyLoss, valueLoss]) => {
         if (cancelled) return
