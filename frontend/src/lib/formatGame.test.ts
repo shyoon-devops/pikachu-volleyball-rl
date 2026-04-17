@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { formatBotLevel, formatRallyCount } from './formatGame'
+import {
+  formatBotLevel,
+  formatRallyCount,
+  formatAvgRallyLength,
+  formatExperimentIdShort,
+} from './formatGame'
 
 describe('formatBotLevel', () => {
   it('renders L1 through L5 for valid levels', () => {
@@ -66,5 +71,44 @@ describe('formatRallyCount (BE-WAITING)', () => {
   it('renders the integer when BE provides a real count', () => {
     expect(formatRallyCount(7)).toBe('7')
     expect(formatRallyCount(1)).toBe('1')
+  })
+})
+
+describe('formatAvgRallyLength', () => {
+  it('rounds frames/rally to an integer with an "f" suffix', () => {
+    expect(formatAvgRallyLength(450, 9)).toBe('50f')
+    expect(formatAvgRallyLength(4500, 7)).toBe('643f') // 4500/7 = 642.86 → 643
+  })
+
+  it('renders "?" when rallyCount is 0 (BE-WAITING) — avoids Infinity', () => {
+    expect(formatAvgRallyLength(4500, 0)).toBe('?')
+  })
+
+  it('renders "?" when either input is missing', () => {
+    expect(formatAvgRallyLength(undefined, 7)).toBe('?')
+    expect(formatAvgRallyLength(4500, undefined)).toBe('?')
+    expect(formatAvgRallyLength(null, null)).toBe('?')
+  })
+
+  it('renders "?" for NaN inputs', () => {
+    expect(formatAvgRallyLength(Number.NaN, 7)).toBe('?')
+    expect(formatAvgRallyLength(4500, Number.NaN)).toBe('?')
+  })
+})
+
+describe('formatExperimentIdShort', () => {
+  it('truncates a long id to the first 8 characters', () => {
+    expect(formatExperimentIdShort('abcdef1234567890')).toBe('abcdef12')
+  })
+
+  it('returns short ids unchanged', () => {
+    expect(formatExperimentIdShort('exp-1')).toBe('exp-1')
+    expect(formatExperimentIdShort('12345678')).toBe('12345678')
+  })
+
+  it('renders "—" when the id is missing', () => {
+    expect(formatExperimentIdShort(null)).toBe('—')
+    expect(formatExperimentIdShort(undefined)).toBe('—')
+    expect(formatExperimentIdShort('')).toBe('—')
   })
 })
