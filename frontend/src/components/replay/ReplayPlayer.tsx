@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { ReplayControls } from './ReplayControls'
-import { getReplay } from '../../lib/api'
-import type { GameState } from '../../lib/types'
+import { getReplay, getGames } from '../../lib/api'
+import { formatBotLevel, formatRallyCount } from '../../lib/formatGame'
+import { formatKstDateTime } from '../../lib/formatTime'
+import type { GameRecord, GameState } from '../../lib/types'
 import './ReplayPlayer.css'
 
 const FPS = 30
@@ -17,6 +19,10 @@ export function ReplayPlayer() {
   const [speed, setSpeed] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // GameRecord lookup for the bottom metadata strip (V4 user request,
+  // 2026-04-18). Optional — the strip degrades gracefully to
+  // frame-derived values when this fetch fails or returns no match.
+  const [meta, setMeta] = useState<GameRecord | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -41,6 +47,34 @@ export function ReplayPlayer() {
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
+    return () => { cancelled = true }
+  }, [id])
+
+  /**
+   * Best-effort GameRecord lookup so the metadata strip can show
+   * `botLevel`, `rallyCount`, and the original game timestamp — none
+   * of which are present in the per-frame `GameState` payloads stored
+   * in the replay msgpack.
+   *
+   * The route `/api/games/{id}` only accepts the Mongo ObjectId hex,
+   * but the URL we navigate from in `ReplayList` carries the UUID4
+   * `gameId` (the replay file stem). There's no FE-callable endpoint
+   * that takes the UUID directly today, so we list page 1 of /games
+   * (default 100 records, 5s server-side TTL cache) and find the
+   * matching record client-side. Misses (game older than the first
+   * page or game record missing from Mongo) silently fall through;
+   * the metadata strip downgrades to frame-derived values only.
+   */
+  useEffect(() => {
+    if (!id) return
+    let cancelled = false
+    getGames(1, 100)
+      .then(res => {
+        if (cancelled) return
+        const match = res.data.find(g => g.gameId === id || g.id === id) ?? null
+        setMeta(match)
+      })
+      .catch(() => { /* silent — strip falls back to frame-derived */ })
     return () => { cancelled = true }
   }, [id])
 
@@ -149,6 +183,31 @@ export function ReplayPlayer() {
   const score1 = currentFrame?.score1 ?? 0
   const score2 = currentFrame?.score2 ?? 0
 
+  /**
+   * Frame-derived metadata — works without the GameRecord fetch and
+   * is the authoritative source for fields the record can't add
+   * (final score is the absolute truth from the replay's last frame,
+   * not the DB record which may have a slight off-by-one in edge
+   * cases). REST `meta` fills in fields no frame carries (botLevel,
+   * rallyCount, timestamp).
+   */
+  const summary = useMemo(() => {
+    const last = frames[frames.length - 1] ?? null
+    const finalScore1 = last?.score1 ?? meta?.score1 ?? 0
+    const finalScore2 = last?.score2 ?? meta?.score2 ?? 0
+    const winner =
+      meta?.winner ??
+      (finalScore1 > finalScore2 ? 1 : finalScore2 > finalScore1 ? 2 : 0)
+    const durationFrames =
+      last?.frame ?? meta?.durationFrames ?? frames.length
+    return {
+      finalScore1,
+      finalScore2,
+      winner,
+      durationFrames,
+    }
+  }, [frames, meta])
+
   if (loading) {
     return <div className="replay-player-loading">Loading replay...</div>
   }
@@ -183,6 +242,47 @@ export function ReplayPlayer() {
         onSpeedChange={setSpeed}
         onSeek={handleSeek}
       />
+
+      <dl className="replay-player-meta" aria-label="Replay metadata">
+        <div className="replay-player-meta-item">
+          <dt>Bot Level</dt>
+          <dd>{formatBotLevel(meta?.botLevel)}</dd>
+        </div>
+        <div className="replay-player-meta-item">
+          <dt>Final Score</dt>
+          <dd>
+            <span className="score-p1">{summary.finalScore1}</span>
+            {' : '}
+            <span className="score-p2">{summary.finalScore2}</span>
+          </dd>
+        </div>
+        <div className="replay-player-meta-item">
+          <dt>Winner</dt>
+          <dd className={summary.winner === 1 ? 'winner-agent' : summary.winner === 2 ? 'winner-bot' : ''}>
+            {summary.winner === 1 ? 'RL Agent' : summary.winner === 2 ? 'Bot' : '—'}
+          </dd>
+        </div>
+        <div className="replay-player-meta-item">
+          <dt>Duration</dt>
+          <dd className="text-muted">{summary.durationFrames} frames</dd>
+        </div>
+        <div className="replay-player-meta-item">
+          <dt>Rallies</dt>
+          <dd className="text-muted">{formatRallyCount(meta?.rallyCount)}</dd>
+        </div>
+        {meta?.timestamp && (
+          <div className="replay-player-meta-item">
+            <dt>Recorded</dt>
+            <dd className="text-muted">{formatKstDateTime(meta.timestamp)}</dd>
+          </div>
+        )}
+        {meta?.experimentId && (
+          <div className="replay-player-meta-item replay-player-meta-item--wide">
+            <dt>Experiment</dt>
+            <dd className="text-muted text-mono">{meta.experimentId}</dd>
+          </div>
+        )}
+      </dl>
     </div>
   )
 }
