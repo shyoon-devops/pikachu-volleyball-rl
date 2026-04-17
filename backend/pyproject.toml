@@ -35,6 +35,16 @@ include = ["backend*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Default: exclude E2E tests that hit a live backend. Opt-in with `-m e2e`
+# AFTER code is pushed + deployed — never against local in-dev code.
+# Incident 2026-04-17: a full-suite run against localhost:8001 fired
+# training:start/set_level/stop on the live dev backend and oxidised
+# the running experiment.
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: end-to-end tests that connect to a live backend (httpx/WebSocket). Deselected by default; run explicitly only after a deploy.",
+    "load: heavy concurrency/load tests (deselect with -m 'not load').",
+]
 
 [tool.ruff]
 target-version = "py311"

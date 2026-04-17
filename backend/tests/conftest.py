@@ -204,14 +204,30 @@ async def _test_lifespan(app):
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
+    # No default live-backend URL. Incident 2026-04-17: a silent default of
+    # http://localhost:8001 caused a full-suite unit-test run to hammer the
+    # dev backend with training:start/set_level/stop via httpx+WebSocket.
+    # E2E tests must be opt-in with explicit --base-url AND -m e2e.
     parser.addoption(
         "--base-url",
-        default="http://localhost:8001",
-        help="Base URL for regression tests (default: dev)",
+        default="http://localhost:9999",
+        help=(
+            "Base URL for E2E/regression tests. Default is an unreachable "
+            "port so accidental runs fail fast instead of mutating a live "
+            "env. Supply --base-url + -m e2e when running against QA/prod."
+        ),
     )
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    # The `e2e` and `load` markers are also declared in pyproject.toml so
+    # `-m 'not e2e'` is picked up via addopts. Re-registering here keeps
+    # older invocations (outside the pyproject path) lint-clean.
+    config.addinivalue_line(
+        "markers",
+        "e2e: end-to-end tests that hit a live backend over "
+        "httpx/WebSocket. Deselected by default.",
+    )
     config.addinivalue_line(
         "markers",
         "load: marks tests that exert heavy concurrency/load "

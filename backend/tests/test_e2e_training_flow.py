@@ -26,6 +26,12 @@ import pytest_asyncio
 import websockets
 import websockets.exceptions
 
+# Every test in this module talks to a live backend (httpx + WebSocket)
+# and mutates training state. Module-level marker keeps the default
+# `-m 'not e2e'` addopts filter excluding the whole file. See the
+# 2026-04-17 incident note in pyproject.toml.
+pytestmark = pytest.mark.e2e
+
 
 @pytest.fixture(scope="session")
 def base_url(request: pytest.FixtureRequest) -> str:
