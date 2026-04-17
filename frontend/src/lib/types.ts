@@ -21,6 +21,22 @@ export interface PlayerState {
   state?: number
   frameNumber?: number
   divingDirection?: number
+  /**
+   * Per-player winner / game-ended flags emitted by the engine
+   * (`backend/game/engine.py`, BE commit 0ec693ef). `isWinner` is
+   * true on the winning player only; `gameEnded` is true on BOTH
+   * players for the duration of the 211-frame gameEnd window so
+   * either sprite can opt into its own pose timing.
+   *
+   * The 5/6 win/lose poses themselves come through `state` (5 = win,
+   * 6 = lose); these flags are useful for FE-only effects (e.g.
+   * "winner highlight") that don't need to peek at top-level
+   * isGameEnded + score.
+   *
+   * Optional for pre-port-state replay decode.
+   */
+  isWinner?: boolean
+  gameEnded?: boolean
 }
 
 export interface BallState {
@@ -87,6 +103,31 @@ export interface GameState {
   isRoundOver?: boolean
   isGameEnded?: boolean
   gameEndFrameCounter?: number
+  /**
+   * Display state-machine fields ported from `pikavolley.js`:
+   *   - `round`                  active rally
+   *   - `afterEndOfRound`        5-frame fade-to-black after a score
+   *   - `beforeStartOfNextRound` 30-frame ready window with a blinking
+   *                              "READY" sprite, fade back to clear
+   *   - `gameEnd`                211-frame winner/loser pose
+   *
+   * `slowMotionFramesLeft` decrements during the post-score slow-mo
+   * window (max 6). The BE re-emits the same frame several times in
+   * a row during this window so the FE renders naturally slow without
+   * needing to special-case animation timing.
+   *
+   * `fadeBlackAlpha` is in [0, 1] and drives a full-screen black
+   * overlay sprite (asset `objects/black.png`).
+   * `readyMessageVisible` toggles every 5 engine frames during
+   * `beforeStartOfNextRound` (`pikavolley.js:443-444`).
+   *
+   * All optional for compatibility with pre-port replay decode and
+   * any frame the engine emits before the state-machine port lands.
+   */
+  stateName?: string
+  slowMotionFramesLeft?: number
+  fadeBlackAlpha?: number
+  readyMessageVisible?: boolean
   /**
    * Per-frame SFX trigger flags emitted by the ported engine
    * (`backend/rl/callbacks.py::_serialize_state::sounds`, BE dev
