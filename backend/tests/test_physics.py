@@ -517,6 +517,31 @@ class TestJumpAndDive:
         assert game._state.player1.is_diving
         assert game._state.player1.diving_direction == 1
 
+    def test_dive_direction_tracks_left_input(self) -> None:
+        # physics.js:597 — player.divingDirection = userInput.xDirection.
+        # Left input (x_dir=-1) must record -1, not default 0 or the
+        # absolute value. FE dive sprite orientation depends on the sign.
+        game = PikachuVolleyball()
+        game.reset()
+        dive_left = PlayerInput(x_dir=-1, y_dir=0, power_hit=True)
+        game.step(dive_left, NOOP)
+        assert game._state.player1.is_diving
+        assert game._state.player1.diving_direction == -1
+
+    def test_dive_direction_resets_on_landing(self) -> None:
+        # physics.js:564-578 — on landing, state=3 → state=4 and
+        # diving flags clear. diving_direction must reset to 0 so the
+        # next idle/jump frame doesn't carry a stale sign.
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.player1.is_diving = True
+        game._state.player1.diving_direction = 1
+        game._state.player1.y = PLAYER_GROUND_Y - 3
+        game._state.player1.vy = 10  # will hit ground
+        game.step(NOOP, NOOP)
+        assert not game._state.player1.is_diving
+        assert game._state.player1.diving_direction == 0
+
     def test_dive_landing_starts_lying_down(self) -> None:
         game = PikachuVolleyball()
         game.reset()

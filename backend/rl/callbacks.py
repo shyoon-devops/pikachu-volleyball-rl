@@ -366,6 +366,15 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             "is_jumping": state.player1.is_jumping,
             "is_diving": state.player1.is_diving,
             "is_power_hitting": state.player1.is_power_hitting,
+            # Signed dive direction (-1 left, 0 none, +1 right).
+            # Mirrors original physics.js:138 (init) / :597 (set on dive
+            # trigger) / :522 (drives dive horizontal velocity). FE needs
+            # this to render the dive pose facing the correct side — vx
+            # sign was being used as a fallback and flipped wrong when the
+            # diving player's x-velocity was clamped against a wall.
+            "diving_direction": int(
+                getattr(state.player1, "diving_direction", 0)
+            ),
         },
         "player2": {
             "x": state.player2.x,
@@ -375,6 +384,9 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             "is_jumping": state.player2.is_jumping,
             "is_diving": state.player2.is_diving,
             "is_power_hitting": state.player2.is_power_hitting,
+            "diving_direction": int(
+                getattr(state.player2, "diving_direction", 0)
+            ),
         },
         "ball": {
             "x": state.ball.x,

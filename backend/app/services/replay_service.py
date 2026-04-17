@@ -57,7 +57,12 @@ class ReplayService:
             files.pop(0).unlink()
 
 
-_PLAYER_DEFAULTS = {"is_jumping": False, "is_diving": False, "is_power_hitting": False}
+_PLAYER_DEFAULTS = {
+    "is_jumping": False,
+    "is_diving": False,
+    "is_power_hitting": False,
+    "diving_direction": 0,
+}
 _BALL_DEFAULTS = {
     "rotation": 0,
     "is_power_hit": False,

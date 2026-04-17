@@ -185,6 +185,29 @@ class TestSerializeState:
             "game_end_frame_counter",
         }
 
+    def test_serialize_state_emits_diving_direction(self) -> None:
+        # Port check: physics.js Player.divingDirection (0xB4, init 0) must
+        # round-trip through the WS/replay frame. FE uses this to flip the
+        # dive sprite left/right instead of guessing from vx sign.
+        state = GameState(
+            player1=PlayerState(x=100, y=200, is_diving=True, diving_direction=-1),
+            player2=PlayerState(x=300, y=200, is_diving=True, diving_direction=1),
+            ball=BallState(x=200, y=150),
+        )
+        result = _serialize_state(state)
+        assert result["player1"]["diving_direction"] == -1
+        assert result["player2"]["diving_direction"] == 1
+
+    def test_serialize_state_diving_direction_defaults_zero(self) -> None:
+        state = GameState(
+            player1=PlayerState(x=0, y=0),
+            player2=PlayerState(x=0, y=0),
+            ball=BallState(x=0, y=0),
+        )
+        result = _serialize_state(state)
+        assert result["player1"]["diving_direction"] == 0
+        assert result["player2"]["diving_direction"] == 0
+
 
 class TestCheckpointCallback:
     """Cover CheckpointCallback save logic."""
