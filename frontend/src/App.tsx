@@ -4,6 +4,7 @@ import { Dashboard } from './components/dashboard/Dashboard'
 import { ReplayList } from './components/replay/ReplayList'
 import { ReplayPlayer } from './components/replay/ReplayPlayer'
 import { EvalPanel } from './components/evaluation/EvalPanel'
+import { VisualHarness } from './components/game/VisualHarness'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ConnectionIndicator } from './components/ConnectionIndicator'
 import { TrainingStateProvider } from './hooks/TrainingStateProvider'
@@ -44,6 +45,7 @@ function App() {
                 <Route path="/history" element={<ReplayList />} />
                 <Route path="/replay/:id" element={<ReplayPlayer />} />
                 <Route path="/evaluation" element={<EvalPanel />} />
+                <Route path="/visual" element={<VisualHarness />} />
               </Routes>
             </ErrorBoundary>
           </main>
