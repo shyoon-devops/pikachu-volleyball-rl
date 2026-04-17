@@ -16,6 +16,12 @@ import {
 } from './powerHitTrail'
 import { computePunchEffect } from './punchEffect'
 import { inferPlayerFrame } from './playerFrame'
+import {
+  Cloud,
+  Wave,
+  cloudAndWaveEngine,
+  NUM_OF_CLOUDS,
+} from './cloudAndWave'
 import './GameCanvas.css'
 
 // ── Original game constants (from physics.js) ──
@@ -28,7 +34,6 @@ const PLAYER_HALF = 32
 const BALL_RADIUS = 20
 const PLAYER_GROUND_Y = 244
 const SHADOW_Y = 273
-const NUM_CLOUDS = 10
 // Net pillar x-anchor in the original engine (view.js:785, 789).
 // Distinct from NET_X (216) which is the collision-axis centre — the
 // sprite sits 3px to the left of that centre line.
@@ -165,67 +170,9 @@ function buildNumberTextures(textures: Record<string, Texture>): Texture[] {
   return result
 }
 
-// ── Cloud model (ported from cloud_and_wave.js) ──
-interface CloudModel {
-  x: number
-  y: number
-  xVelocity: number
-  sizeTurn: number
-}
-
-function createCloud(): CloudModel {
-  return {
-    x: -68 + Math.floor(Math.random() * (COURT_WIDTH + 68)),
-    y: Math.floor(Math.random() * 152),
-    xVelocity: 1 + Math.floor(Math.random() * 2),
-    sizeTurn: Math.floor(Math.random() * 11),
-  }
-}
-
-function cloudSizeDiff(c: CloudModel): number {
-  return 5 - Math.abs(c.sizeTurn - 5)
-}
-
-function tickClouds(clouds: CloudModel[]): void {
-  for (const c of clouds) {
-    c.x += c.xVelocity
-    if (c.x > COURT_WIDTH) {
-      c.x = -68
-      c.y = Math.floor(Math.random() * 152)
-      c.xVelocity = 1 + Math.floor(Math.random() * 2)
-    }
-    c.sizeTurn = (c.sizeTurn + 1) % 11
-  }
-}
-
-// ── Wave model ──
-interface WaveModel {
-  verticalCoord: number
-  velocity: number
-  yCoords: number[]
-}
-
-function createWave(): WaveModel {
-  const yCoords: number[] = []
-  for (let i = 0; i < COURT_WIDTH / 16; i++) {
-    yCoords.push(314)
-  }
-  return { verticalCoord: 0, velocity: 2, yCoords }
-}
-
-function tickWave(w: WaveModel): void {
-  w.verticalCoord += w.velocity
-  if (w.verticalCoord > 32) {
-    w.verticalCoord = 32
-    w.velocity = -1
-  } else if (w.verticalCoord < 0 && w.velocity < 0) {
-    w.velocity = 2
-    w.verticalCoord = -Math.floor(Math.random() * 40)
-  }
-  for (let i = 0; i < COURT_WIDTH / 16; i++) {
-    w.yCoords[i] = 314 - w.verticalCoord + Math.floor(Math.random() * 3)
-  }
-}
+// Cloud/Wave models + engine live in ./cloudAndWave (1:1 port of the
+// original cloud_and_wave.js). GameCanvas just holds the instances and
+// forwards their state onto Pixi sprites each frame.
 
 // ── Scene objects ──
 interface SpriteObjects {
@@ -353,11 +300,11 @@ function buildSpriteScene(
 
   stage.addChild(bg)
 
-  // ── Clouds ──
+  // ── Clouds (view.js:904-915 makeCloudContainer) ──
   const cloudContainer = new Container()
   const cloudTex = textures['objects/cloud.png']
   if (cloudTex) {
-    for (let i = 0; i < NUM_CLOUDS; i++) {
+    for (let i = 0; i < NUM_OF_CLOUDS; i++) {
       const cloud = new Sprite(cloudTex)
       cloud.anchor.set(0, 0)
       cloudContainer.addChild(cloud)
@@ -484,8 +431,8 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
   const lerpFactorRef = useRef(0)
   const animFrameRef = useRef(0)
   const frameCounterRef = useRef(0)
-  const cloudsRef = useRef<CloudModel[]>([])
-  const waveRef = useRef<WaveModel>(createWave())
+  const cloudsRef = useRef<Cloud[]>([])
+  const waveRef = useRef<Wave>(new Wave())
 
   useEffect(() => {
     const container = containerRef.current
@@ -550,13 +497,16 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
             sharedSource.scaleMode = 'nearest'
           }
           spritesRef.current = buildSpriteScene(textures, app.stage)
-          // Initialize clouds
-          const clouds: CloudModel[] = []
-          for (let i = 0; i < NUM_CLOUDS; i++) {
-            clouds.push(createCloud())
+          // Initialize 10 clouds + wave using the 1:1 port of
+          // cloud_and_wave.js. Each Cloud seeds itself with randomized
+          // x/y/velocity in its constructor; Wave starts at y=314
+          // (bottom of the court) and oscillates 0→32 vertically.
+          const clouds: Cloud[] = []
+          for (let i = 0; i < NUM_OF_CLOUDS; i++) {
+            clouds.push(new Cloud())
           }
           cloudsRef.current = clouds
-          waveRef.current = createWave()
+          waveRef.current = new Wave()
           return
         }
       } catch {
@@ -619,23 +569,25 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
 
     const fc = frameCounterRef.current
 
-    // ── Clouds & Waves (ambient, independent of game state) ──
+    // ── Clouds & Waves (view.js:552-573 drawCloudsAndWave) ──
+    // One engine tick advances both clouds and wave together, then we
+    // flush each to its Pixi sprite. Sprite positions use the cloud's
+    // size-compensated getters so width/height pulsing stays centered.
     const clouds = cloudsRef.current
-    if (clouds.length > 0) {
-      tickClouds(clouds)
-      for (let i = 0; i < clouds.length && i < sprites.cloudContainer.children.length; i++) {
-        const c = clouds[i]
-        const sd = cloudSizeDiff(c)
-        const sprite = sprites.cloudContainer.children[i]
-        sprite.x = c.x - sd
-        sprite.y = c.y - sd
-        sprite.width = 48 + 2 * sd
-        sprite.height = 24 + 2 * sd
-      }
-    }
-
     const wave = waveRef.current
-    tickWave(wave)
+    cloudAndWaveEngine(clouds, wave)
+    for (
+      let i = 0;
+      i < clouds.length && i < sprites.cloudContainer.children.length;
+      i++
+    ) {
+      const c = clouds[i]
+      const sprite = sprites.cloudContainer.children[i]
+      sprite.x = c.spriteTopLeftPointX
+      sprite.y = c.spriteTopLeftPointY
+      sprite.width = c.spriteWidth
+      sprite.height = c.spriteHeight
+    }
     for (let i = 0; i < sprites.waveContainer.children.length; i++) {
       sprites.waveContainer.children[i].y = wave.yCoords[i] ?? 314
     }
