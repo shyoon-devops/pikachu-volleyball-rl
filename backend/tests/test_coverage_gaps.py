@@ -169,9 +169,10 @@ class TestSerializeState:
             ball=BallState(x=0, y=0),
         )
         result = _serialize_state(state)
-        # `is_round_over` + `post_score_freeze_frames` were added so the FE
-        # replay viewer can render a scoring freeze overlay on the grounded
-        # frames emitted by the new post-score hold.
+        # `is_round_over` + `is_game_ended` + `game_end_frame_counter` drive
+        # the FE scoring / winner-pose overlays. The pre-view-port field
+        # `post_score_freeze_frames` was dropped; replay_service back-fills
+        # it for legacy replays so old replay files still decode on the FE.
         assert set(result.keys()) == {
             "player1",
             "player2",
@@ -180,7 +181,8 @@ class TestSerializeState:
             "score2",
             "frame",
             "is_round_over",
-            "post_score_freeze_frames",
+            "is_game_ended",
+            "game_end_frame_counter",
         }
 
 

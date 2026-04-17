@@ -194,12 +194,17 @@ class GameState:
     # grounded). The concede is awarded to the side currently holding the
     # ball. Consumers can distinguish timeout concedes via this flag.
     round_ended_by_timeout: bool = False
-    # Countdown of remaining "freeze" frames after a scoring event. While > 0
-    # the engine holds the grounded-ball state unchanged so viewers see the
-    # final scoring moment. NOTE: slated for removal in the upcoming
-    # ``port(view): gameEnd 211f`` commit — the original has no freeze, it
-    # lets physics continue running inside the ``gameEnd`` state.
-    post_score_freeze_frames: int = 0
+    # Port of pikavolley.js ``gameEnded``. Flips to True the frame MAX_SCORE
+    # is reached and stays True; subsequent ``step()`` calls continue to run
+    # physics (ball can bounce, players move into win/lose poses) but
+    # scoring is gated so no further points are awarded. See the view-port
+    # commit message for the full state-machine mapping.
+    is_game_ended: bool = False
+    # Frames elapsed since ``is_game_ended`` was set. Port of pikavolley.js
+    # ``frameCounter`` for the ``gameEnd`` state. When it reaches
+    # ``PikachuVolleyball.GAME_END_FRAMES`` the engine freezes state
+    # permanently (equivalent to the original returning to the intro).
+    game_end_frame_counter: int = 0
 
 
 class PlayerInput(NamedTuple):
@@ -218,27 +223,20 @@ class PikachuVolleyball:
     # forfeit the round.
     RALLY_MAX_FRAMES: int = 600
 
-    # Freeze-frame duration after a scoring event. Held so viewers can see
-    # the final grounded-ball moment. Slated for removal in the view port.
-    POST_SCORE_FREEZE_FRAMES: int = 20
+    # Duration of the ``gameEnd`` state (port of pikavolley.js
+    # ``frameTotal.gameEnd``). After MAX_SCORE is reached physics continues
+    # running for this many frames so winner/loser poses play out; the
+    # engine then freezes state permanently (original: returns to intro).
+    GAME_END_FRAMES: int = 211
 
-    def __init__(
-        self,
-        *,
-        post_score_freeze: bool = True,
-        seed: int | None = None,
-    ) -> None:
+    def __init__(self, *, seed: int | None = None) -> None:
         """Create a new engine instance.
 
-        post_score_freeze: when True (default), every scoring event triggers
-            a POST_SCORE_FREEZE_FRAMES-long hold. Disable for RL training so
-            the agent isn't forced to no-op during the hold.
         seed: optional seed for the engine's internal RNG. All stochastic
             physics decisions (``rand() % 3`` in ball-player collision,
             ``rand() % 5`` boldness) go through it so golden-scenario tests
             can reproduce identical frame sequences across runs.
         """
-        self._post_score_freeze: bool = post_score_freeze
         self._rng: random.Random = random.Random(seed)
         self._state: GameState = self._create_initial_state()
         self._prev_ball_x: float = float(self._state.ball.x)
@@ -288,13 +286,16 @@ class PikachuVolleyball:
         After the original-faithful update, one extension runs:
           * Rally-timeout safety valve (not in original).
 
-        Post-score freeze (when enabled): if the previous frame ended the
-        round, subsequent calls tick ``post_score_freeze_frames`` without
-        advancing physics. The freeze tick ALWAYS runs — even on the
-        match-winning point — so consumer loops can rely on freeze expiry
-        to signal "replay done". When the counter reaches zero the engine
-        either swaps in a fresh serving state (match ongoing) or falls
-        through to the match-over guard on the next call (match ended).
+        Game-end flow (port of pikavolley.js ``round`` + ``gameEnd``):
+          * When a player's score reaches MAX_SCORE, ``is_game_ended`` is set
+            and ``game_end_frame_counter`` starts counting. Physics continues
+            running for the next ``GAME_END_FRAMES`` calls — the ball can
+            bounce, players transition into their win (state=5) or lose
+            (state=6) pose — but scoring is gated so no further points are
+            awarded. Once the counter hits ``GAME_END_FRAMES`` the engine
+            freezes state permanently (equivalent to the original returning
+            to ``intro``). Consumer loops should exit when
+            ``is_game_ended and game_end_frame_counter >= GAME_END_FRAMES``.
         """
         state = self._state
 
@@ -306,73 +307,69 @@ class PikachuVolleyball:
                 0, state.ball.punch_effect_radius - 2
             )
 
-        # Freeze-frame pass-through. MUST run BEFORE the match-over guard so
-        # the hold also ticks down on the match-winning point — otherwise the
-        # guard returns early every frame and freeze stays pinned forever,
-        # wedging any consumer loop that relies on freeze expiry.
-        if state.post_score_freeze_frames > 0:
-            state.post_score_freeze_frames -= 1
-            state.frame += 1
-            if (
-                state.post_score_freeze_frames == 0
-                and state.score1 < MAX_SCORE
-                and state.score2 < MAX_SCORE
-            ):
-                serving = state.serving_player
-                s1, s2, frame = state.score1, state.score2, state.frame
-                new = self._create_initial_state(serving_player=serving)
-                new.score1 = s1
-                new.score2 = s2
-                new.frame = frame
-                self._state = new
-                self._prev_ball_x = float(new.ball.x)
-                return new
-            return state
-
-        # Match-over guard. Once freeze has fully expired and either player
-        # has reached MAX_SCORE, the engine refuses to advance physics —
-        # preserves the final grounded-ball scene and makes repeated step()
-        # calls a no-op (same contract as the original's ``gameEnd`` state).
-        # Consumer loops that want to end cleanly at match-end should exit
-        # when ``score >= MAX_SCORE and freeze == 0``.
-        if state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE:
+        # Match-over guard. Once the 211-frame gameEnd window has fully
+        # elapsed the engine refuses to advance physics — this preserves
+        # the final scene and makes repeated step() calls a no-op (same
+        # effective contract as the original returning to ``intro``).
+        if (
+            state.is_game_ended
+            and state.game_end_frame_counter >= self.GAME_END_FRAMES
+        ):
             state.is_round_over = True
             return state
 
-        state.is_round_over = False
-        state.round_ended_by_timeout = False
+        if state.is_game_ended:
+            # gameEnd window — tick the counter, keep ``is_round_over`` set,
+            # and let physics run normally below. Scoring is gated by the
+            # ``grounded and not is_game_ended`` branch.
+            state.game_end_frame_counter += 1
+        else:
+            # Live round — clear per-frame round flags.
+            state.is_round_over = False
+            state.round_ended_by_timeout = False
+
         state.frame += 1
         prev_ball_x = self._prev_ball_x
 
         grounded = self._update_ball_and_world(state.ball)
-        if grounded:
+        if grounded and not state.is_game_ended:
             self._handle_scoring(state)
             self._prev_ball_x = float(self._state.ball.x)
             return self._state
 
-        self._update_player(state.player1, p1_input, is_player2=False, ball=state.ball, other=state.player2)
-        self._update_player(state.player2, p2_input, is_player2=True, ball=state.ball, other=state.player1)
+        self._update_player(
+            state.player1, p1_input, is_player2=False,
+            ball=state.ball, other=state.player2,
+        )
+        self._update_player(
+            state.player2, p2_input, is_player2=True,
+            ball=state.ball, other=state.player1,
+        )
 
         self._check_ball_player_collision(state.ball, state.player1, p1_input)
         self._check_ball_player_collision(state.ball, state.player2, p2_input)
 
-        # Net-crossing counter (extension — safety valve, not in original).
-        now_ball_x = float(state.ball.x)
-        crossed = (
-            (prev_ball_x <= NET_PILLAR_X < now_ball_x)
-            or (prev_ball_x >= NET_PILLAR_X > now_ball_x)
-        )
-        if crossed:
-            state.frames_since_net_crossing = 0
+        # Net-crossing counter + rally-timeout safety valve (extensions —
+        # not in original). Gated on ``not is_game_ended`` so the gameEnd
+        # window can't force-concede a phantom timeout point.
+        if not state.is_game_ended:
+            now_ball_x = float(state.ball.x)
+            crossed = (
+                (prev_ball_x <= NET_PILLAR_X < now_ball_x)
+                or (prev_ball_x >= NET_PILLAR_X > now_ball_x)
+            )
+            if crossed:
+                state.frames_since_net_crossing = 0
+            else:
+                state.frames_since_net_crossing += 1
+
+            if state.frames_since_net_crossing >= self.RALLY_MAX_FRAMES:
+                self._handle_rally_timeout(state)
+                self._prev_ball_x = float(self._state.ball.x)
+                return self._state
+            self._prev_ball_x = now_ball_x
         else:
-            state.frames_since_net_crossing += 1
-
-        if state.frames_since_net_crossing >= self.RALLY_MAX_FRAMES:
-            self._handle_rally_timeout(state)
-            self._prev_ball_x = float(self._state.ball.x)
-            return self._state
-
-        self._prev_ball_x = now_ball_x
+            self._prev_ball_x = float(state.ball.x)
         return state
 
     # ==================================================================
@@ -702,7 +699,8 @@ class PikachuVolleyball:
 
     # ==================================================================
     # Scoring wrapper — NOT in physics.js (original defers to pikavolley.js).
-    # Preserved until the view port commit switches to gameEnd 211f flow.
+    # Mirrors pikavolley.js:368-400 (score bookkeeping) and the gameEnd
+    # transition on MAX_SCORE.
     # ==================================================================
 
     def _handle_scoring(self, state: GameState) -> None:
@@ -715,26 +713,40 @@ class PikachuVolleyball:
             state.score1 += 1
             state.serving_player = 1
 
-        if self._post_score_freeze:
-            state.post_score_freeze_frames = self.POST_SCORE_FREEZE_FRAMES
+        # Game-end transition — port of pikavolley.js:377-383 / 387-393.
+        # When a player reaches MAX_SCORE we flip the gameEnd flags on both
+        # sides and DO NOT swap in a new serving state — the ball stays
+        # where it grounded and physics continues running through the next
+        # GAME_END_FRAMES calls so winner/loser poses play out.
+        if state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE:
+            state.is_game_ended = True
+            state.game_end_frame_counter = 0
+            p1_won = state.score1 >= MAX_SCORE
+            state.player1.is_winner = p1_won
+            state.player2.is_winner = not p1_won
+            state.player1.game_ended = True
+            state.player2.game_ended = True
             return
 
-        if state.score1 < MAX_SCORE and state.score2 < MAX_SCORE:
-            serving = state.serving_player
-            s1, s2, frame = state.score1, state.score2, state.frame
-            new = self._create_initial_state(serving_player=serving)
-            new.score1 = s1
-            new.score2 = s2
-            new.frame = frame
-            new.is_round_over = True
-            self._state = new
+        # Mid-match — swap to fresh serving state. Consumers see
+        # ``is_round_over=True`` on this frame and a reset ball on the next
+        # step() call. Replaces the old post-score freeze path.
+        serving = state.serving_player
+        s1, s2, frame = state.score1, state.score2, state.frame
+        new = self._create_initial_state(serving_player=serving)
+        new.score1 = s1
+        new.score2 = s2
+        new.frame = frame
+        new.is_round_over = True
+        self._state = new
 
     def _handle_rally_timeout(self, state: GameState) -> None:
         """Force-end the round when the rally stalls past RALLY_MAX_FRAMES.
 
         Concede goes to the side currently holding the ball.
         ``round_ended_by_timeout`` is set so RL / UI can distinguish from
-        a grounded-ball concede.
+        a grounded-ball concede. If the concede wins the match, the
+        gameEnd path is entered just like a normal ground-touch score.
         """
         ball = state.ball
         state.is_round_over = True
@@ -746,17 +758,22 @@ class PikachuVolleyball:
             state.score1 += 1
             state.serving_player = 1
 
-        if self._post_score_freeze:
-            state.post_score_freeze_frames = self.POST_SCORE_FREEZE_FRAMES
+        if state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE:
+            state.is_game_ended = True
+            state.game_end_frame_counter = 0
+            p1_won = state.score1 >= MAX_SCORE
+            state.player1.is_winner = p1_won
+            state.player2.is_winner = not p1_won
+            state.player1.game_ended = True
+            state.player2.game_ended = True
             return
 
-        if state.score1 < MAX_SCORE and state.score2 < MAX_SCORE:
-            serving = state.serving_player
-            s1, s2, frame = state.score1, state.score2, state.frame
-            new = self._create_initial_state(serving_player=serving)
-            new.score1 = s1
-            new.score2 = s2
-            new.frame = frame
-            new.is_round_over = True
-            new.round_ended_by_timeout = True
-            self._state = new
+        serving = state.serving_player
+        s1, s2, frame = state.score1, state.score2, state.frame
+        new = self._create_initial_state(serving_player=serving)
+        new.score1 = s1
+        new.score2 = s2
+        new.frame = frame
+        new.is_round_over = True
+        new.round_ended_by_timeout = True
+        self._state = new

@@ -299,146 +299,13 @@ class TestPostScoreFreeze:
         game._state.ball.y = BALL_GROUND_Y - 1
         game._state.ball.vy = 10
 
-    def test_scoring_sets_freeze_counter(self) -> None:
-        game = PikachuVolleyball()
-        game.reset()
-        self._force_ground_on_p2_side(game)
+    def test_mid_match_score_swaps_to_fresh_serve(self) -> None:
+        """Mid-match scoring immediately swaps to a fresh serving state.
 
-        state = game.step(NOOP, NOOP)
-        assert state.is_round_over is True
-        assert state.score1 == 1
-        assert state.post_score_freeze_frames == game.POST_SCORE_FREEZE_FRAMES
-
-    def test_ball_stays_grounded_during_freeze(self) -> None:
-        """Ball position, score, and is_round_over all hold through freeze."""
-        game = PikachuVolleyball()
-        game.reset()
-        self._force_ground_on_p2_side(game)
-
-        state = game.step(NOOP, NOOP)
-        grounded_x = state.ball.x
-        grounded_y = state.ball.y
-        score_at_ground = state.score1
-
-        # Step through the full freeze window (but NOT past it).
-        for _ in range(game.POST_SCORE_FREEZE_FRAMES - 1):
-            state = game.step(NOOP, NOOP)
-            assert state.ball.x == grounded_x
-            assert state.ball.y == grounded_y
-            assert state.score1 == score_at_ground
-            assert state.is_round_over is True
-            assert state.post_score_freeze_frames > 0
-
-    def test_freeze_expires_into_fresh_serving_state(self) -> None:
-        """When freeze reaches 0, engine swaps to a new serving state."""
-        game = PikachuVolleyball()
-        game.reset()
-        self._force_ground_on_p2_side(game)
-
-        # First step triggers scoring + freeze=POST_SCORE_FREEZE_FRAMES.
-        game.step(NOOP, NOOP)
-        # Run out the rest of the freeze.
-        for _ in range(game.POST_SCORE_FREEZE_FRAMES):
-            state = game.step(NOOP, NOOP)
-
-        # Freeze has expired; engine reset to serving state for round 2.
-        assert state.post_score_freeze_frames == 0
-        assert state.is_round_over is False
-        assert state.ball.y < BALL_GROUND_Y  # ball no longer grounded
-
-    def test_final_point_holds_grounded_state_forever(self) -> None:
-        """Last point (score == MAX_SCORE) must NOT reset to serve state."""
-        game = PikachuVolleyball()
-        game.reset()
-        game._state.score1 = MAX_SCORE - 1
-        self._force_ground_on_p2_side(game)
-
-        state = game.step(NOOP, NOOP)
-        assert state.score1 == MAX_SCORE
-        grounded_y = state.ball.y
-
-        # Run through freeze + a handful of extra frames — ball must stay
-        # on the ground because the match is over.
-        for _ in range(game.POST_SCORE_FREEZE_FRAMES + 10):
-            state = game.step(NOOP, NOOP)
-            assert state.score1 == MAX_SCORE
-            assert state.is_round_over is True
-            assert state.ball.y == grounded_y
-
-    def test_final_point_freeze_counter_actually_decrements(self) -> None:
-        """Regression: freeze must tick down even on the match-winning point.
-
-        Prior bug: the match-over guard in step() returned early BEFORE the
-        freeze pass-through, so `post_score_freeze_frames` stayed pinned at
-        its initial value forever once score reached MAX_SCORE. That wedged
-        the `backend/rl/callbacks.py:199` `while ... or freeze > 0` loop,
-        which emitted the same freeze frame indefinitely and prevented the
-        next match from starting (user-reported "15점 내면 게임이 거기서
-        멈춤" bug, 2026-04-12).
-        """
-        game = PikachuVolleyball()
-        game.reset()
-        game._state.score1 = MAX_SCORE - 1
-        self._force_ground_on_p2_side(game)
-
-        # Scoring frame: score reaches MAX_SCORE, freeze set to max.
-        state = game.step(NOOP, NOOP)
-        assert state.score1 == MAX_SCORE
-        assert state.post_score_freeze_frames == game.POST_SCORE_FREEZE_FRAMES
-
-        # Every subsequent step must decrement freeze by exactly one.
-        for expected in range(game.POST_SCORE_FREEZE_FRAMES - 1, -1, -1):
-            state = game.step(NOOP, NOOP)
-            assert state.post_score_freeze_frames == expected, (
-                f"freeze stuck — expected {expected}, got "
-                f"{state.post_score_freeze_frames}"
-            )
-
-        # After freeze fully expires, the match-over guard holds the state.
-        assert state.post_score_freeze_frames == 0
-        assert state.score1 == MAX_SCORE
-        assert state.is_round_over is True
-
-    def test_callback_style_loop_exits_at_match_end(self) -> None:
-        """Regression: callback while-loop condition must go False at match end.
-
-        Mirrors the exact loop condition in `backend/rl/callbacks.py:199-201`.
-        Before the fix, `freeze > 0` stayed True forever once score hit
-        MAX_SCORE, so the callback loop never exited and training replays
-        for the final match never completed.
-        """
-        game = PikachuVolleyball()
-        game.reset()
-        game._state.score1 = MAX_SCORE - 1
-        self._force_ground_on_p2_side(game)
-
-        # Emulate the callback's emit/step loop with a safety bound that's
-        # well above the expected POST_SCORE_FREEZE_FRAMES window. Bound
-        # must fail loudly if the loop runs away (the original bug).
-        state = game.step(NOOP, NOOP)
-        safety_bound = game.POST_SCORE_FREEZE_FRAMES * 5
-        steps = 0
-        while (
-            state.score1 < MAX_SCORE and state.score2 < MAX_SCORE
-        ) or state.post_score_freeze_frames > 0:
-            state = game.step(NOOP, NOOP)
-            steps += 1
-            assert steps <= safety_bound, "callback loop did not terminate"
-
-        # Loop terminated because: score >= MAX_SCORE AND freeze == 0.
-        assert state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE
-        assert state.post_score_freeze_frames == 0
-        # Total iterations must roughly match the freeze window — if it
-        # exploded we'd still catch real regressions even if the safety
-        # bound above permitted them.
-        assert steps <= game.POST_SCORE_FREEZE_FRAMES + 5
-
-    def test_mid_match_freeze_still_swaps_to_next_round(self) -> None:
-        """Guard: the fix must not break mid-match serve resets.
-
-        When freeze expires and neither side has reached MAX_SCORE the
-        engine swaps to a fresh serving state for the next rally. This
-        pre-existing behavior must survive the step() reorder.
+        Port(view) dropped the 20-frame post-score freeze. On a non-match-
+        deciding point the engine now swaps immediately (matches the
+        ``pikavolley.js`` ``startOfNewRound`` transition minus its display-
+        layer pauses, which live above the engine).
         """
         game = PikachuVolleyball()
         game.reset()
@@ -447,25 +314,164 @@ class TestPostScoreFreeze:
 
         state = game.step(NOOP, NOOP)
         assert state.score1 == 6
-        assert state.post_score_freeze_frames == game.POST_SCORE_FREEZE_FRAMES
-
-        # Run through the freeze window.
-        for _ in range(game.POST_SCORE_FREEZE_FRAMES):
-            state = game.step(NOOP, NOOP)
-
-        # Freeze done → next serving state (ball off the ground, scores
-        # preserved, round flag cleared).
-        assert state.post_score_freeze_frames == 0
-        assert state.score1 == 6
+        assert state.is_round_over is True
+        assert state.is_game_ended is False
+        # Swap happened on the same frame — ball is at serve position.
         assert state.ball.y < BALL_GROUND_Y
-        assert state.is_round_over is False
 
-    def test_timeout_flag_persists_through_freeze(self) -> None:
-        """round_ended_by_timeout must stay True for the whole hold."""
+    def test_max_score_enters_game_end_without_swap(self) -> None:
+        """Match-winning point sets is_game_ended and keeps the grounded ball.
+
+        Unlike mid-match scoring, the match-winning ground touch does NOT
+        swap to a serving state — the ball stays where it grounded so the
+        211-frame gameEnd window can play out the winner/loser pose.
+        """
         game = PikachuVolleyball()
         game.reset()
-        # Seed a pending timeout by pinning the ball on p1 side with no
-        # horizontal motion so no net crossing ever happens.
+        game._state.score1 = MAX_SCORE - 1
+        self._force_ground_on_p2_side(game)
+
+        state = game.step(NOOP, NOOP)
+        assert state.score1 == MAX_SCORE
+        assert state.is_game_ended is True
+        assert state.game_end_frame_counter == 0
+        assert state.player1.is_winner is True
+        assert state.player2.is_winner is False
+        assert state.player1.game_ended is True
+        assert state.player2.game_ended is True
+        # Grounded ball preserved (no serve-state swap).
+        assert state.ball.y == BALL_GROUND_Y
+
+    def test_game_end_counter_advances_and_physics_continues(self) -> None:
+        """During gameEnd, counter increments and physics runs.
+
+        Regression target: port(physics) used to freeze physics for 20
+        frames after scoring; the view port restores the original's
+        behavior where physics continues running through the full 211-
+        frame gameEnd window (ball can bounce, animations play).
+        """
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.score1 = MAX_SCORE - 1
+        self._force_ground_on_p2_side(game)
+
+        state = game.step(NOOP, NOOP)
+        assert state.is_game_ended is True
+
+        # Counter ticks up each step.
+        prev_counter = state.game_end_frame_counter
+        for i in range(5):
+            state = game.step(NOOP, NOOP)
+            assert state.game_end_frame_counter == prev_counter + 1, (
+                f"counter stuck at frame {i}: expected {prev_counter + 1}, "
+                f"got {state.game_end_frame_counter}"
+            )
+            prev_counter = state.game_end_frame_counter
+
+    def test_game_end_no_extra_scoring_on_subsequent_ground_touches(self) -> None:
+        """Ground touches during gameEnd must NOT add further points.
+
+        Mirrors ``pikavolley.js`` round() gating
+        (``isBallTouchingGround && ... && this.gameEnded === false``).
+        Without this gate, a ball bouncing during the 211-frame window
+        could silently increment the score past the winning threshold.
+        """
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.score1 = MAX_SCORE - 1
+        self._force_ground_on_p2_side(game)
+
+        state = game.step(NOOP, NOOP)
+        assert state.is_game_ended is True
+        score_at_end = state.score1
+
+        # Drive the ball to ground repeatedly — score must NOT advance.
+        for _ in range(30):
+            game._state.ball.y = BALL_GROUND_Y - 1
+            game._state.ball.vy = 10
+            state = game.step(NOOP, NOOP)
+            assert state.score1 == score_at_end, (
+                "score advanced during gameEnd window"
+            )
+
+    def test_game_end_freezes_state_after_full_window(self) -> None:
+        """After GAME_END_FRAMES, repeated step() is a no-op.
+
+        Equivalent to the original's ``state = this.intro`` transition at
+        ``frameCounter >= frameTotal.gameEnd``. Our headless engine can't
+        return to an intro screen so it simply pins state instead.
+        """
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.score1 = MAX_SCORE - 1
+        self._force_ground_on_p2_side(game)
+
+        # Scoring frame.
+        game.step(NOOP, NOOP)
+
+        # Run out the 211-frame window.
+        for _ in range(game.GAME_END_FRAMES):
+            state = game.step(NOOP, NOOP)
+
+        pinned_counter = state.game_end_frame_counter
+        pinned_ball_x = state.ball.x
+        pinned_ball_y = state.ball.y
+
+        # Additional calls should no-op (counter stops advancing, physics frozen).
+        for _ in range(10):
+            state = game.step(NOOP, NOOP)
+            assert state.game_end_frame_counter == pinned_counter
+            assert state.ball.x == pinned_ball_x
+            assert state.ball.y == pinned_ball_y
+            assert state.score1 == MAX_SCORE
+            assert state.is_round_over is True
+
+    def test_callback_style_loop_exits_at_game_end_plus_211(self) -> None:
+        """Regression: callback while-loop must terminate.
+
+        Mirrors the exact loop condition in ``backend/rl/callbacks.py:199``
+        (``score < MAX or (is_game_ended and counter < GAME_END_FRAMES)``).
+        This test locks in the full-match exit: the loop must go False
+        within roughly the 211-frame gameEnd window (plus the scoring
+        frame) and never run away.
+        """
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.score1 = MAX_SCORE - 1
+        self._force_ground_on_p2_side(game)
+
+        state = game.step(NOOP, NOOP)
+        safety_bound = game.GAME_END_FRAMES * 2
+        steps = 0
+        while (
+            state.score1 < MAX_SCORE and state.score2 < MAX_SCORE
+        ) or (
+            state.is_game_ended
+            and state.game_end_frame_counter < game.GAME_END_FRAMES
+        ):
+            state = game.step(NOOP, NOOP)
+            steps += 1
+            assert steps <= safety_bound, "callback loop did not terminate"
+
+        assert state.score1 >= MAX_SCORE or state.score2 >= MAX_SCORE
+        assert state.game_end_frame_counter >= game.GAME_END_FRAMES
+        # Iterations should be in the 211-frame ballpark — a large blowup
+        # would still be caught by the safety bound above, but this keeps
+        # the expected shape explicit.
+        assert steps <= game.GAME_END_FRAMES + 5
+
+    def test_timeout_flag_persists_after_round_swap(self) -> None:
+        """round_ended_by_timeout stays True on the timeout frame.
+
+        Pre-port (freeze model) this flag used to persist across the
+        whole 20-frame freeze window. Post-port there is no freeze, so
+        the flag is observable on the exact frame the timeout fires; the
+        engine swaps to a fresh serving state on the same frame, but the
+        returned state still carries the flag so RL / UI layers can
+        distinguish a concede from a timeout.
+        """
+        game = PikachuVolleyball()
+        game.reset()
         game._state.frames_since_net_crossing = game.RALLY_MAX_FRAMES - 1
         game._state.ball.x = NET_PILLAR_X - 50
         game._state.ball.y = BALL_GROUND_Y - 60
@@ -475,26 +481,7 @@ class TestPostScoreFreeze:
 
         state = game.step(NOOP, NOOP)
         assert state.round_ended_by_timeout is True
-        assert state.post_score_freeze_frames > 0
-
-        # Next freeze frame must still report the timeout flag.
-        state = game.step(NOOP, NOOP)
-        assert state.round_ended_by_timeout is True
         assert state.is_round_over is True
-
-    def test_rl_env_default_disables_freeze(self) -> None:
-        """Env path opts out — scoring swaps immediately (no freeze frames)."""
-        game = PikachuVolleyball(post_score_freeze=False)
-        game.reset()
-        self._force_ground_on_p2_side(game)
-
-        state = game.step(NOOP, NOOP)
-        assert state.score1 == 1
-        assert state.post_score_freeze_frames == 0
-        # With freeze disabled, the engine immediately swapped to a fresh
-        # serving state, so the ball is back at serve position — not on the
-        # ground.
-        assert state.ball.y < BALL_GROUND_Y
 
 
 class TestPunchEffectRadius:
@@ -513,7 +500,14 @@ class TestPunchEffectRadius:
     def test_ground_touch_sets_radius_to_ball_radius(
         self, game: PikachuVolleyball
     ) -> None:
+        # Pre-score to MAX_SCORE-1 so this grounding enters the gameEnd
+        # window instead of swapping to a fresh serving state. After the
+        # view port, mid-match scoring immediately swaps (losing the
+        # grounded-ball markers), whereas the match-winning ground touch
+        # preserves them for the 211-frame winner-pose window — which is
+        # where the FE actually needs the punch-effect radius to render.
         game.reset()
+        game._state.score1 = MAX_SCORE - 1
         game._state.ball.x = NET_PILLAR_X + 100
         game._state.ball.y = BALL_GROUND_Y - 1
         game._state.ball.vy = 10
