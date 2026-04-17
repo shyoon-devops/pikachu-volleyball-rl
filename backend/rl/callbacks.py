@@ -400,6 +400,16 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             "diving_direction": int(
                 getattr(state.player1, "diving_direction", 0)
             ),
+            # Pikachu sprite state (port of physics.js Player.state at 0xC0):
+            # 0=normal, 1=jumping, 2=jumping+power_hit, 3=diving,
+            # 4=lying_down, 5=win, 6=lose. The FE picks the pikachu sprite
+            # frame from (state, frame_number); without these the 5/6
+            # winner/loser poses during the 211f gameEnd window have no
+            # data to render against.
+            "state": int(getattr(state.player1, "state", 0)),
+            "frame_number": int(getattr(state.player1, "frame_number", 0)),
+            "is_winner": bool(getattr(state.player1, "is_winner", False)),
+            "game_ended": bool(getattr(state.player1, "game_ended", False)),
         },
         "player2": {
             "x": state.player2.x,
@@ -412,6 +422,10 @@ def _serialize_state(state: Any) -> dict[str, Any]:
             "diving_direction": int(
                 getattr(state.player2, "diving_direction", 0)
             ),
+            "state": int(getattr(state.player2, "state", 0)),
+            "frame_number": int(getattr(state.player2, "frame_number", 0)),
+            "is_winner": bool(getattr(state.player2, "is_winner", False)),
+            "game_ended": bool(getattr(state.player2, "game_ended", False)),
         },
         "ball": {
             "x": state.ball.x,

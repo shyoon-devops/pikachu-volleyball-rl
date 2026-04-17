@@ -62,6 +62,13 @@ _PLAYER_DEFAULTS = {
     "is_diving": False,
     "is_power_hitting": False,
     "diving_direction": 0,
+    # Pikachu sprite state for the FE renderer. Defaulted on legacy
+    # replays pickled before the engine emitted these — without the
+    # back-fill the FE renderer would KeyError during scrubbing.
+    "state": 0,
+    "frame_number": 0,
+    "is_winner": False,
+    "game_ended": False,
 }
 _BALL_DEFAULTS = {
     "rotation": 0,

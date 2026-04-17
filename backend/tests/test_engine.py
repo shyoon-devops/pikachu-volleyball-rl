@@ -749,3 +749,56 @@ class TestDisplayStateMachine:
         # State machine fields stay at defaults.
         assert state.slow_motion_frames_left == 0
         assert state.state_name == "round"
+
+
+class TestWinPoseEmit:
+    """Engine emits player.state=5/6 (winner/loser pose) and is_winner /
+    game_ended flags during the 211f gameEnd window. Adjacent regression:
+    _serialize_state must surface them on the wire for the FE.
+    """
+
+    def test_engine_sets_winner_loser_state_after_max_score(self) -> None:
+        game = PikachuVolleyball(seed=42, display_state_machine=True)
+        game.reset()
+        game._state.score1 = MAX_SCORE - 1
+        game._state.ball.x = NET_PILLAR_X + 100
+        game._state.ball.y = BALL_GROUND_Y - 1
+        game._state.ball.vy = 10
+        game.step(NOOP, NOOP)  # winning point
+
+        # Run a handful of gameEnd frames so player state can transition
+        # via the in-air → state==0 → state=5/6 pathway in _update_player.
+        for _ in range(30):
+            game.step(NOOP, NOOP)
+
+        assert game._state.player1.state == 5
+        assert game._state.player2.state == 6
+        assert game._state.player1.is_winner is True
+        assert game._state.player2.is_winner is False
+        assert game._state.player1.game_ended is True
+        assert game._state.player2.game_ended is True
+
+    def test_serialize_state_emits_player_pose_fields(self) -> None:
+        from backend.rl.callbacks import _serialize_state
+
+        game = PikachuVolleyball(seed=42, display_state_machine=True)
+        game.reset()
+        game._state.score1 = MAX_SCORE - 1
+        game._state.ball.x = NET_PILLAR_X + 100
+        game._state.ball.y = BALL_GROUND_Y - 1
+        game._state.ball.vy = 10
+        game.step(NOOP, NOOP)
+
+        for _ in range(20):
+            game.step(NOOP, NOOP)
+
+        emitted = _serialize_state(game._state)
+        # Required keys for the FE to render the win/lose pose at all.
+        for key in ("state", "frame_number", "is_winner", "game_ended"):
+            assert key in emitted["player1"], f"missing player1.{key}"
+            assert key in emitted["player2"], f"missing player2.{key}"
+
+        assert emitted["player1"]["state"] == 5
+        assert emitted["player2"]["state"] == 6
+        assert emitted["player1"]["is_winner"] is True
+        assert emitted["player2"]["is_winner"] is False
