@@ -87,6 +87,25 @@ export interface GameState {
   isRoundOver?: boolean
   isGameEnded?: boolean
   gameEndFrameCounter?: number
+  /**
+   * Per-frame SFX trigger flags emitted by the ported engine
+   * (`backend/rl/callbacks.py::_serialize_state::sounds`, BE dev
+   * 2084a13d). Each key is true *only on the frame the sound fires*
+   * — the engine resets all flags at the start of every tick
+   * (`engine.py:357-364`). `pi` and `pikachu` are intentionally
+   * omitted: they are menu-layer sounds in pikavolley.js that the
+   * training dashboard never reaches.
+   *
+   * Wire names are snake_case (`power_hit`, `ball_touches_ground`);
+   * snakeToCamel produces the camelCase keys shown here.
+   */
+  sounds?: {
+    pipikachu?: boolean
+    pika?: boolean
+    chu?: boolean
+    powerHit?: boolean
+    ballTouchesGround?: boolean
+  }
 }
 
 export interface TrainingMetrics {

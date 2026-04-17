@@ -23,7 +23,7 @@ import {
   cloudAndWaveEngine,
   NUM_OF_CLOUDS,
 } from './cloudAndWave'
-import { diffAudioTriggers } from './audioTriggers'
+import { resolveAudioTriggers } from './audioTriggers'
 import { getPikaAudio } from '../../lib/pikaAudio'
 import './GameCanvas.css'
 
@@ -556,18 +556,19 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
 
   useEffect(() => {
     if (gameState) {
-      const prevForAudio = currentStateRef.current
       prevStateRef.current = currentStateRef.current ?? gameState
       currentStateRef.current = gameState
       lerpFactorRef.current = 0
       frameCounterRef.current++
 
       // ── SFX triggers (audio.js + pikavolley.js trigger points) ──
-      // Compute against the *previous* server frame, not the 60fps
-      // interpolated value, so rising edges land once per engine tick
-      // (not 2× due to rAF doubling). Audio singleton is muted by
-      // default — calls are cheap no-ops until the user unmutes.
-      const triggers = diffAudioTriggers(prevForAudio, gameState)
+      // BE resets `sounds.*` at the start of each engine tick and sets
+      // flags only on the triggering frame, so reading them straight
+      // from the server gameState fires exactly once per tick. Firing
+      // from this useEffect (rather than the 60fps rAF loop) is what
+      // guarantees no double-play. Audio singleton is muted by default
+      // — calls are cheap no-ops until the user unmutes.
+      const triggers = resolveAudioTriggers(gameState)
       if (triggers.length > 0) {
         const audio = getPikaAudio()
         for (const t of triggers) audio.playSfx(t.name, t.pan)

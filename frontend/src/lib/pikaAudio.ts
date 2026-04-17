@@ -13,23 +13,25 @@
  * it on a pointer listener so the context is unlocked the moment the
  * user interacts.
  *
- * Trigger timing (audio.js + pikavolley.js references):
+ * Trigger timing (audio.js + pikavolley.js references; BE emits the
+ * flags now — FE just fires `playSfx(name)` when the flag is set):
  *   - powerHit           — on a successful power-hit connect
  *   - ballTouchesGround  — on ball hitting the floor (not on power-hit)
- *   - pipikachu          — on score (routed left/right per winner)
- *   - pika / chu / pi / pikachu — pikachu voice (reserved; BE must
- *     emit explicit triggers to use these — unused in the training
- *     dashboard right now)
+ *   - pipikachu          — multi-step power-hit combo (engine-driven)
+ *   - pika / chu         — pikachu voice during play
  *   - bgm                — optional background loop; off by default
  *     since the dashboard is a monitoring surface, not a game view.
+ *
+ * `pi` and `pikachu` from audio.js are menu-layer sounds (title /
+ * "with friend" select) and are intentionally excluded — the RL
+ * dashboard never shows those surfaces, so shipping their WAVs
+ * would only bloat the bundle.
  */
 
 export type SfxName =
   | 'pipikachu'
   | 'pika'
   | 'chu'
-  | 'pi'
-  | 'pikachu'
   | 'powerHit'
   | 'ballTouchesGround'
 
@@ -40,8 +42,6 @@ const SFX_URL: Record<SfxName, string> = {
   pipikachu: '/assets/sounds/WAVE140_1.wav',
   pika: '/assets/sounds/WAVE141_1.wav',
   chu: '/assets/sounds/WAVE142_1.wav',
-  pi: '/assets/sounds/WAVE143_1.wav',
-  pikachu: '/assets/sounds/WAVE144_1.wav',
   powerHit: '/assets/sounds/WAVE145_1.wav',
   ballTouchesGround: '/assets/sounds/WAVE146_1.wav',
 }
