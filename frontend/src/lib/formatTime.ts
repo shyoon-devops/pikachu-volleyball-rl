@@ -24,14 +24,28 @@ const KST_TIME_ZONE = 'Asia/Seoul'
  * Returns the input string unchanged when it can't be parsed — keeps
  * older / corrupted records from blanking the whole row.
  *
+ * Naive-ISO handling (V2 root cause, 2026-04-18): Pydantic serialises
+ * `datetime.utcnow()` as `"2026-04-17T17:32:22"` — no `Z`, no offset.
+ * JavaScript's `new Date(s)` interprets such bare strings as LOCAL
+ * time, so the subsequent KST conversion ran from a wrong base and
+ * produced wall-clock-shifted output (the "looks like UTC" symptom
+ * the user reported). We preprocess by appending `Z` when the input
+ * matches the bare-ISO shape, forcing the parser to treat it as UTC
+ * before converting to KST.
+ *
+ * BE may still emit a string with explicit `Z` or a `±HH:MM` offset
+ * (e.g. timeseries timestamps); those bypass the patch.
+ *
  * Output shape (matches the historic `toLocaleString` output users
- * expect): `2026. 04. 18. 오전 10:00:00` style — handled by the `ko-KR`
- * locale below. We pin the locale too because the user runs Korean
- * dashboards; otherwise CI-rendered snapshots could diverge from
- * what's on the deployed UI.
+ * expect): `2026. 04. 18. 10:00:00` style via the `ko-KR` locale.
+ * We pin the locale too because the user runs Korean dashboards;
+ * otherwise CI-rendered snapshots diverge from the deployed UI.
  */
 export function formatKstDateTime(value: string | number | Date): string {
-  const date = value instanceof Date ? value : new Date(value)
+  const date =
+    value instanceof Date
+      ? value
+      : new Date(typeof value === 'string' ? coerceNaiveIsoToUtc(value) : value)
   if (Number.isNaN(date.getTime())) {
     return typeof value === 'string' ? value : String(value)
   }
@@ -45,6 +59,23 @@ export function formatKstDateTime(value: string | number | Date): string {
     second: '2-digit',
     hour12: false,
   }).format(date)
+}
+
+/**
+ * Detect a bare ISO-8601 datetime (no `Z`, no `±HH:MM`) and append
+ * `Z` so it parses as UTC. Strings that already carry a timezone
+ * suffix are returned unchanged. Strings that don't look like ISO
+ * datetimes at all are also returned as-is — `new Date()` will still
+ * return Invalid Date and the caller falls through to the
+ * unchanged-string branch above.
+ */
+function coerceNaiveIsoToUtc(s: string): string {
+  // ISO-8601 datetime, optional fractional seconds, NO trailing tz.
+  // ^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) {
+    return `${s}Z`
+  }
+  return s
 }
 
 /**
