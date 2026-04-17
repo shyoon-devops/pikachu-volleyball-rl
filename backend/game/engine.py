@@ -1,14 +1,22 @@
 """Pikachu Volleyball game engine — pure Python port of physics.js.
 
 Physics ported frame-accurately from the original game source
-(gorisanson/pikachu-volleyball: src/resources/js/physics.js, MIT-licensed).
-Function-level comments reference the original JS function name.
+(`gorisanson/pikachu-volleyball: src/resources/js/physics.js`). The
+upstream repository is declared ``"license": "UNLICENSED"`` in its
+``package.json`` and carries no ``LICENSE`` file at its root; the
+upstream itself is a reverse-engineering of the 1997 commercial game
+``対戦ぴかちゅ～ ﾋﾞｰﾁﾊﾞﾚｰ編`` (© SACHI SOFT / SAWAYAKAN Programmers,
+© Satoshi Takenouchi). See the repository-root ``ATTRIBUTION.md`` and
+``docs/NOTICE-ATTRIBUTION-CORRECTION.md`` for the full provenance
+chain and a correction to an earlier commit message that incorrectly
+claimed MIT licensing. Function-level comments below reference the
+original JavaScript function names for traceability only; no license
+grant is claimed or implied over the ported portions.
 
 This module implements ONLY the physics engine equivalent of physics.js.
 The pikavolley.js state machine (intro / menu / startOfNewGame / round /
 gameEnd / afterEndOfRound etc.) is layered on top via this module's scoring
-wrapper and is being progressively aligned with the original — see commit
-`port(view): gameEnd 211f intro 복귀 플로우`.
+wrapper and the gameEnd 211f flow added by the view port commit.
 
 Design notes:
   * Back-compat flags (``PlayerState.is_jumping`` etc.) are kept as derived
