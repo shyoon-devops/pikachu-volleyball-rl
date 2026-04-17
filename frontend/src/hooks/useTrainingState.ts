@@ -22,7 +22,23 @@ import type {
   WSMessage,
 } from '../lib/types'
 
-const MAX_METRICS_POINTS = 1000
+/**
+ * Cap on the live metrics ring buffer.
+ *
+ * Bumped from 1000 → 10000 (R3 user report, 2026-04-18): the previous
+ * cap covered only ~256k training steps at MetricsCallback's
+ * log_interval=256, so a refresh mid-run on a long session showed the
+ * chart starting at step ~150k+ with the leading 37% blank — the FE
+ * had silently dropped the older samples on the way up. 10000 matches
+ * the BE `/api/training/timeseries` upper bound (BE-7) and covers
+ * 2.56M steps of training, far beyond a typical 1M-step run.
+ *
+ * Memory cost is modest: 10000 × ~48 bytes (TrainingMetrics fields) =
+ * ~480 KB on the heap, well below the chart-render budget.
+ */
+const MAX_METRICS_POINTS = 10000
+/** Matches BE `/api/training/timeseries` `limit` ceiling. */
+const TIMESERIES_HYDRATION_LIMIT = 10000
 const MAX_RECENT_GAMES = 100
 /**
  * How many completed games to pull on mount/reconnect. The hook
@@ -277,10 +293,10 @@ export function useTrainingStateImpl(): TrainingState {
 
     let cancelled = false
     Promise.all([
-      getTimeseries('reward', 1000, expId).catch(() => []),
-      getTimeseries('win_rate', 1000, expId).catch(() => []),
-      getTimeseries('policy_loss', 1000, expId).catch(() => []),
-      getTimeseries('value_loss', 1000, expId).catch(() => []),
+      getTimeseries('reward', TIMESERIES_HYDRATION_LIMIT, expId).catch(() => []),
+      getTimeseries('win_rate', TIMESERIES_HYDRATION_LIMIT, expId).catch(() => []),
+      getTimeseries('policy_loss', TIMESERIES_HYDRATION_LIMIT, expId).catch(() => []),
+      getTimeseries('value_loss', TIMESERIES_HYDRATION_LIMIT, expId).catch(() => []),
     ])
       .then(([reward, winRate, policyLoss, valueLoss]) => {
         if (cancelled) return
