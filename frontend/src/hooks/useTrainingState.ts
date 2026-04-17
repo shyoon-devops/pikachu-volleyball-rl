@@ -71,6 +71,25 @@ export function useTrainingStateImpl(): TrainingState {
       const next = [...prev, payload]
       return next.length > MAX_METRICS_POINTS ? next.slice(-MAX_METRICS_POINTS) : next
     })
+    // Sync `status.currentStep` / `currentEpisode` to the metrics
+    // payload so the dashboard's text counters and the chart line
+    // always reflect the same training tick (B1 user report,
+    // 2026-04-18). BE only broadcasts `training:status` on explicit
+    // state transitions (start/stop/pause/resume/level), so without
+    // this the header counter stayed pinned at the value snapshotted
+    // at the last transition while the chart kept advancing — visible
+    // mismatch between the "Step: N" header and the chart label /
+    // x-axis. Metrics is the single authoritative cadence both
+    // surfaces should follow.
+    //
+    // Defensive `Math.max`: a delayed metrics payload from a previous
+    // experiment shouldn't roll the counter backwards. Same guard
+    // applies to currentEpisode for symmetry.
+    setStatus(prev => ({
+      ...prev,
+      currentStep: Math.max(prev.currentStep, payload.step),
+      currentEpisode: Math.max(prev.currentEpisode, payload.episode),
+    }))
   }, [])
 
   const handleFrame = useCallback((msg: WSMessage) => {
