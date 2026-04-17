@@ -2,7 +2,12 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getGames, getAvailableReplays } from '../../lib/api'
 import type { GameRecord, ReplayInfo } from '../../lib/types'
-import { formatBotLevel, formatRallyCount } from '../../lib/formatGame'
+import {
+  formatBotLevel,
+  formatRallyCount,
+  formatAvgRallyLength,
+  formatExperimentIdShort,
+} from '../../lib/formatGame'
 import { formatKstDateTime } from '../../lib/formatTime'
 import './ReplayList.css'
 
@@ -97,7 +102,17 @@ export function ReplayList() {
         <table className="replay-list-table">
           <thead>
             <tr>
-              {['Date', 'Bot Level', 'Score', 'Winner', 'Frames', 'Rallies', 'Replay'].map(h => (
+              {[
+                'Date',
+                'Bot Level',
+                'Score',
+                'Winner',
+                'Frames',
+                'Rallies',
+                'Avg Rally',
+                'Experiment',
+                'Replay',
+              ].map(h => (
                 <th key={h} scope="col">{h}</th>
               ))}
             </tr>
@@ -105,11 +120,11 @@ export function ReplayList() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="replay-list-empty">Loading...</td>
+                <td colSpan={9} className="replay-list-empty">Loading...</td>
               </tr>
             ) : games.length === 0 ? (
               <tr>
-                <td colSpan={7} className="replay-list-empty empty-state">No games recorded yet.</td>
+                <td colSpan={9} className="replay-list-empty empty-state">No games recorded yet.</td>
               </tr>
             ) : (
               games.map(g => {
@@ -136,6 +151,12 @@ export function ReplayList() {
                     </td>
                     <td className="text-muted">{g.durationFrames}</td>
                     <td className="text-muted">{formatRallyCount(g.rallyCount)}</td>
+                    <td className="text-muted">
+                      {formatAvgRallyLength(g.durationFrames, g.rallyCount)}
+                    </td>
+                    <td className="text-muted text-mono" title={g.experimentId ?? undefined}>
+                      {formatExperimentIdShort(g.experimentId)}
+                    </td>
                     <td>
                       {replay ? (
                         <button

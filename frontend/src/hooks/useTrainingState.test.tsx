@@ -828,3 +828,132 @@ describe('useTrainingState — text/chart sync (B1, 2026-04-18)', () => {
     expect(screen.getByTestId('step').textContent).toBe('5000')
   })
 })
+
+describe('useTrainingState — clear chart on experiment_id transition (V3, 2026-04-18)', () => {
+  // BE assigns a fresh `experiment_id` on every training:start, so a
+  // change of that field signals "this is a new training session — drop
+  // anything we cached for the previous one". Without this, Stop→Start
+  // produced a chart line that continued from the previous run's last
+  // metrics point, and the new run's step-0..N samples collided in the
+  // step-keyed merge map with the prior run's same step range.
+
+  function setupRoutes(initialStatus: { state: string; experiment_id: string | null }) {
+    let currentStatus = initialStatus
+    const fetchMock = installFetchRouter(url => {
+      if (url.startsWith('/api/training/status')) {
+        return {
+          ok: true,
+          payload: {
+            state: currentStatus.state,
+            current_step: 0,
+            current_episode: 0,
+            experiment_id: currentStatus.experiment_id,
+          },
+        }
+      }
+      if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
+      if (url.startsWith('/api/training/timeseries')) {
+        return { ok: true, payload: { data: [] } }
+      }
+      const side = matchSideEffectRoute(url, {})
+      if (side) return side
+      return { ok: false, status: 404, payload: {} }
+    })
+    return {
+      fetchMock,
+      setStatus(next: { state: string; experiment_id: string | null }) {
+        currentStatus = next
+      },
+    }
+  }
+
+  it('clears metrics when experiment_id transitions to a different value', async () => {
+    setupRoutes({ state: 'running', experiment_id: 'exp-A' })
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1))
+    await act(async () => { MockWebSocket.instances[0]?.simulateOpen() })
+
+    // Seed metrics under exp-A.
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('training:metrics', {
+        step: 100, episode: 1, mean_reward: 0.1, win_rate: 0, policy_loss: 0, value_loss: 0,
+      })
+      MockWebSocket.instances[0]?.simulateMessage('training:metrics', {
+        step: 200, episode: 2, mean_reward: 0.2, win_rate: 0, policy_loss: 0, value_loss: 0,
+      })
+    })
+    await waitFor(() => expect(screen.getByTestId('metrics-count').textContent).toBe('2'))
+
+    // BE switches to a new experiment.
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('training:status', {
+        state: 'running',
+        experiment_id: 'exp-B',
+      })
+    })
+
+    // Metrics array drops to 0 — the chart starts fresh for exp-B.
+    await waitFor(() => expect(screen.getByTestId('metrics-count').textContent).toBe('0'))
+  })
+
+  it('does NOT clear metrics on the very first experiment_id observation', async () => {
+    // First-mount path: REST status sets experimentId before any
+    // metrics arrive. That initial set must not wipe a future incoming
+    // metrics payload.
+    setupRoutes({ state: 'running', experiment_id: 'exp-A' })
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1))
+    await act(async () => { MockWebSocket.instances[0]?.simulateOpen() })
+
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('training:metrics', {
+        step: 100, episode: 1, mean_reward: 0.1, win_rate: 0, policy_loss: 0, value_loss: 0,
+      })
+    })
+
+    await waitFor(() => expect(screen.getByTestId('metrics-count').textContent).toBe('1'))
+  })
+
+  it('does NOT clear metrics when experimentId stays the same across reconnect', async () => {
+    // Pause/resume keeps the same experiment_id; metrics must persist.
+    setupRoutes({ state: 'running', experiment_id: 'exp-A' })
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1))
+    await act(async () => { MockWebSocket.instances[0]?.simulateOpen() })
+
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('training:metrics', {
+        step: 100, episode: 1, mean_reward: 0.1, win_rate: 0, policy_loss: 0, value_loss: 0,
+      })
+    })
+    await waitFor(() => expect(screen.getByTestId('metrics-count').textContent).toBe('1'))
+
+    // Status broadcast with the same experiment id → no clear.
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('training:status', {
+        state: 'paused',
+        experiment_id: 'exp-A',
+      })
+    })
+
+    expect(screen.getByTestId('metrics-count').textContent).toBe('1')
+  })
+})
