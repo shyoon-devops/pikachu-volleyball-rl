@@ -194,8 +194,3 @@ export function getPikaAudio(): PikaAudio {
   if (!singleton) singleton = new PikaAudio()
   return singleton
 }
-
-/** Test-only reset so suites that swap `window.Audio` mocks don't leak state. */
-export function __resetPikaAudioForTests(): void {
-  singleton = null
-}

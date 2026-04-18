@@ -6,7 +6,6 @@ import type {
   PaginatedResponse,
   ReplayInfo,
   TimeseriesPoint,
-  TrainingMetrics,
   TrainingStatus,
   TrainingRun,
 } from './types'
@@ -87,11 +86,6 @@ export async function getGames(
     page: raw.page,
     limit: raw.limit,
   }
-}
-
-export async function getGame(id: string): Promise<GameRecord> {
-  const raw = await request<unknown>(`/api/games/${id}`)
-  return snakeToCamel<GameRecord>(raw)
 }
 
 export async function getReplay(gameId: string): Promise<{ frames: GameState[] }> {
@@ -337,36 +331,6 @@ export async function getRecentGames(limit = 20): Promise<GameRecord[]> {
   return resp.data
 }
 
-interface MetricsAggregateBucket {
-  bucket_start?: string
-  count?: number
-  step_max?: number | null
-  avg_mean_reward?: number | null
-  avg_win_rate?: number | null
-  avg_policy_loss?: number | null
-  avg_value_loss?: number | null
-}
-
-interface MetricsAggregateResponse {
-  data?: MetricsAggregateBucket[]
-  count?: number
-  bucket?: string
-  experiment_id?: string | null
-}
-
-/**
- * Fetch time-bucketed training metrics and map them to the
- * `TrainingMetrics` shape the charts consume. Used on mount /
- * reconnect so a refresh doesn't wipe the graphs — the live stream
- * continues to append per-step samples over WebSocket on top of this
- * historical seed.
- *
- * The aggregate endpoint groups metrics into fixed-width time buckets
- * and reports averages; `step_max` per bucket is used as the x-axis
- * value so the chart reflects training progress even when cadence is
- * irregular. Unknown / null fields collapse to 0 rather than blowing
- * up the chart pipeline.
- */
 /**
  * Fetch raw per-step training metric points from the BE timeseries
  * endpoint (API spec v0.2.4). Used on mount to hydrate the MetricsChart
@@ -402,22 +366,4 @@ export async function getTimeseries(
     `/api/training/timeseries?${params.toString()}`,
   )
   return Array.isArray(raw.points) ? (raw.points as TimeseriesPoint[]) : []
-}
-
-export async function getMetricsHistory(
-  bucket: '1m' | '5m' | '1h' = '1m',
-): Promise<TrainingMetrics[]> {
-  const params = new URLSearchParams({ bucket })
-  const raw = await request<MetricsAggregateResponse>(
-    `/api/training/metrics/aggregate?${params.toString()}`,
-  )
-  const buckets = Array.isArray(raw.data) ? raw.data : []
-  return buckets.map<TrainingMetrics>(b => ({
-    step: Number(b.step_max ?? 0),
-    episode: 0,
-    meanReward: Number(b.avg_mean_reward ?? 0),
-    winRate: Number(b.avg_win_rate ?? 0),
-    policyLoss: Number(b.avg_policy_loss ?? 0),
-    valueLoss: Number(b.avg_value_loss ?? 0),
-  }))
 }

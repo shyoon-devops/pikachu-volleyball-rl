@@ -959,7 +959,6 @@ async def delete_models(request: Request, body: DeleteModelsRequest):
     resolved: list[tuple[str, Path]] = []
     failed: list[dict[str, str]] = []
     protected: list[str] = []
-    seen_traversal_or_invalid = False
 
     for raw_path in body.paths:
         rel = (raw_path or "").strip()
@@ -975,7 +974,6 @@ async def delete_models(request: Request, body: DeleteModelsRequest):
             target = (model_dir / rel).resolve()
         except (OSError, ValueError):
             failed.append({"path": raw_path, "reason": "invalid_path"})
-            seen_traversal_or_invalid = True
             continue
 
         # Containment check — rejects ``..``, absolute paths escaping
@@ -988,7 +986,6 @@ async def delete_models(request: Request, body: DeleteModelsRequest):
                 raw_path, target,
             )
             failed.append({"path": raw_path, "reason": "outside_model_dir"})
-            seen_traversal_or_invalid = True
             continue
 
         if active_exp_dir is not None:
