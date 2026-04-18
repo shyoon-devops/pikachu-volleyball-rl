@@ -14,13 +14,15 @@ const FPS = 30
 export function ReplayPlayer() {
   const { id } = useParams<{ id: string }>()
   const location = useLocation()
-  // FC-R7J: callers (ReplayList's Watch button) ship the originating
-  // path via `location.state.from` so Back returns to the exact drill-
-  // down — e.g. /history/my-run — instead of the top-level /history.
-  // Fallback to /history keeps the flow intact for deep-link traffic
-  // (bookmarks / shared URLs) where there's no referrer in state.
+  // FC-R7J / FC-R8A: callers (ReplayList's Watch button) ship the
+  // originating path via `location.state.from` so Back returns to the
+  // exact drill-down — e.g. /runs/my-run?tab=games — instead of the
+  // top-level runs list. Fallback to /runs keeps the flow intact for
+  // deep-link traffic (bookmarks / shared URLs) where there's no
+  // referrer in state. Legacy /history fallbacks still land on /runs
+  // via the App-level 301 redirect.
   const backTo =
-    (location.state as { from?: string } | null)?.from ?? '/history'
+    (location.state as { from?: string } | null)?.from ?? '/runs'
   const [frames, setFrames] = useState<GameState[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)

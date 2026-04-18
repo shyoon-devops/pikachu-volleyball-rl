@@ -424,7 +424,7 @@ const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecor
       <td className="recent-games-title-cell" title={g.title ?? undefined}>
         {g.title && g.title.trim() !== '' ? (
           <Link
-            to={`/history/${encodeURIComponent(g.title)}`}
+            to={`/runs/${encodeURIComponent(g.title)}?tab=games`}
             className="recent-games-title-link"
           >
             {g.title}

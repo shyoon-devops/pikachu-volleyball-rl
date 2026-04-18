@@ -286,7 +286,10 @@ describe('ReplayPlayer back-button drill-down context (FC-R7J)', () => {
     expect(back).toHaveAttribute('href', '/history/my-run')
   })
 
-  it('falls back to /history when no state.from is present (cold link)', async () => {
+  it('falls back to /runs when no state.from is present (cold link)', async () => {
+    // FC-R8A: legacy /history fallback rolled over to /runs; the
+    // App-level 301 redirect still handles any ancient shared link
+    // that happens to land on /history directly.
     mockGetReplay.mockResolvedValueOnce({ frames: makeFrames(10) })
     mockGetGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 100 })
     render(
@@ -298,7 +301,7 @@ describe('ReplayPlayer back-button drill-down context (FC-R7J)', () => {
     )
     await waitFor(() => expect(screen.getByRole('slider')).toBeInTheDocument())
     const back = screen.getByRole('link', { name: /Back$/ })
-    expect(back).toHaveAttribute('href', '/history')
+    expect(back).toHaveAttribute('href', '/runs')
   })
 
   it('uses state.from on the error-screen Back button too', async () => {
