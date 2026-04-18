@@ -383,18 +383,9 @@ class PikachuVolleyballEnv(gymnasium.Env):
         counter_reset_this_frame = False
 
         # --- PRIMARY: scoring events ---
-        scored = state.score1 - self._prev_score1
-        conceded = state.score2 - self._prev_score2
-        if scored > 0:
-            reward += self._SCORE_REWARD
-            self._consecutive_touches = 0
-            self._frames_since_crossing = 0
-            counter_reset_this_frame = True
-        if conceded > 0:
-            reward += self._CONCEDE_REWARD
-            self._consecutive_touches = 0
-            self._frames_since_crossing = 0
-            counter_reset_this_frame = True
+        score_delta, score_reset = self._score_reward(state)
+        reward += score_delta
+        counter_reset_this_frame = counter_reset_this_frame or score_reset
         reward += self._game_outcome_reward(state)
 
         # --- AUX 1: ball touch with diminishing returns ---
@@ -440,6 +431,33 @@ class PikachuVolleyballEnv(gymnasium.Env):
     # byte-identical to the pre-refactor monolith. Pure helpers (no state
     # mutation) are extracted first; mutation-carrying ones follow.
     # ------------------------------------------------------------------
+    def _score_reward(self, state: Any) -> tuple[float, bool]:
+        """Per-point scoring reward. Mutates ``_consecutive_touches`` and
+        ``_frames_since_crossing`` on either a score or a concede.
+
+        Returns ``(reward_delta, did_reset_counters)``. Both branches
+        fire independently (double-counting a simultaneous score + concede
+        has never been observed but the pre-refactor code allowed it, so
+        the two ``if`` blocks stay independent rather than ``elif``).
+        Float-accumulation order matches the inline version:
+        ``_SCORE_REWARD`` first, then ``_CONCEDE_REWARD``.
+        """
+        scored = state.score1 - self._prev_score1
+        conceded = state.score2 - self._prev_score2
+        delta = 0.0
+        reset = False
+        if scored > 0:
+            delta += self._SCORE_REWARD
+            self._consecutive_touches = 0
+            self._frames_since_crossing = 0
+            reset = True
+        if conceded > 0:
+            delta += self._CONCEDE_REWARD
+            self._consecutive_touches = 0
+            self._frames_since_crossing = 0
+            reset = True
+        return delta, reset
+
     def _net_crossing_reward(self, state: Any) -> tuple[float, bool]:
         """Ball-over-the-net bonus. Mutates ``_consecutive_touches``
         and ``_frames_since_crossing`` when the crossing is detected.
