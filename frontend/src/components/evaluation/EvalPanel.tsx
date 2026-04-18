@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   getModels,
   getEvalResults,
   runEvaluation,
   getEvaluationStatus,
 } from '../../lib/api'
+import { formatKstDateTime } from '../../lib/formatTime'
 import { EvalChart } from './EvalChart'
 import { CheckpointList } from './CheckpointList'
 import type { ModelInfo, EvalResult } from '../../lib/types'
@@ -38,6 +40,23 @@ const EVAL_POLL_INTERVAL_MS = 2000
  */
 const ACTIVE_EVAL_JOB_KEY = 'eval:active_job_id'
 
+/**
+ * URL query parameter for the persistent `bot_level` selection
+ * (FC-R6F user report, 2026-04-18). Users complained that
+ * switching tabs + returning reset the bot-level picker to L1 —
+ * fine at first use but tedious when running several evals in
+ * sequence. Persisting via `?bot_level=N` survives tab nav AND
+ * produces a copy-pasteable URL.
+ */
+const BOT_LEVEL_QUERY_KEY = 'bot_level'
+
+function parseBotLevelParam(raw: string | null): number {
+  if (raw === null) return 1
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1 || n > 5) return 1
+  return n
+}
+
 function readStoredJobId(): string | null {
   try {
     return sessionStorage.getItem(ACTIVE_EVAL_JOB_KEY)
@@ -63,10 +82,23 @@ type JobUiState =
   | { kind: 'busy-already'; message: string }
 
 export function EvalPanel() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const botLevel = parseBotLevelParam(searchParams.get(BOT_LEVEL_QUERY_KEY))
+  const setBotLevel = useCallback(
+    (next: number) => {
+      const params = new URLSearchParams(searchParams)
+      // L1 is the default — don't clutter the URL when the selection
+      // matches the default.
+      if (next === 1) params.delete(BOT_LEVEL_QUERY_KEY)
+      else params.set(BOT_LEVEL_QUERY_KEY, String(next))
+      setSearchParams(params, { replace: true })
+    },
+    [searchParams, setSearchParams],
+  )
+
   const [models, setModels] = useState<ModelInfo[]>([])
   const [results, setResults] = useState<EvalResult[]>([])
   const [selectedModel, setSelectedModel] = useState('')
-  const [botLevel, setBotLevel] = useState(1)
   const [nGames, setNGames] = useState(50)
   const [filterLevel, setFilterLevel] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
@@ -347,7 +379,7 @@ export function EvalPanel() {
         <table className="eval-results-table">
           <thead>
             <tr>
-              {['Model', 'Bot Level', 'Games', 'Win Rate', 'Avg Score', 'Avg Rally'].map(h => (
+              {['Time', 'Model', 'Bot Level', 'Games', 'Win Rate', 'Avg Score', 'Avg Rally'].map(h => (
                 <th key={h}>{h}</th>
               ))}
             </tr>
@@ -355,11 +387,12 @@ export function EvalPanel() {
           <tbody>
             {results.length === 0 ? (
               <tr>
-                <td colSpan={6} className="eval-results-empty empty-state">No evaluation results yet.</td>
+                <td colSpan={7} className="eval-results-empty empty-state">No evaluation results yet.</td>
               </tr>
             ) : (
               results.map((r, i) => (
                 <tr key={i}>
+                  <td className="text-muted">{r.timestamp ? formatKstDateTime(r.timestamp) : '—'}</td>
                   <td>{r.modelPath.split('/').pop()}</td>
                   <td>L{r.botLevel}</td>
                   <td className="text-muted">{r.nGames}</td>

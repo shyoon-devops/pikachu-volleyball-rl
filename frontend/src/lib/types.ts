@@ -265,6 +265,14 @@ export interface EvalResult {
   winRate: number
   avgScore: number
   avgRallyLength: number
+  /**
+   * ISO-8601 UTC timestamp, set by BE Pydantic default on the
+   * `EvaluationRecord` (`backend/app/models/schemas.py:58`).
+   * Optional on the FE side because older stored records may be
+   * missing the field; `formatKstDateTime` falls back to an
+   * em-dash when absent.
+   */
+  timestamp?: string
 }
 
 /**
