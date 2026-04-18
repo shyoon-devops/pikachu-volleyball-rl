@@ -12,6 +12,11 @@ import {
   patchTrainingLevel,
 } from '../lib/api'
 import { mergeTimeseries } from '../lib/mergeTimeseries'
+import {
+  envFramePayloadSchema,
+  trainingMetricsSchema,
+  trainingStatusSchema,
+} from '../lib/ws-schemas'
 import type {
   GameState,
   TrainingMetrics,
@@ -109,7 +114,17 @@ export function useTrainingStateImpl(): TrainingState {
   const [envFrames, setEnvFrames] = useState<EnvFramesMap>({})
 
   const handleMetrics = useCallback((msg: WSMessage<'training:metrics'>) => {
-    const payload = snakeToCamel<TrainingMetrics>(msg.payload)
+    // A6: zod parse + transform replaces the unchecked snakeToCamel
+    // cast. A malformed payload (missing field, NaN, wrong type) no
+    // longer reaches React state; we log and drop so the chart and
+    // step counter can't be poisoned with NaN math.
+    const result = trainingMetricsSchema.safeParse(msg.payload)
+    if (!result.success) {
+      // eslint-disable-next-line no-console
+      console.warn('[ws] training:metrics parse failed', result.error.issues)
+      return
+    }
+    const payload = result.data
     setMetrics(prev => {
       const next = [...prev, payload]
       return next.length > MAX_METRICS_POINTS ? next.slice(-MAX_METRICS_POINTS) : next
@@ -158,13 +173,42 @@ export function useTrainingStateImpl(): TrainingState {
    * still show its last frame while its siblings tick forward).
    */
   const handleEnvFrame = useCallback((msg: WSMessage<'training:env_frame'>) => {
-    const payload = snakeToCamel<EnvFramePayload>(msg.payload)
-    if (typeof payload?.envId !== 'number') return
+    // A6: zod validates env_id + score + state_name + step inline.
+    // The previous `if (typeof payload?.envId !== 'number') return`
+    // guard is now subsumed by the schema's `z.number().int().min(0)`
+    // — a missing/non-numeric env_id fails the parse and the message
+    // is logged + dropped instead of reaching the env-frame map.
+    // The nested `frame` GameState is still passed through (canvas
+    // renders it defensively); see ws-schemas.ts for the rationale.
+    const result = envFramePayloadSchema.safeParse(msg.payload)
+    if (!result.success) {
+      // eslint-disable-next-line no-console
+      console.warn('[ws] training:env_frame parse failed', result.error.issues)
+      return
+    }
+    // The frame field still arrives snake_case from BE; downstream
+    // (canvas, batch tab) consumes via the nested-camel path. Keep
+    // the same snakeToCamel pass on the frame slot only.
+    const payload: EnvFramePayload = {
+      ...result.data,
+      frame: snakeToCamel<GameState>(result.data.frame),
+    }
     setEnvFrames(prev => ({ ...prev, [payload.envId]: payload }))
   }, [])
 
   const handleStatus = useCallback((msg: WSMessage<'training:status'>) => {
-    const incoming = snakeToCamel<Partial<TrainingStatus>>(msg.payload)
+    // A6: schema enforces `state` is one of the three known values
+    // (running / stopped / paused) — a foreign string (BE bug, future
+    // state name) is rejected, preventing every CTA-disabled gate
+    // from silently breaking. All other fields stay optional and
+    // pass through unchanged.
+    const result = trainingStatusSchema.safeParse(msg.payload)
+    if (!result.success) {
+      // eslint-disable-next-line no-console
+      console.warn('[ws] training:status parse failed', result.error.issues)
+      return
+    }
+    const incoming = result.data
     setStatus(prev => ({
       ...prev,
       ...incoming,
