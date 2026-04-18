@@ -1269,11 +1269,81 @@ async def get_evaluation_status(job_id: str):
     }
 
 
+async def _backfill_eval_titles(
+    request: Request, docs: list[dict[str, Any]]
+) -> None:
+    """Populate ``title`` on legacy evaluation docs in place (BE-T12).
+
+    Legacy docs (saved before BE-T11) have no ``title`` / no
+    ``experiment_id``. We extract ``experiment_id`` from ``model_path``
+    where we can, bulk-lookup the ``training_runs`` collection in one
+    round-trip, and inject ``title`` (+ ``experiment_id`` for good
+    measure) on the response dict so the FE's title-filter matches.
+
+    Runs AFTER ``eval_service.get_results()`` so a db outage on the
+    runs-service path degrades to "no title on legacy rows" rather
+    than breaking the whole endpoint.
+    """
+    # Figure out which docs actually need backfill.
+    needs: list[tuple[dict[str, Any], str]] = []  # (doc, exp_id)
+    for d in docs:
+        if d.get("title") or d.get("training_title"):
+            # Already has a title snapshot — nothing to backfill.
+            continue
+        exp_id = d.get("experiment_id") or _experiment_id_from_model_path(
+            d.get("model_path", "")
+        )
+        if exp_id:
+            needs.append((d, exp_id))
+            # Surface exp_id on the doc too so the FE can cross-link
+            # without re-parsing model_path on its side.
+            d.setdefault("experiment_id", exp_id)
+
+    if not needs:
+        return
+    runs_service = getattr(request.app.state, "training_runs_service", None)
+    if runs_service is None:
+        return
+
+    exp_ids = list({exp_id for _, exp_id in needs})
+    try:
+        lookup = await runs_service.get_by_experiment_ids(exp_ids)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "evaluation title backfill: training_runs lookup failed for %d exp(s)",
+            len(exp_ids),
+        )
+        return
+
+    for doc, exp_id in needs:
+        run_doc = lookup.get(exp_id)
+        if run_doc is None:
+            continue
+        title = run_doc.get("title")
+        if title:
+            doc["title"] = title
+            # Keep ``training_title`` aligned for readers keying off it.
+            doc.setdefault("training_title", title)
+
+
 @router.get("/evaluation/results")
 @endpoint_guard("get_evaluation_results")
 async def get_evaluation_results(request: Request):
+    """List recent evaluations; legacy rows get ``title`` backfilled (BE-T12).
+
+    Backfill walks rows missing ``title`` / ``training_title``, pulls
+    the source training's title from the ``training_runs`` collection
+    via the experiment_id (either stored on the row or parsed from
+    ``model_path``), and mutates the response dict in place so the
+    FE's title filter matches. Degrades to "no title" on lookup
+    failures — never blocks the endpoint.
+    """
     eval_service = getattr(request.app.state, "eval_service", None)
     if eval_service is None:
         logger.info("get_evaluation_results called before eval_service init")
         return {"data": []}
-    return await eval_service.get_results()
+    response = await eval_service.get_results()
+    docs = response.get("data") or []
+    if isinstance(docs, list):
+        await _backfill_eval_titles(request, docs)
+    return response
