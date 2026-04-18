@@ -395,10 +395,7 @@ class PikachuVolleyballEnv(gymnasium.Env):
             self._consecutive_touches = 0
             self._frames_since_crossing = 0
             counter_reset_this_frame = True
-        if state.score1 >= MAX_SCORE:
-            reward += self._GAME_WIN_REWARD
-        elif state.score2 >= MAX_SCORE:
-            reward += self._GAME_LOSS_REWARD
+        reward += self._game_outcome_reward(state)
 
         # --- AUX 1: ball touch with diminishing returns ---
         # Engine sets ball.vy = min(vy, -15) on player collision.
@@ -463,3 +460,25 @@ class PikachuVolleyballEnv(gymnasium.Env):
             reward += self._READY_REWARD * max(0.0, 1.0 - dist_from_ready / max_dist)
 
         return float(reward)
+
+    # ------------------------------------------------------------------
+    # Reward helpers (A1 refactor) — each returns its delta only. Main
+    # ``_compute_reward`` sums in a fixed order so float accumulation is
+    # byte-identical to the pre-refactor monolith. Pure helpers (no state
+    # mutation) are extracted first; mutation-carrying ones follow.
+    # ------------------------------------------------------------------
+    def _game_outcome_reward(self, state: Any) -> float:
+        """Terminal win / loss bonus. Pure — no state mutation.
+
+        Returns ``+_GAME_WIN_REWARD`` when p1 reached MAX_SCORE,
+        ``+_GAME_LOSS_REWARD`` when p2 did (note: the loss constant is
+        a NEGATIVE number, so adding it subtracts). Exactly one branch
+        fires per call — ``score1 >= MAX_SCORE`` takes priority if both
+        somehow reached MAX at once, matching the pre-refactor
+        if/elif chain.
+        """
+        if state.score1 >= MAX_SCORE:
+            return self._GAME_WIN_REWARD
+        if state.score2 >= MAX_SCORE:
+            return self._GAME_LOSS_REWARD
+        return 0.0
