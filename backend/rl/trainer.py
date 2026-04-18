@@ -416,6 +416,7 @@ class TrainingManager:
                     experiment_id=self._experiment_id,
                     model_dir=self.model_dir,
                     save_interval=hp.get("checkpoint_interval", 10000),
+                    slug=self._slug,
                 ),
                 LiveFrameCallback(
                     frames_queue=self.frames_queue,
@@ -458,12 +459,20 @@ class TrainingManager:
                 pass
 
     def _save_final_checkpoint(self) -> None:
-        """Save a final checkpoint with the label 'final'."""
+        """Save a final checkpoint — slug-prefixed per BE-T2.
+
+        Filename: ``{slug}__{exp8}__final.zip``. The legacy
+        ``final.zip`` name stays forever-resolvable via the
+        ``_find_latest_checkpoint`` glob below, which picks up any
+        ``*.zip`` in the experiment directory.
+        """
         if self._model is None:
             return
         checkpoint_dir = Path(self.model_dir) / self._experiment_id
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        self._model.save(str(checkpoint_dir / "final"))
+        exp8 = (self._experiment_id or "unknown0")[:8]
+        name = f"{self._slug or 'run'}__{exp8}__final"
+        self._model.save(str(checkpoint_dir / name))
 
     def _find_latest_checkpoint(self) -> str | None:
         """Find the latest checkpoint .zip for the current experiment."""

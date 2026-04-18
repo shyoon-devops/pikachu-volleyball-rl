@@ -138,7 +138,15 @@ class MetricsCallback(BaseCallback):
 
 
 class CheckpointCallback(BaseCallback):
-    """Saves model checkpoints every K steps."""
+    """Saves model checkpoints every K steps.
+
+    Filename format (BE-T2, spec §6): ``{slug}__{exp8}__{step}.zip``.
+    The slug is the 40-char sanitised training title; ``exp8`` is the
+    first 8 hex chars of the experiment UUID, which guarantees
+    collision-safety even across identical slugs. A legacy-compatible
+    subdirectory per experiment_id is kept so existing
+    ``models/{exp}/*.zip`` consumers still find their checkpoints.
+    """
 
     def __init__(
         self,
@@ -146,17 +154,25 @@ class CheckpointCallback(BaseCallback):
         model_dir: str = "models",
         save_interval: int = 10000,
         verbose: int = 0,
+        slug: str = "run",
     ) -> None:
         super().__init__(verbose)
         self.experiment_id = experiment_id
         self.model_dir = model_dir
         self.save_interval = save_interval
+        # Slug defaults to ``"run"`` so legacy callers that don't pass
+        # one still produce a valid filename matching the spec fallback.
+        self.slug = slug or "run"
+        self._exp8 = (experiment_id or "unknown0")[:8]
         self._checkpoint_dir = Path(model_dir) / experiment_id
         self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     def _on_step(self) -> bool:
         if self.num_timesteps % self.save_interval == 0:
-            path = self._checkpoint_dir / f"{self.num_timesteps}"
+            # SB3 appends .zip on save; pass the base filename so the
+            # final file lands at "{slug}__{exp8}__{step}.zip" on disk.
+            name = f"{self.slug}__{self._exp8}__{self.num_timesteps}"
+            path = self._checkpoint_dir / name
             self.model.save(str(path))
         return True
 
