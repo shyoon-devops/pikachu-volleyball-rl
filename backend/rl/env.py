@@ -378,8 +378,6 @@ class PikachuVolleyballEnv(gymnasium.Env):
           - Stall/timeout penalties strengthened so rally loops are costly
         """
         reward = 0.0
-        ball = state.ball
-        p1 = state.player1
         counter_reset_this_frame = False
 
         # --- PRIMARY: scoring events ---
