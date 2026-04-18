@@ -389,17 +389,7 @@ class PikachuVolleyballEnv(gymnasium.Env):
         reward += self._game_outcome_reward(state)
 
         # --- AUX 1: ball touch with diminishing returns ---
-        # Engine sets ball.vy = min(vy, -15) on player collision.
-        collision_dist = PLAYER_HALF_LENGTH + BALL_RADIUS
-        if self._prev_ball_vy >= 0 and ball.vy <= -14:
-            if abs(ball.x - p1.x) < collision_dist * 3:
-                self._consecutive_touches += 1
-                if self._consecutive_touches == 1:
-                    reward += self._TOUCH_REWARD_FIRST
-                elif self._consecutive_touches == 2:
-                    reward += self._TOUCH_REWARD_SECOND
-                else:
-                    reward += self._TOUCH_PENALTY_EXCESS
+        reward += self._touch_reward(state)
 
         # --- AUX 2: net crossing (strengthened, resets touch counter) ---
         crossing_delta, crossing_reset = self._net_crossing_reward(state)
@@ -431,6 +421,35 @@ class PikachuVolleyballEnv(gymnasium.Env):
     # byte-identical to the pre-refactor monolith. Pure helpers (no state
     # mutation) are extracted first; mutation-carrying ones follow.
     # ------------------------------------------------------------------
+    def _touch_reward(self, state: Any) -> float:
+        """Diminishing-returns bonus for agent touching the ball.
+        Mutates ``_consecutive_touches`` only (not frames_since_crossing).
+
+        Touch detection uses the engine's post-collision velocity clamp:
+        the engine sets ``ball.vy <= -15`` on a player collision, and
+        we see the previous frame's ``_prev_ball_vy >= 0`` (ball was
+        falling or level) paired with ``ball.vy <= -14`` (reflected
+        upward past the clamp floor) to detect exactly one edge per
+        collision. A 3× collision_dist x-proximity gate keeps the signal
+        pinned to player 1 (the agent) vs. player 2 (bot).
+
+        First touch of a rally: +_TOUCH_REWARD_FIRST. Second: +_TOUCH_
+        REWARD_SECOND. Third+ (``else``): +_TOUCH_PENALTY_EXCESS — a
+        NEGATIVE constant, intentionally punishing self-toss loops.
+        """
+        ball = state.ball
+        p1 = state.player1
+        collision_dist = PLAYER_HALF_LENGTH + BALL_RADIUS
+        if self._prev_ball_vy >= 0 and ball.vy <= -14:
+            if abs(ball.x - p1.x) < collision_dist * 3:
+                self._consecutive_touches += 1
+                if self._consecutive_touches == 1:
+                    return self._TOUCH_REWARD_FIRST
+                if self._consecutive_touches == 2:
+                    return self._TOUCH_REWARD_SECOND
+                return self._TOUCH_PENALTY_EXCESS
+        return 0.0
+
     def _score_reward(self, state: Any) -> tuple[float, bool]:
         """Per-point scoring reward. Mutates ``_consecutive_touches`` and
         ``_frames_since_crossing`` on either a score or a concede.
