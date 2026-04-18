@@ -100,10 +100,46 @@ export async function getReplay(gameId: string): Promise<{ frames: GameState[] }
   return { frames: snakeToCamel<GameState[]>(frames) }
 }
 
-export async function getModels(): Promise<ModelInfo[]> {
-  const raw = await request<Record<string, unknown>>('/api/models')
+/**
+ * List model checkpoints. `title` filter (BE-T8 cd16ef63) scopes the
+ * response to one training run — BE slugifies the caller-supplied
+ * value and matches against the filename slug, sorted by step desc.
+ */
+export async function getModels(title?: string, limit?: number): Promise<ModelInfo[]> {
+  const qs = new URLSearchParams()
+  if (title !== undefined && title !== '') qs.set('title', title)
+  if (limit !== undefined) qs.set('limit', String(limit))
+  const suffix = qs.toString()
+  const raw = await request<Record<string, unknown>>(
+    suffix ? `/api/models?${suffix}` : '/api/models',
+  )
   const models = Array.isArray(raw.models) ? raw.models : Array.isArray(raw.data) ? raw.data : []
   return snakeToCamel<ModelInfo[]>(models)
+}
+
+export interface DeleteModelsResponse {
+  deleted: string[]
+  failed: Array<{ path: string; reason: string }>
+}
+
+/**
+ * Bulk-delete checkpoints (BE-T9 dc80b557). Body is `{paths: [...]}`,
+ * capped at 100 per request. A 409 means the batch included a file
+ * from the active training run — BE rejects the whole request so no
+ * partial deletion ever happens; callers should re-surface the list
+ * minus protected paths and retry.
+ */
+export async function deleteModels(paths: string[]): Promise<DeleteModelsResponse> {
+  const raw = await request<Record<string, unknown>>('/api/models', {
+    method: 'DELETE',
+    body: JSON.stringify({ paths }),
+  })
+  return {
+    deleted: Array.isArray(raw.deleted) ? (raw.deleted as string[]) : [],
+    failed: Array.isArray(raw.failed)
+      ? (raw.failed as Array<{ path: string; reason: string }>)
+      : [],
+  }
 }
 
 /**

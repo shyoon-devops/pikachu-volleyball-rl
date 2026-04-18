@@ -4,7 +4,7 @@ import { Dashboard } from './components/dashboard/Dashboard'
 import { TrainingRunList } from './components/history/TrainingRunList'
 import { TrainingRunDetail } from './components/history/TrainingRunDetail'
 import { ReplayPlayer } from './components/replay/ReplayPlayer'
-import { EvalPanel } from './components/evaluation/EvalPanel'
+import { EvaluationRunDetail } from './components/evaluation/EvaluationRunDetail'
 import { VisualHarness } from './components/game/VisualHarness'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ConnectionIndicator } from './components/ConnectionIndicator'
@@ -41,8 +41,22 @@ function App() {
 
           <main id="main-content" role="main" tabIndex={-1}>
             <ErrorBoundary>
+              {/*
+                Per-route ErrorBoundaries (FC-R7A, 2026-04-18). The
+                outer boundary catches anything missed; each inner
+                one isolates a single route so a stopped-state
+                render crash on /history doesn't take down
+                /evaluation's "Try again" behaviour. qa regression
+                that surfaced this: empty / null fields on
+                training:status fed downstream components that
+                crashed mid-render.
+              */}
               <Routes>
-                <Route path="/" element={<Dashboard />} />
+                <Route path="/" element={
+                  <ErrorBoundary>
+                    <Dashboard />
+                  </ErrorBoundary>
+                } />
                 {/*
                   History drill-down (R6H, spec c460c55b):
                     /history          → runs aggregate list (level-1)
@@ -50,10 +64,39 @@ function App() {
                   Legacy bookmarks to /history still land on the
                   hub page; deep-linked games pages go via /history/X.
                 */}
-                <Route path="/history" element={<TrainingRunList />} />
-                <Route path="/history/:title" element={<TrainingRunDetail />} />
-                <Route path="/replay/:id" element={<ReplayPlayer />} />
-                <Route path="/evaluation" element={<EvalPanel />} />
+                <Route path="/history" element={
+                  <ErrorBoundary>
+                    <TrainingRunList />
+                  </ErrorBoundary>
+                } />
+                <Route path="/history/:title" element={
+                  <ErrorBoundary>
+                    <TrainingRunDetail />
+                  </ErrorBoundary>
+                } />
+                <Route path="/replay/:id" element={
+                  <ErrorBoundary>
+                    <ReplayPlayer />
+                  </ErrorBoundary>
+                } />
+                {/*
+                  Evaluation drill-down (R7C, spec bf7bfaa4):
+                    /evaluation          → runs aggregate list (level-1)
+                    /evaluation/:title   → checkpoints of one run + eval runner
+                  Reuses TrainingRunList for level-1 with a `/evaluation/`
+                  link base, so the history and evaluation landing pages
+                  share the same search/filter/card UX.
+                */}
+                <Route path="/evaluation" element={
+                  <ErrorBoundary>
+                    <TrainingRunList linkBase="/evaluation/" />
+                  </ErrorBoundary>
+                } />
+                <Route path="/evaluation/:title" element={
+                  <ErrorBoundary>
+                    <EvaluationRunDetail />
+                  </ErrorBoundary>
+                } />
                 <Route path="/visual" element={<VisualHarness />} />
               </Routes>
             </ErrorBoundary>

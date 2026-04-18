@@ -13,6 +13,7 @@ interface MockState {
   latestFrame: GameState | null
   recentGames: GameRecord[]
   envFrames: EnvFramesMap
+  gameResultSeq: number
   send: () => void
 }
 
@@ -24,6 +25,7 @@ const mockState: MockState = {
   latestFrame: null,
   recentGames: [],
   envFrames: {},
+  gameResultSeq: 0,
   send: vi.fn(),
 }
 
@@ -60,6 +62,7 @@ function resetMockState(overrides: Partial<MockState> = {}) {
     latestFrame: null,
     recentGames: [],
     envFrames: {},
+    gameResultSeq: 0,
     send: vi.fn(),
     ...overrides,
   })

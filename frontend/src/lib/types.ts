@@ -337,6 +337,24 @@ export interface Hyperparams {
 export interface ModelInfo {
   path: string
   sizeBytes: number
+  /**
+   * Enriched fields (BE-T8 cd16ef63). Older callers kept reading
+   * `path`/`sizeBytes`; new surfaces (eval drill-down) read these.
+   *
+   * `step` is the PPO timestep parsed from the filename. The string
+   * `"final"` is coerced server-side to the sentinel `10**12` so it
+   * sorts above every real step in a desc view.
+   *
+   * `slug` / `title` are the lowercased training-title slug; both hold
+   * the same value — `title` is the FE-friendly name, `slug` is kept
+   * for debugging parity with BE's filename parser. Legacy
+   * `{exp_id}/final` files land without a slug and return null.
+   */
+  filename?: string
+  slug?: string | null
+  title?: string | null
+  step?: number | null
+  createdAt?: string
 }
 
 export interface ReplayInfo {

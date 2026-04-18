@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { getTrainingRuns } from '../../lib/api'
 import type { TrainingRun } from '../../lib/types'
 import { formatKstDateTime } from '../../lib/formatTime'
+import { useTrainingState } from '../../hooks/useTrainingState'
 import './TrainingRunList.css'
 
 /**
@@ -27,8 +28,21 @@ const SEARCH_DEBOUNCE_MS = 200
 const SEARCH_QUERY_KEY = 'q'
 const PAGE_LIMIT = 50
 
-export function TrainingRunList() {
+/**
+ * Route the per-row link to. Defaults to the history drill-down
+ * (`/history/`) so existing callers stay unchanged; the evaluation
+ * page passes `/evaluation/` (FC-R7C) to reuse the same L1 surface
+ * with an eval-intent destination. CTA in the empty state still
+ * points at `/` — starting a new training is the only escape hatch
+ * regardless of which L1 surface the user is on.
+ */
+export interface TrainingRunListProps {
+  linkBase?: string
+}
+
+export function TrainingRunList({ linkBase = '/history/' }: TrainingRunListProps = {}) {
   const [searchParams, setSearchParams] = useSearchParams()
+  const { gameResultSeq } = useTrainingState()
   const [runs, setRuns] = useState<TrainingRun[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +77,11 @@ export function TrainingRunList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQuery])
 
+  // FC-R7B live-history: refetch whenever a new game:result lands so
+  // the run aggregates (totalGames / winRate / avgRally / running-status)
+  // reflect the in-progress training run without a manual refresh. The
+  // hook bumps `gameResultSeq` on every ws `game:result` message; adding
+  // it to the dep array re-runs this effect.
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -80,12 +99,15 @@ export function TrainingRunList() {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [])
+  }, [gameResultSeq])
 
   const filteredRuns = useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase()
     if (q === '') return runs
-    return runs.filter(r => r.title.toLowerCase().includes(q))
+    // FC-R7A null-safety: a runs-aggregate row with `title: null`
+    // would crash `r.title.toLowerCase()`. Treat null/missing as
+    // the empty string so the search gracefully excludes them.
+    return runs.filter(r => (r.title ?? '').toLowerCase().includes(q))
   }, [runs, debouncedQuery])
 
   const hasQuery = debouncedQuery.trim() !== ''
@@ -139,7 +161,7 @@ export function TrainingRunList() {
               </thead>
               <tbody>
                 {filteredRuns.map(run => (
-                  <RunRow key={run.title} run={run} query={debouncedQuery} />
+                  <RunRow key={run.title} run={run} query={debouncedQuery} linkBase={linkBase} />
                 ))}
               </tbody>
             </table>
@@ -148,7 +170,7 @@ export function TrainingRunList() {
           {/* Mobile card stack. Hidden on ≥768px via CSS. */}
           <div className="training-run-list-cards">
             {filteredRuns.map(run => (
-              <RunCard key={run.title} run={run} query={debouncedQuery} />
+              <RunCard key={run.title} run={run} query={debouncedQuery} linkBase={linkBase} />
             ))}
           </div>
         </>
@@ -160,56 +182,70 @@ export function TrainingRunList() {
 interface RunRowProps {
   run: TrainingRun
   query: string
+  linkBase: string
 }
 
-function RunRow({ run, query }: RunRowProps) {
+function RunRow({ run, query, linkBase }: RunRowProps) {
+  // FC-R7A null-safety: every scalar falls back to a safe value
+  // before any method access. BE sends `null` for untitled legacy
+  // records + empty aggregates; a null `title.toLowerCase()` or
+  // `totalGames.toLocaleString()` crashes the whole table otherwise.
+  const safeTitle = run.title && run.title.trim() !== '' ? run.title : 'untitled'
+  const safeTotalGames = run.totalGames ?? 0
+  const safeWinRate = Number.isFinite(run.winRate) ? run.winRate : 0
+  const safeAvgRally = Number.isFinite(run.avgRallyLength) ? run.avgRallyLength : 0
   return (
     <tr className="training-run-list-row">
       <td className="training-run-list-cell-title">
         <Link
-          to={`/history/${encodeURIComponent(run.title)}`}
+          to={`${linkBase}${encodeURIComponent(safeTitle)}`}
           className="training-run-list-title-link"
         >
-          <HighlightedText text={run.title} query={query} />
+          <HighlightedText text={safeTitle} query={query} />
         </Link>
       </td>
       <td className="training-run-list-cell-started">
         {run.startedAt ? formatKstDateTime(run.startedAt) : '—'}
       </td>
       <td>
-        <StatusChip status={run.status} />
+        <StatusChip status={run.status ?? 'done'} />
       </td>
       <td className="training-run-list-cell-numeric">
-        {run.totalGames.toLocaleString()}
+        {safeTotalGames.toLocaleString()}
       </td>
       <td className="training-run-list-cell-numeric">
-        <WinRateBar rate={run.winRate} />
+        <WinRateBar rate={safeWinRate} />
       </td>
       <td className="training-run-list-cell-numeric">
-        {run.avgRallyLength.toFixed(1)}
+        {safeAvgRally.toFixed(1)}
       </td>
     </tr>
   )
 }
 
-function RunCard({ run, query }: RunRowProps) {
+function RunCard({ run, query, linkBase }: RunRowProps) {
+  // Same null-safety as RunRow — mobile card stack reuses the
+  // same fallback rules.
+  const safeTitle = run.title && run.title.trim() !== '' ? run.title : 'untitled'
+  const safeTotalGames = run.totalGames ?? 0
+  const safeWinRate = Number.isFinite(run.winRate) ? run.winRate : 0
   return (
     <Link
-      to={`/history/${encodeURIComponent(run.title)}`}
+      to={`${linkBase}${encodeURIComponent(safeTitle)}`}
       className="training-run-card card"
     >
       <div className="training-run-card-row-1">
         <span className="training-run-card-title">
-          <HighlightedText text={run.title} query={query} />
+          <HighlightedText text={safeTitle} query={query} />
         </span>
-        <StatusChip status={run.status} />
+        <StatusChip status={run.status ?? 'done'} />
       </div>
       <div className="training-run-card-row-2 text-muted">
         <span>{run.startedAt ? formatKstDateTime(run.startedAt) : '—'}</span>
-        <span> · {run.totalGames.toLocaleString()} games</span>
+        <span> · {safeTotalGames.toLocaleString()} games</span>
       </div>
       <div className="training-run-card-row-3">
-        <WinRateBar rate={run.winRate} />
+        <WinRateBar rate={safeWinRate} />
       </div>
     </Link>
   )
@@ -255,10 +291,12 @@ function WinRateBar({ rate }: { rate: number }) {
  * returns non-matching slices as unmatched text.
  */
 function HighlightedText({ text, query }: { text: string; query: string }) {
+  // FC-R7A: guard against callers that haven't yet filtered nulls.
+  const safeText = text ?? ''
   const q = query.trim()
-  if (q === '') return <>{text}</>
+  if (q === '') return <>{safeText}</>
   const regex = new RegExp(`(${escapeRegExp(q)})`, 'ig')
-  const parts = text.split(regex)
+  const parts = safeText.split(regex)
   return (
     <>
       {parts.map((part, idx) =>

@@ -67,6 +67,15 @@ export interface TrainingState {
   latestFrame: GameState | null
   recentGames: GameRecord[]
   envFrames: EnvFramesMap
+  /**
+   * Monotonic counter bumped every time a `game:result` WS payload
+   * lands. Pages that render server-fetched lists (TrainingRunList,
+   * level-2 ReplayList) can `useEffect(() => refetch(), [gameResultSeq])`
+   * to pick up new games without maintaining their own WS
+   * subscription. Wraps at JS's max-safe-integer but that's ~9e15
+   * games — effectively infinite for the project lifetime.
+   */
+  gameResultSeq: number
   send: (type: WSClientMessageType, payload?: unknown) => void
 }
 
@@ -92,6 +101,8 @@ export function useTrainingStateImpl(): TrainingState {
   const [metrics, setMetrics] = useState<TrainingMetrics[]>([])
   const [latestFrame, setLatestFrame] = useState<GameState | null>(null)
   const [recentGames, setRecentGames] = useState<GameRecord[]>([])
+  /** Bumps on every `game:result` — see `TrainingState.gameResultSeq`. */
+  const [gameResultSeq, setGameResultSeq] = useState(0)
   // Per-env live snapshots, keyed on env_id. Replacing the entry is
   // O(1); the BatchTabBar only re-renders chips whose entries changed
   // because React diffs by reference.
@@ -189,6 +200,11 @@ export function useTrainingStateImpl(): TrainingState {
       const next = [record, ...prev]
       return next.length > MAX_RECENT_GAMES ? next.slice(0, MAX_RECENT_GAMES) : next
     })
+    // FC-R7B: bump the sequence counter so TrainingRunList + the
+    // level-2 ReplayList refetch without maintaining their own WS
+    // subscriptions. Dashboard's Recent Games table updates via the
+    // `recentGames` array directly and doesn't need the counter.
+    setGameResultSeq(n => n + 1)
   }, [])
 
   useEffect(() => {
@@ -453,7 +469,7 @@ export function useTrainingStateImpl(): TrainingState {
     }
   }, [wsSend])
 
-  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, send }
+  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, gameResultSeq, send }
 }
 
 export const TrainingStateContext = createContext<TrainingState | null>(null)
