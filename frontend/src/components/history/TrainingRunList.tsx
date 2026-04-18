@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { getTrainingRuns, getModels, slugifyTitle } from '../../lib/api'
 import type { TrainingRun } from '../../lib/types'
-import { formatKstDateTime } from '../../lib/formatTime'
+import { TimestampText } from '../shared/TimestampText'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import './TrainingRunList.css'
 
@@ -345,7 +345,7 @@ const RunRow = memo(function RunRow({ run, query, linkBase, evalMode = false, ch
     <tr className={rowClass}>
       <td className="training-run-list-cell-title">{titleCell}</td>
       <td className="training-run-list-cell-started">
-        {run.startedAt ? formatKstDateTime(run.startedAt) : '—'}
+        <TimestampText ts={run.startedAt} />
       </td>
       <td>
         <StatusChip status={run.status ?? 'done'} />
@@ -400,7 +400,7 @@ const RunCard = memo(function RunCard({ run, query, linkBase, evalMode = false, 
         <StatusChip status={run.status ?? 'done'} />
       </div>
       <div className="training-run-card-row-2 text-muted">
-        <span>{run.startedAt ? formatKstDateTime(run.startedAt) : '—'}</span>
+        <span><TimestampText ts={run.startedAt} /></span>
         <span> · {safeTotalGames.toLocaleString()} games</span>
         {evalMode && (
           <>

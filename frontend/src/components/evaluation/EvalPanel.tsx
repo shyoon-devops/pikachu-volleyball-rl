@@ -6,7 +6,7 @@ import {
   runEvaluation,
   getEvaluationStatus,
 } from '../../lib/api'
-import { formatKstDateTime } from '../../lib/formatTime'
+import { TimestampText } from '../shared/TimestampText'
 import { EvalChart } from './EvalChart'
 import { CheckpointList } from './CheckpointList'
 import type { ModelInfo, EvalResult } from '../../lib/types'
@@ -392,7 +392,7 @@ export function EvalPanel() {
             ) : (
               results.map((r, i) => (
                 <tr key={i}>
-                  <td className="text-muted">{r.timestamp ? formatKstDateTime(r.timestamp) : '—'}</td>
+                  <td className="text-muted"><TimestampText ts={r.timestamp} /></td>
                   <td>{r.modelPath.split('/').pop()}</td>
                   <td>L{r.botLevel}</td>
                   <td className="text-muted">{r.nGames}</td>
