@@ -1,5 +1,7 @@
 # History — Two-Level Drill-Down Spec
 
+> **SUPERSEDED BY `docs/DESIGN-RUNS-MERGED.md`** (2026-04-18). The standalone `/history` surface is folded into the unified `/runs` nav with a `Games` sub-tab. Kept for reference; §2b (unified game list) is still reused by the `Games` sub-tab.
+
 Restructure the History surface from a flat game list into **Training run list → per-training game list**. Depends on the Training Title spec (`docs/DESIGN-TRAINING-TITLE.md`).
 
 ## 0. Routes

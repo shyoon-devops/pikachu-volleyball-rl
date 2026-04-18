@@ -225,6 +225,37 @@ describe('Dashboard loading state', () => {
     expect(payload.title).toBe('')
   })
 
+  // R7A follow-up — React error #310 ("Rendered more hooks than
+  // during the previous render"). Skeleton gate used to sit between
+  // the hooks; transitioning from skeleton (connecting + no data) to
+  // the real UI (connected + data) ran a different number of hooks
+  // across consecutive renders and React tore down the tree. The
+  // gate now lives below every hook, so this transition must be
+  // stable.
+  it('transitions from skeleton to real UI without hook-order violation', () => {
+    resetMockState({ connectionState: 'connecting' })
+    const { rerender } = renderDashboard()
+    expect(screen.getByRole('status', { name: /loading dashboard/i })).toBeInTheDocument()
+
+    // Simulate WS connect + data landing → gate flips to false.
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      metrics: [
+        { step: 1, episode: 1, meanReward: 0, winRate: 0, policyLoss: 0, valueLoss: 0 } as TrainingMetrics,
+      ],
+    })
+    expect(() =>
+      rerender(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>,
+      ),
+    ).not.toThrow()
+    expect(screen.queryByRole('status', { name: /loading dashboard/i })).not.toBeInTheDocument()
+    expect(screen.getByTestId('game-canvas')).toBeInTheDocument()
+  })
+
   it('does not show the skeleton when reconnecting mid-session with data present', () => {
     resetMockState({
       connectionState: 'connecting',
@@ -239,5 +270,37 @@ describe('Dashboard loading state', () => {
     })
     renderDashboard()
     expect(screen.queryByRole('status', { name: /loading dashboard/i })).not.toBeInTheDocument()
+  })
+
+  // FC-R7G: tabs track the submitted n_envs alone — `observed` keys
+  // from a prior run no longer inflate the count. Reproduces the
+  // user-reported flow:
+  //   1. run1 n_envs=16 → envFrames caches 16 keys
+  //   2. run1 stops (envFrames NOT cleared since exp_id didn't
+  //      transition through a new value)
+  //   3. form sits at the default n_envs=8
+  // Pre-fix: the tab bar rendered 16 chips. Post-fix: 8.
+  it('does not inflate tab count from stale envFrames beyond form n_envs', () => {
+    const staleFrames: EnvFramesMap = {}
+    for (let i = 0; i < 16; i++) {
+      staleFrames[i] = {
+        envId: i,
+        frame: null,
+        score: [0, 0],
+        stateName: 'play',
+        stepCount: 0,
+      } as unknown as EnvFramesMap[number]
+    }
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      envFrames: staleFrames,
+    })
+    renderDashboard()
+    // Form default params.n_envs=8 (hyperparamDefaults). With the
+    // pre-fix `Math.max(observed, requested)` derivation this would
+    // render 16 tabs; the FC-R7G fix pins it to 8.
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs.length).toBe(8)
   })
 })

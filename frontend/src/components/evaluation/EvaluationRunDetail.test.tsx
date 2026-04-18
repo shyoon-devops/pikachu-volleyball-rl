@@ -69,7 +69,9 @@ describe('EvaluationRunDetail (FC-R7C level-2)', () => {
     getModels.mockResolvedValueOnce([])
     renderAt('/evaluation/run-with%20space')
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('run-with space')
-    expect(screen.getByRole('link', { name: /All Trainings/ })).toHaveAttribute(
+    // FC-R7F: breadcrumb renamed "All Trainings" → "Evaluation" to
+    // make the page context unambiguous.
+    expect(screen.getByRole('link', { name: 'Evaluation' })).toHaveAttribute(
       'href', '/evaluation',
     )
     await waitFor(() => {
@@ -145,6 +147,40 @@ describe('EvaluationRunDetail (FC-R7C level-2)', () => {
     await waitFor(() => {
       expect(runEvaluation).toHaveBeenCalledWith('exp/a__slug__500.zip', 3, 20)
     })
+  })
+
+  // FC-R7I: poll checkpoints while the training run is active.
+  it('polls getModels every 10s while the run is active', async () => {
+    vi.useFakeTimers()
+    mockTrainingState.status = {
+      state: 'running',
+      currentStep: 1000,
+      currentEpisode: 5,
+      title: 'my-run',
+    } as TrainingStatus
+    getModels.mockResolvedValue([])
+    renderAt('/evaluation/my-run')
+    // Initial fetch.
+    await vi.waitFor(() => expect(getModels).toHaveBeenCalledTimes(1))
+
+    // Advance 10s → one more fetch; another 10s → one more.
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(getModels).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(getModels).toHaveBeenCalledTimes(3)
+    vi.useRealTimers()
+  })
+
+  it('does NOT poll when the run is not active', async () => {
+    vi.useFakeTimers()
+    mockTrainingState.status = { state: 'stopped', currentStep: 0, currentEpisode: 0 } as TrainingStatus
+    getModels.mockResolvedValue([])
+    renderAt('/evaluation/some-run')
+    await vi.waitFor(() => expect(getModels).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(30000)
+    // No additional fetches — polling gated on isActiveRun.
+    expect(getModels).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
   })
 
   it('surfaces a fetch error when getModels rejects', async () => {

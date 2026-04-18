@@ -1,5 +1,7 @@
 # Evaluation — Two-Level Drill-Down Spec
 
+> **SUPERSEDED BY `docs/DESIGN-RUNS-MERGED.md`** (2026-04-18). The standalone `/evaluation` surface is folded into the unified `/runs` nav with an `Evaluation` sub-tab. Kept for reference; §2b (checkpoint table) + §2c (eval runner panel) are still reused by the `Evaluation` sub-tab.
+
 Mirror history drill-down: **Training runs → Checkpoints of one run → Run evaluation**. Replaces current flat checkpoint list. Depends on `DESIGN-TRAINING-TITLE.md` + `DESIGN-HISTORY-DRILLDOWN.md`.
 
 ## 0. Routes
