@@ -80,7 +80,22 @@ function formatStep(step: number | null | undefined): string {
   return step.toLocaleString()
 }
 
-export function EvaluationRunDetail() {
+/**
+ * When `embedded` is true, the component renders its body (checkpoint
+ * table + eval runner + bulk-delete toolbar + modal) without the
+ * breadcrumb / h1 / active-run badge chrome. `UnifiedRunDetail`
+ * (FC-R8A) reuses this as the Evaluation sub-tab body, so the outer
+ * header is the unified header and we don't double-stack navigation.
+ *
+ * When omitted (legacy `/evaluation/:title` route, now 301-redirected
+ * away), the full chrome renders for back-compat tests + bookmarked
+ * URLs that haven't rolled over yet.
+ */
+export interface EvaluationRunDetailProps {
+  embedded?: boolean
+}
+
+export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailProps = {}) {
   const { title = '' } = useParams<{ title: string }>()
   const decoded = decodeURIComponent(title)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -388,26 +403,30 @@ export function EvaluationRunDetail() {
     '진행 중인 학습의 체크포인트는 삭제할 수 없습니다. 학습 종료 후 다시 시도하세요.'
 
   return (
-    <div className="eval-run-detail">
-      <nav className="eval-run-detail-breadcrumb" aria-label="Breadcrumb">
-        <Link to="/evaluation" className="eval-run-detail-breadcrumb-link">
-          Evaluation
-        </Link>
-        <span className="eval-run-detail-breadcrumb-separator" aria-hidden="true">
-          {' › '}
-        </span>
-        <span className="eval-run-detail-breadcrumb-current">
-          {decoded || 'untitled'}
-        </span>
-      </nav>
-      <div className="eval-run-detail-header">
-        <h1 className="eval-run-detail-title">{decoded || 'untitled'}</h1>
-        {isActiveRun && (
-          <span className="eval-run-detail-live" aria-label="This training run is currently running">
-            Running
-          </span>
-        )}
-      </div>
+    <div className={`eval-run-detail${embedded ? ' eval-run-detail--embedded' : ''}`}>
+      {!embedded && (
+        <>
+          <nav className="eval-run-detail-breadcrumb" aria-label="Breadcrumb">
+            <Link to="/evaluation" className="eval-run-detail-breadcrumb-link">
+              Evaluation
+            </Link>
+            <span className="eval-run-detail-breadcrumb-separator" aria-hidden="true">
+              {' › '}
+            </span>
+            <span className="eval-run-detail-breadcrumb-current">
+              {decoded || 'untitled'}
+            </span>
+          </nav>
+          <div className="eval-run-detail-header">
+            <h1 className="eval-run-detail-title">{decoded || 'untitled'}</h1>
+            {isActiveRun && (
+              <span className="eval-run-detail-live" aria-label="This training run is currently running">
+                Running
+              </span>
+            )}
+          </div>
+        </>
+      )}
 
       {error && (
         <div className="eval-run-detail-error alert-error" role="alert">{error}</div>

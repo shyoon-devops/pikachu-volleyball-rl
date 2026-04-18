@@ -30,20 +30,14 @@ import {
 import './Dashboard.css'
 
 /**
- * Baseline env count before WS data arrives or when the user hasn't
- * yet started a training run. Spec supports 1..16; 8 matches BE's
- * training run default and the HyperparamForm's baseline for n_envs.
+ * Spec ceiling for parallel envs. The form permits values up to 32
+ * but the BatchTabBar only renders up to MAX_N_ENVS cleanly.
+ * `effectiveNEnvs` derives from live envFrames — see the comment
+ * at that useMemo for the refresh-hydration rationale.
  *
- * Effective count is `max(baseline, params.n_envs, observed+1)` —
- * see `effectiveNEnvs` below. The derivation lives FE-side because
- * `/api/training/status` doesn't expose `n_envs` today;
- * [BE-WAITING] adding `"n_envs": self.manager._n_envs` to
- * `backend/app/services/training_service.py::status()` would let us
- * drop the observed-map derivation. For now the observed path
- * catches any count the user configured, including values above the
- * form default (n_envs=16 when the user bumps it).
+ * [BE-WAITING] Once `/api/training/status` exposes `n_envs`, the
+ * active-run count can skip the observed-frame dependency entirely.
  */
-const DEFAULT_N_ENVS = 8
 const MAX_N_ENVS = 16
 /** Matches the 180ms canvas crossfade per Designer spec §3. */
 const CANVAS_FADE_MS = 180
@@ -106,31 +100,40 @@ export function Dashboard() {
   /**
    * Effective env count — the tab-bar length.
    *
-   * Authoritative source: the form's `params.n_envs`, which is the
-   * value Start would submit (and that BE received on the most recent
-   * `training:start` for an active run). Clamped to [1, MAX_N_ENVS].
+   * FC-R8a (2026-04-18): the form's `params.n_envs` is "next run
+   * intent" (what Start would submit); for the ACTIVE run we trust
+   * the live envFrames snapshot. This fixes the refresh-after-shrink
+   * regression where a running n_envs=4 session reloaded the page
+   * and the form fell back to its default 8, inflating the tabs.
    *
-   * FC-R7G regression (2026-04-18): previous revisions additionally
-   * bumped the count to `Math.max(DEFAULT_N_ENVS, observed)` which
-   * pinned the tab bar at 8 whenever envFrames still carried stale
-   * keys 0..7 from a prior run — even after the user reduced n_envs
-   * to 4 and started a fresh run. Observed is now IGNORED for the
-   * count; tabs always match `params.n_envs` exactly.
+   * Source of truth by state:
+   *   - running + envFrames populated → observed max + 1 (authoritative)
+   *   - running + envFrames empty     → 0 (render a "waiting" skeleton
+   *                                         instead of tabs — the first
+   *                                         env_frame will repopulate)
+   *   - stopped / paused-idle          → 0 (render a "no active run"
+   *                                         placeholder instead of tabs)
    *
    * [BE-WAITING] `/api/training/status` does NOT expose `n_envs`
-   * today. When it does (e.g. `status.n_envs`), prefer that value
-   * for running sessions so a mid-session refresh still pins the
-   * right count without re-reading the form. The form value remains
-   * correct for idle + post-start windows, so this path stays
-   * load-bearing.
+   * today. Once it does, prefer the BE-echoed value for running
+   * sessions (observed can still lag on first frame). Until then,
+   * the observed path is correct within one broadcast_interval.
    */
+  const observedNEnvs = useMemo(() => {
+    const source = envFrames ?? {}
+    return Object.keys(source)
+      .map(Number)
+      .filter(n => Number.isFinite(n) && n >= 0)
+      .reduce((max, id) => Math.max(max, id + 1), 0)
+  }, [envFrames])
+
+  const isTrainingActive = status.state === 'running' || status.state === 'paused'
+
   const effectiveNEnvs = useMemo(() => {
-    const rawRequested = Number(params?.n_envs)
-    const requested = Number.isFinite(rawRequested) && rawRequested > 0
-      ? rawRequested
-      : DEFAULT_N_ENVS
-    return Math.max(1, Math.min(MAX_N_ENVS, requested))
-  }, [params])
+    if (!isTrainingActive) return 0
+    if (observedNEnvs <= 0) return 0
+    return Math.max(1, Math.min(MAX_N_ENVS, observedNEnvs))
+  }, [isTrainingActive, observedNEnvs])
 
   const score1 = displayFrame?.score1 ?? 0
   const score2 = displayFrame?.score2 ?? 0
@@ -294,12 +297,29 @@ export function Dashboard() {
             )}
           </div>
 
-          <BatchTabBar
-            envFrames={envFrames ?? {}}
-            nEnvs={effectiveNEnvs}
-            activeEnvId={activeEnvId}
-            onSelect={handleEnvSelect}
-          />
+          {effectiveNEnvs > 0 ? (
+            <BatchTabBar
+              envFrames={envFrames ?? {}}
+              nEnvs={effectiveNEnvs}
+              activeEnvId={activeEnvId}
+              onSelect={handleEnvSelect}
+            />
+          ) : isTrainingActive ? (
+            <div
+              className="dashboard-batch-tab-placeholder"
+              role="status"
+              aria-live="polite"
+            >
+              학습 환경 정보 대기 중…
+            </div>
+          ) : (
+            <div
+              className="dashboard-batch-tab-placeholder dashboard-batch-tab-placeholder--idle"
+              role="status"
+            >
+              활성 학습 없음
+            </div>
+          )}
         </ErrorBoundary>
 
         {isStopped && (
@@ -404,7 +424,7 @@ const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecor
       <td className="recent-games-title-cell" title={g.title ?? undefined}>
         {g.title && g.title.trim() !== '' ? (
           <Link
-            to={`/history/${encodeURIComponent(g.title)}`}
+            to={`/runs/${encodeURIComponent(g.title)}?tab=games`}
             className="recent-games-title-link"
           >
             {g.title}

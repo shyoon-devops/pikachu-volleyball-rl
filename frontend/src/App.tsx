@@ -1,15 +1,34 @@
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useParams, useLocation } from 'react-router-dom'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { Dashboard } from './components/dashboard/Dashboard'
 import { TrainingRunList } from './components/history/TrainingRunList'
-import { TrainingRunDetail } from './components/history/TrainingRunDetail'
+import { UnifiedRunDetail } from './components/runs/UnifiedRunDetail'
 import { ReplayPlayer } from './components/replay/ReplayPlayer'
-import { EvaluationRunDetail } from './components/evaluation/EvaluationRunDetail'
 import { VisualHarness } from './components/game/VisualHarness'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ConnectionIndicator } from './components/ConnectionIndicator'
 import { TrainingStateProvider } from './hooks/TrainingStateProvider'
 import './App.css'
+
+/**
+ * FC-R8A legacy redirect for `/history/:title` and `/evaluation/:title`
+ * — keeps shared URLs working after the nav merge. The default sub-tab
+ * is pinned per origin so old links land on the expected content:
+ *   /history/X    → /runs/X?tab=games
+ *   /evaluation/X → /runs/X?tab=eval
+ * Existing query params (e.g. `?env=3` on the history drill-down) are
+ * preserved where they make sense for the target tab.
+ */
+function LegacyTitleRedirect({ tab }: { tab: 'games' | 'eval' }) {
+  const { title = '' } = useParams<{ title: string }>()
+  const location = useLocation()
+  const params = new URLSearchParams(location.search)
+  params.set('tab', tab)
+  // Preserve namespaced query params if any. Host-specific namespacing
+  // (games.env, eval.step) lives inside child components — we pass
+  // whatever arrived through without mutation.
+  return <Navigate to={`/runs/${title}?${params.toString()}`} replace />
+}
 
 function App() {
   return (
@@ -26,11 +45,14 @@ function App() {
               <NavLink to="/" end className={({ isActive }) => `app-nav-link${isActive ? ' active' : ''}`}>
                 Dashboard
               </NavLink>
-              <NavLink to="/history" className={({ isActive }) => `app-nav-link${isActive ? ' active' : ''}`}>
-                History
-              </NavLink>
-              <NavLink to="/evaluation" className={({ isActive }) => `app-nav-link${isActive ? ' active' : ''}`}>
-                Evaluation
+              {/*
+                FC-R8A: merged History + Evaluation nav entries into a
+                single "Training Runs" entry. Legacy /history and
+                /evaluation routes redirect to /runs below so shared
+                URLs and bookmarks keep working.
+              */}
+              <NavLink to="/runs" className={({ isActive }) => `app-nav-link${isActive ? ' active' : ''}`}>
+                Training Runs
               </NavLink>
             </nav>
             <div className="app-header-actions">
@@ -45,11 +67,7 @@ function App() {
                 Per-route ErrorBoundaries (FC-R7A, 2026-04-18). The
                 outer boundary catches anything missed; each inner
                 one isolates a single route so a stopped-state
-                render crash on /history doesn't take down
-                /evaluation's "Try again" behaviour. qa regression
-                that surfaced this: empty / null fields on
-                training:status fed downstream components that
-                crashed mid-render.
+                render crash on /runs doesn't take down other routes.
               */}
               <Routes>
                 <Route path="/" element={
@@ -58,43 +76,29 @@ function App() {
                   </ErrorBoundary>
                 } />
                 {/*
-                  History drill-down (R6H, spec c460c55b):
-                    /history          → runs aggregate list (level-1)
-                    /history/:title   → games of one run (level-2, ReplayList)
-                  Legacy bookmarks to /history still land on the
-                  hub page; deep-linked games pages go via /history/X.
+                  FC-R8A unified surface (spec 43d9d1bb):
+                    /runs         → L1 runs list (merged H+E)
+                    /runs/:title  → L2 detail with Overview / Games /
+                                    Evaluation sub-tabs
                 */}
-                <Route path="/history" element={
+                <Route path="/runs" element={
                   <ErrorBoundary>
-                    <TrainingRunList />
+                    <TrainingRunList linkBase="/runs/" mode="evaluation" />
                   </ErrorBoundary>
                 } />
-                <Route path="/history/:title" element={
+                <Route path="/runs/:title" element={
                   <ErrorBoundary>
-                    <TrainingRunDetail />
+                    <UnifiedRunDetail />
                   </ErrorBoundary>
                 } />
+                {/* Legacy redirects — preserve shared URLs and bookmarks. */}
+                <Route path="/history" element={<Navigate to="/runs" replace />} />
+                <Route path="/history/:title" element={<LegacyTitleRedirect tab="games" />} />
+                <Route path="/evaluation" element={<Navigate to="/runs" replace />} />
+                <Route path="/evaluation/:title" element={<LegacyTitleRedirect tab="eval" />} />
                 <Route path="/replay/:id" element={
                   <ErrorBoundary>
                     <ReplayPlayer />
-                  </ErrorBoundary>
-                } />
-                {/*
-                  Evaluation drill-down (R7C, spec bf7bfaa4):
-                    /evaluation          → runs aggregate list (level-1)
-                    /evaluation/:title   → checkpoints of one run + eval runner
-                  Reuses TrainingRunList for level-1 with a `/evaluation/`
-                  link base, so the history and evaluation landing pages
-                  share the same search/filter/card UX.
-                */}
-                <Route path="/evaluation" element={
-                  <ErrorBoundary>
-                    <TrainingRunList linkBase="/evaluation/" mode="evaluation" />
-                  </ErrorBoundary>
-                } />
-                <Route path="/evaluation/:title" element={
-                  <ErrorBoundary>
-                    <EvaluationRunDetail />
                   </ErrorBoundary>
                 } />
                 <Route path="/visual" element={<VisualHarness />} />
