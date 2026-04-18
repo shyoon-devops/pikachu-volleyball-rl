@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { getTrainingRuns } from '../../lib/api'
 import type { TrainingRun } from '../../lib/types'
 import { formatKstDateTime } from '../../lib/formatTime'
+import { useTrainingState } from '../../hooks/useTrainingState'
 import './TrainingRunList.css'
 
 /**
@@ -29,6 +30,7 @@ const PAGE_LIMIT = 50
 
 export function TrainingRunList() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const { gameResultSeq } = useTrainingState()
   const [runs, setRuns] = useState<TrainingRun[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +65,11 @@ export function TrainingRunList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQuery])
 
+  // FC-R7B live-history: refetch whenever a new game:result lands so
+  // the run aggregates (totalGames / winRate / avgRally / running-status)
+  // reflect the in-progress training run without a manual refresh. The
+  // hook bumps `gameResultSeq` on every ws `game:result` message; adding
+  // it to the dep array re-runs this effect.
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -80,7 +87,7 @@ export function TrainingRunList() {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [])
+  }, [gameResultSeq])
 
   const filteredRuns = useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase()

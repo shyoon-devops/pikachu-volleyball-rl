@@ -19,6 +19,16 @@ vi.mock('../../lib/api', () => ({
   getAvailableReplays: () => getAvailableReplays(),
 }))
 
+// FC-R7B: ReplayList consumes `gameResultSeq` from the shared training
+// state hook so it refetches on each ws game:result. Component tests
+// render outside the app's TrainingStateProvider, so we mock the hook
+// directly. Tests that exercise the live-refetch path mutate
+// `mockTrainingState.gameResultSeq` + rerender.
+const mockTrainingState = { gameResultSeq: 0 }
+vi.mock('../../hooks/useTrainingState', () => ({
+  useTrainingState: () => mockTrainingState,
+}))
+
 function gameRow(overrides: Partial<GameRecord> = {}): GameRecord {
   // BE shape: `id` is the Mongo ObjectId hex (unique row key), `gameId`
   // is the UUID4 minted at game-end and used as the replay file stem.
@@ -50,6 +60,7 @@ function replayRow(overrides: Partial<ReplayInfo> = {}): ReplayInfo {
 beforeEach(() => {
   getGames.mockReset()
   getAvailableReplays.mockReset()
+  mockTrainingState.gameResultSeq = 0
 })
 
 afterEach(() => {
@@ -504,6 +515,36 @@ describe('ReplayList — titleFilter prop (FC-R6H level-2 reuse)', () => {
     })
     // "Title" header is NOT rendered in this mode.
     expect(screen.queryByRole('columnheader', { name: 'Title' })).toBeNull()
+  })
+
+  // FC-R7B: a bump on `gameResultSeq` from the shared hook must
+  // re-run `getGames` so the title-scoped level-2 list picks up the
+  // freshly-landed game without a manual refresh.
+  it('refetches games when gameResultSeq bumps (live game:result sync)', async () => {
+    getGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 20 })
+    getAvailableReplays.mockResolvedValue([])
+    const { rerender } = render(
+      <MemoryRouter>
+        <ReplayList titleFilter="my-run" />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(getGames).toHaveBeenCalledTimes(1))
+
+    getGames.mockResolvedValueOnce({
+      data: [gameRow({ id: 'm-new', gameId: 'uuid-new', title: 'my-run' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    mockTrainingState.gameResultSeq = 1
+    rerender(
+      <MemoryRouter>
+        <ReplayList titleFilter="my-run" />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(getGames).toHaveBeenCalledTimes(2))
+    // Title filter is still forwarded on the refetch (deps include it).
+    expect(getGames.mock.calls[1][2]).toBe('my-run')
   })
 
   it('uses the emptyStateOverride message when no games are found', async () => {
