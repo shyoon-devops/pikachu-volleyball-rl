@@ -233,13 +233,29 @@ export interface GameRecord {
    */
   rallyCount?: number
   /**
-   * 0-indexed parallel env that produced this game, for the A+C
-   * (batch tabs) feature's history-page filter. Optional because BE
-   * A2 hasn't landed yet — see [BE-WAITING] in the History page's
-   * env filter. Demo / single-env runs also legitimately have no
-   * env id; those render as '—' in the chip column.
+   * Parallel env that produced this game. BE
+   * (`backend/rl/callbacks.py::DrainResultsCallback._on_step`) emits
+   * the field as a STRING: `"0".."7"` for parallel gradient envs,
+   * `"demo"` for the standalone demo game. Stringified so both
+   * families share a single Mongo column.
+   *
+   * FE keeps the string form verbatim; `formatEnvId` and the env
+   * filter drop-down handle both variants. Optional because
+   * pre-port records lack the field entirely.
    */
-  envId?: number
+  envId?: string
+  /**
+   * Monotonic episode number at game-end, sourced from
+   * `TrainingManager.current_episode` (`backend/rl/trainer.py`).
+   * Optional: BE does NOT include it on per-game result broadcasts
+   * today (only on REST `/api/training/status` for the LIVE
+   * counter). Rows without it render as `—` in the column.
+   *
+   * [BE-WAITING] Add `"episode": mgr.current_episode` to the payload
+   * dict in `callbacks.py::DrainResultsCallback._on_step` alongside
+   * `env_id` so the FE column can light up per row.
+   */
+  episode?: number
 }
 
 export interface EvalResult {

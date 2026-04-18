@@ -4,6 +4,8 @@ import {
   formatRallyCount,
   formatAvgRallyLength,
   formatExperimentIdShort,
+  formatEnvId,
+  formatEpisode,
 } from './formatGame'
 
 describe('formatBotLevel', () => {
@@ -110,5 +112,44 @@ describe('formatExperimentIdShort', () => {
     expect(formatExperimentIdShort(null)).toBe('—')
     expect(formatExperimentIdShort(undefined)).toBe('—')
     expect(formatExperimentIdShort('')).toBe('—')
+  })
+})
+
+describe('formatEnvId', () => {
+  it('renders numeric string env ids as "ENV N"', () => {
+    expect(formatEnvId('0')).toBe('ENV 0')
+    expect(formatEnvId('7')).toBe('ENV 7')
+    expect(formatEnvId('12')).toBe('ENV 12')
+  })
+
+  it('renders legacy numeric values as "ENV N"', () => {
+    expect(formatEnvId(0)).toBe('ENV 0')
+    expect(formatEnvId(3)).toBe('ENV 3')
+  })
+
+  it('uppercases non-numeric string env labels (e.g. "demo" → "DEMO")', () => {
+    expect(formatEnvId('demo')).toBe('DEMO')
+    expect(formatEnvId('eval')).toBe('EVAL')
+  })
+
+  it('renders "—" for missing / empty / NaN', () => {
+    expect(formatEnvId(null)).toBe('—')
+    expect(formatEnvId(undefined)).toBe('—')
+    expect(formatEnvId('')).toBe('—')
+    expect(formatEnvId('   ')).toBe('—')
+    expect(formatEnvId(Number.NaN)).toBe('—')
+  })
+})
+
+describe('formatEpisode (BE-WAITING)', () => {
+  it('renders "—" for missing / NaN inputs', () => {
+    expect(formatEpisode(null)).toBe('—')
+    expect(formatEpisode(undefined)).toBe('—')
+    expect(formatEpisode(Number.NaN)).toBe('—')
+  })
+
+  it('formats a real episode number with locale separators', () => {
+    expect(formatEpisode(0)).toBe('0')
+    expect(formatEpisode(12345)).toBe('12,345')
   })
 })

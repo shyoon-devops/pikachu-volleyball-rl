@@ -14,6 +14,8 @@ import {
   formatRallyCount,
   formatAvgRallyLength,
   formatExperimentIdShort,
+  formatEnvId,
+  formatEpisode,
 } from '../../lib/formatGame'
 import { formatKstDateTime } from '../../lib/formatTime'
 import './Dashboard.css'
@@ -182,6 +184,8 @@ export function Dashboard() {
                     */}
                     {[
                       'Time',
+                      'Env',
+                      'Episode',
                       'Bot Level',
                       'Score',
                       'Winner',
@@ -198,6 +202,20 @@ export function Dashboard() {
                   {recentGames.slice(0, 20).map((g) => (
                     <tr key={g.id}>
                       <td>{formatKstDateTime(g.timestamp)}</td>
+                      <td>
+                        <span
+                          className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
+                          aria-label={
+                            g.envId === undefined
+                              ? 'No env id recorded'
+                              : `Env ${g.envId}`
+                          }
+                          data-env-id={g.envId ?? ''}
+                        >
+                          {formatEnvId(g.envId)}
+                        </span>
+                      </td>
+                      <td className="text-muted">{formatEpisode(g.episode)}</td>
                       <td>{formatBotLevel(g.botLevel)}</td>
                       <td>
                         <span className="score-p1">{g.score1}</span>
