@@ -1,0 +1,570 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import { ReplayList } from './ReplayList'
+import type { GameRecord, ReplayInfo } from '../../lib/types'
+
+// Pin formatBotLevel by mocking the api module so we control both
+// fetches independently — the unified-list behaviour is the join
+// between games and replays, so test must verify both inputs land
+// on the same row.
+
+const getGames = vi.fn<
+  (page: number, limit: number, title?: string) => Promise<{ data: GameRecord[]; total: number; page: number; limit: number }>
+>()
+const getAvailableReplays = vi.fn<() => Promise<ReplayInfo[]>>()
+
+vi.mock('../../lib/api', () => ({
+  getGames: (page: number, limit: number, title?: string) => getGames(page, limit, title),
+  getAvailableReplays: () => getAvailableReplays(),
+}))
+
+// FC-R7B: ReplayList consumes `gameResultSeq` from the shared training
+// state hook so it refetches on each ws game:result. Component tests
+// render outside the app's TrainingStateProvider, so we mock the hook
+// directly. Tests that exercise the live-refetch path mutate
+// `mockTrainingState.gameResultSeq` + rerender.
+const mockTrainingState = { gameResultSeq: 0 }
+vi.mock('../../hooks/useTrainingState', () => ({
+  useTrainingState: () => mockTrainingState,
+}))
+
+function gameRow(overrides: Partial<GameRecord> = {}): GameRecord {
+  // BE shape: `id` is the Mongo ObjectId hex (unique row key), `gameId`
+  // is the UUID4 minted at game-end and used as the replay file stem.
+  // The unified-list join MUST use `gameId`, not `id`.
+  return {
+    id: 'mongo-objectid-1',
+    gameId: 'uuid-game-1',
+    timestamp: '2026-04-18T01:00:00Z',
+    botLevel: 3,
+    score1: 15,
+    score2: 12,
+    winner: 1,
+    durationFrames: 4500,
+    rallyCount: 9,
+    ...overrides,
+  }
+}
+
+function replayRow(overrides: Partial<ReplayInfo> = {}): ReplayInfo {
+  return {
+    // Default replay matches the default game's UUID, NOT its Mongo id.
+    gameId: 'uuid-game-1',
+    sizeBytes: 4096,
+    createdAt: 1713400000,
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  getGames.mockReset()
+  getAvailableReplays.mockReset()
+  mockTrainingState.gameResultSeq = 0
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe('ReplayList — unified games + replays (B2)', () => {
+  it('renders one row per game with a Watch button when a replay file exists', async () => {
+    // Mongo ObjectId hex (g.id) and replay UUID4 (g.gameId) are
+    // different — the join key is the UUID. This test pins the F1
+    // regression: pre-fix code joined on g.id and the Watch button
+    // never lit up.
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'mongo-objectid-x', gameId: 'uuid-watched' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([replayRow({ gameId: 'uuid-watched' })])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Watch replay for game uuid-wat/ })).toBeTruthy()
+    })
+    // Old "Available Replays" section header must not be in the unified view.
+    expect(screen.queryByText('Available Replays')).toBeNull()
+  })
+
+  it('renders an em-dash for games without a replay file (no Watch button)', async () => {
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'mongo-no-replay', gameId: 'uuid-no-replay' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    // Empty replay inventory — game still renders, replay column shows
+    // "—" so the user sees the game existed even if the .msgpack is gone.
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('No replay file available')).toBeTruthy()
+    })
+    expect(screen.queryByRole('button', { name: /Watch replay/ })).toBeNull()
+  })
+
+  it('joins games and replays by gameId (extra replays without a game row are ignored)', async () => {
+    // Two games, but only one has a replay file. The replay inventory
+    // also contains an entry for an unrelated gameId (e.g. a game on
+    // a later page) — that orphan must NOT spawn an extra row, since
+    // the table is driven by the games list, not the replays list.
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'mongo-a', gameId: 'uuid-with-replay' }),
+        gameRow({ id: 'mongo-b', gameId: 'uuid-without' }),
+      ],
+      total: 2,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([
+      replayRow({ gameId: 'uuid-with-replay' }),
+      replayRow({ gameId: 'uuid-orphan-not-on-this-page' }),
+    ])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Watch replay for game uuid-wit/ })).toBeTruthy()
+    })
+    // The orphan replay must not appear as its own row.
+    expect(screen.queryByText(/uuid-orphan/)).toBeNull()
+    // Two data rows total (the row count check is implicit via game IDs).
+    const watchButtons = screen.queryAllByRole('button', { name: /Watch replay/ })
+    expect(watchButtons.length).toBe(1)
+  })
+
+  it('falls back to id when gameId is missing (legacy doc — UUID stored as _id)', async () => {
+    // Pre-port docs occasionally stored the UUID directly as `_id`,
+    // leaving `game_id` field empty. The fallback `g.gameId ?? g.id`
+    // must still resolve those rows so older history doesn't go dark.
+    getGames.mockResolvedValue({
+      data: [{
+        id: 'uuid-legacy',
+        // gameId intentionally omitted
+        timestamp: '2026-04-18T01:00:00Z',
+        botLevel: 2,
+        score1: 15,
+        score2: 7,
+        winner: 1,
+        durationFrames: 3000,
+        rallyCount: 5,
+      }],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([replayRow({ gameId: 'uuid-legacy' })])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Watch replay for game uuid-leg/ })).toBeTruthy()
+    })
+  })
+
+  it('keeps rendering games when getAvailableReplays() rejects (degraded mode)', async () => {
+    // Filesystem inventory failure should not blank the page — the
+    // user can still read the game stats; only the Watch column goes
+    // dark.
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'mongo-1', gameId: 'uuid-1' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockRejectedValue(new Error('replays endpoint down'))
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('No replay file available')).toBeTruthy()
+    })
+    // No global error banner — the games fetch succeeded.
+    expect(screen.queryByText(/Failed to load games/)).toBeNull()
+  })
+
+  it('shows the empty-state message when there are no games', async () => {
+    getGames.mockResolvedValue({ data: [], total: 0, page: 1, limit: 20 })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('No games recorded yet.')).toBeTruthy()
+    })
+  })
+})
+
+describe('ReplayList — env filter + chip column (FC-history, Designer §6)', () => {
+  it('renders an env chip per row using the envId field', async () => {
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'm1', gameId: 'u1', envId: '3' }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: undefined }),
+      ],
+      total: 2,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Env 3')).toBeInTheDocument()
+    })
+    // The undefined envId row renders an em-dash chip with a clear aria label.
+    expect(screen.getByLabelText('No env id recorded')).toBeInTheDocument()
+  })
+
+  it('filters the row list when ?env=N is present in the URL', async () => {
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'm1', gameId: 'u1', envId: '0' }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: '3' }),
+        gameRow({ id: 'm3', gameId: 'u3', envId: '3' }),
+        gameRow({ id: 'm4', gameId: 'u4', envId: undefined }),
+      ],
+      total: 4,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/history?env=3']}>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    // Two env=3 rows land; the env=0 row and the undefined-env row are hidden.
+    await waitFor(() => {
+      expect(screen.getAllByLabelText('Env 3')).toHaveLength(2)
+    })
+    expect(screen.queryByLabelText('Env 0')).toBeNull()
+    expect(screen.queryByLabelText('No env id recorded')).toBeNull()
+    // Filter-state hint surfaces the active filter value.
+    expect(screen.getByText(/env_id=3/i)).toBeInTheDocument()
+  })
+
+  it('shows all rows when the filter dropdown is set to All', async () => {
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'm1', gameId: 'u1', envId: '0' }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: '5' }),
+      ],
+      total: 2,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/history']}>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Env 0')).toBeInTheDocument()
+    })
+    expect(screen.getByLabelText('Env 5')).toBeInTheDocument()
+  })
+
+  it('renders a dedicated empty-state when a filter matches no games on the page', async () => {
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'm1', gameId: 'u1', envId: '0' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/history?env=7']}>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/No games match env_id=7/i)).toBeInTheDocument()
+    })
+  })
+
+  it('ignores a bogus ?env=foo value and shows all rows', async () => {
+    // parseEnvParam is strict — non-integer / negative values fall back
+    // to "all" so a broken bookmark doesn't blank the whole page.
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'm1', gameId: 'u1', envId: '2' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/history?env=foo']}>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Env 2')).toBeInTheDocument()
+    })
+    // No filter hint rendered when effective filter is null.
+    expect(screen.queryByText(/env_id=/i)).toBeNull()
+  })
+
+  it('supports the ?env=demo filter for the standalone LiveFrameCallback game', async () => {
+    // BE emits env_id="demo" for the single-game LiveFrameCallback,
+    // distinct from "0".."7" for parallel gradient envs. Filter must
+    // treat them as separate tokens and match string-exactly.
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'm1', gameId: 'u1', envId: '0' }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: 'demo' }),
+      ],
+      total: 2,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/history?env=demo']}>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      // After FC-R6E the dropdown only renders a DEMO option when the
+      // page has a game tagged "demo" — and the row's env chip also
+      // reads "DEMO". So there are TWO "DEMO" texts on a matched
+      // page; use `getAllByText` to avoid the ambiguity error.
+      expect(screen.getAllByText('DEMO').length).toBeGreaterThanOrEqual(1)
+    })
+    // ENV 0 row should be filtered OUT.
+    expect(screen.queryByLabelText('Env 0')).toBeNull()
+  })
+})
+
+describe('ReplayList — env filter options dynamic max (FC-R6E, 2026-04-18)', () => {
+  it('extends ENV options past 7 when games reference higher env_ids', async () => {
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'm1', gameId: 'u1', envId: '0' }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: '12' }),
+        gameRow({ id: 'm3', gameId: 'u3', envId: '15' }),
+      ],
+      total: 3,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    const select = await screen.findByLabelText('Filter by parallel env')
+    // Baseline ENV 0..7 + observed 12, 15 = 10 options + All.
+    const options = (select as HTMLSelectElement).options
+    const values = Array.from(options).map(o => o.value)
+    expect(values).toContain('0')
+    expect(values).toContain('7')
+    expect(values).toContain('12')
+    expect(values).toContain('15')
+    // No DEMO option because no game has env_id="demo" on this page.
+    expect(values).not.toContain('demo')
+  })
+
+  it('omits the DEMO option when no game on the page is tagged demo', async () => {
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'm1', gameId: 'u1', envId: '0' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    const select = await screen.findByLabelText('Filter by parallel env')
+    const values = Array.from((select as HTMLSelectElement).options).map(o => o.value)
+    expect(values).not.toContain('demo')
+  })
+})
+
+describe('ReplayList — episode column (FC-R2, 2026-04-18)', () => {
+  it('renders the episode number when BE provides it', async () => {
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'm1', gameId: 'u1', episode: 1234 })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      // Locale-formatted — "1,234" on en-*, any separator elsewhere.
+      expect(screen.getByText(/1.?234/)).toBeInTheDocument()
+    })
+  })
+
+  it('renders "—" when the episode field is missing [BE-WAITING]', async () => {
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'm1', gameId: 'u1', episode: undefined })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      // At least one em-dash (from Episode + maybe other missing fields).
+      const dashes = screen.getAllByText('—')
+      expect(dashes.length).toBeGreaterThanOrEqual(1)
+    })
+  })
+})
+
+describe('ReplayList — titleFilter prop (FC-R6H level-2 reuse)', () => {
+  it('forwards titleFilter into getGames so BE filters server-side', async () => {
+    getGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 20 })
+    getAvailableReplays.mockResolvedValueOnce([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList titleFilter="my-run" />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(getGames).toHaveBeenCalled()
+    })
+    // Third arg is the title filter.
+    expect(getGames.mock.calls[0][2]).toBe('my-run')
+  })
+
+  it('hides the Title column when hideTitleColumn is true', async () => {
+    getGames.mockResolvedValueOnce({
+      data: [gameRow({ title: 'my-run', envId: '0' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValueOnce([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList titleFilter="my-run" hideTitleColumn />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Env 0')).toBeInTheDocument()
+    })
+    // "Title" header is NOT rendered in this mode.
+    expect(screen.queryByRole('columnheader', { name: 'Title' })).toBeNull()
+  })
+
+  // FC-R7B: a bump on `gameResultSeq` from the shared hook must
+  // re-run `getGames` so the title-scoped level-2 list picks up the
+  // freshly-landed game without a manual refresh.
+  it('refetches games when gameResultSeq bumps (live game:result sync)', async () => {
+    getGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 20 })
+    getAvailableReplays.mockResolvedValue([])
+    const { rerender } = render(
+      <MemoryRouter>
+        <ReplayList titleFilter="my-run" />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(getGames).toHaveBeenCalledTimes(1))
+
+    getGames.mockResolvedValueOnce({
+      data: [gameRow({ id: 'm-new', gameId: 'uuid-new', title: 'my-run' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    mockTrainingState.gameResultSeq = 1
+    rerender(
+      <MemoryRouter>
+        <ReplayList titleFilter="my-run" />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(getGames).toHaveBeenCalledTimes(2))
+    // Title filter is still forwarded on the refetch (deps include it).
+    expect(getGames.mock.calls[1][2]).toBe('my-run')
+  })
+
+  it('uses the emptyStateOverride message when no games are found', async () => {
+    getGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 20 })
+    getAvailableReplays.mockResolvedValueOnce([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList
+          titleFilter="empty-run"
+          hideTitleColumn
+          emptyStateOverride="No games recorded for this training run yet."
+        />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('No games recorded for this training run yet.'),
+      ).toBeInTheDocument()
+    })
+  })
+})

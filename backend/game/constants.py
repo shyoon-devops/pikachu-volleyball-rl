@@ -26,7 +26,13 @@ PLAYER_DIVE_VELOCITY: int = -5  # original: yVelocity = -5 on dive start
 PLAYER_INIT_X_P1: int = 36  # original: player1.x = 36
 PLAYER_INIT_X_P2: int = GROUND_WIDTH - 36  # original: 396
 
-# Lying-down after dive landing — original: lyingDownDurationLeft = 3
+# Lying-down after dive landing. Set on the landing frame (player.state
+# 3 → 4), then decremented by 1 each frame the player is in state==4;
+# state transitions back to 0 the frame the counter falls below -1. So
+# total time stuck in state=4 is exactly 5 frames (3 → 2 → 1 → 0 → -1,
+# then -2 triggers the state=0 transition). Matches the literal value
+# at physics.js:575 ``player.lyingDownDurationLeft = 3``; see also the
+# decrement / exit branch at physics.js:507-512.
 LYING_DOWN_DURATION: int = 3
 
 # Ball — original: BALL_RADIUS=20, BALL_TOUCHING_GROUND_Y=252
@@ -49,4 +55,12 @@ BALL_MIN_REFLECT_VY_ABS: int = 15
 
 # Game rules
 MAX_SCORE: int = 15
-FPS: int = 30
+# Canonical engine tick rate. One ``PikachuVolleyball.step()`` call advances
+# the physics by exactly one game frame; this constant declares how many of
+# those frames make up one real-time second so consumers (FE replay player,
+# WS frame emitter, dashboard interpolator) can convert tick counts to
+# milliseconds correctly. Matches pikavolley.js:53 ``this.normalFPS = 25``.
+# Pre-2026-04-18 this was 30 — that 17% mismatch made dive/jump/lying-down
+# durations and the slow-motion window all play back faster than the
+# original.
+FPS: int = 25

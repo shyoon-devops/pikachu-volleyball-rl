@@ -48,6 +48,22 @@
   --color-chart-red:     #ef4444;
   --color-chart-cyan:    #06b6d4;
 
+  /* ── Bot difficulty ramp (L1 easy → L5 hard) ─────────── */
+  /*   사용자가 한눈에 난이도 인지할 수 있도록 초록→노랑→주황→빨강
+   *   4단계 그라데이션. L3 은 중간 지점이라 amber 선택.
+   *   dim 토큰은 배경, solid 는 테두리/텍스트 강조용.
+   */
+  --color-level-1:       #4ade80;  /* 초록 — 쉬움 */
+  --color-level-1-dim:   rgba(74, 222, 128, 0.14);
+  --color-level-2:       #a3e635;  /* 라임 — 보통 */
+  --color-level-2-dim:   rgba(163, 230, 53, 0.14);
+  --color-level-3:       #fbbf24;  /* amber — 중간 */
+  --color-level-3-dim:   rgba(251, 191, 36, 0.14);
+  --color-level-4:       #fb923c;  /* 주황 — 어려움 */
+  --color-level-4-dim:   rgba(251, 146, 60, 0.14);
+  --color-level-5:       #f87171;  /* 빨강 — 최고 난이도 */
+  --color-level-5-dim:   rgba(248, 113, 113, 0.16);
+
   /* ── Game field ──────────────────────────────────────── */
   --color-court-sky:     #1a2744;
   --color-court-grass:   #1b5e20;

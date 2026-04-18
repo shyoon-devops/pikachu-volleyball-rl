@@ -110,6 +110,14 @@ class TestConstantsParity:
     def test_max_score(self) -> None:
         assert MAX_SCORE == 15
 
+    def test_engine_tick_rate_matches_original(self) -> None:
+        # Original ``this.normalFPS = 25`` at pikavolley.js:53. Pre-port the
+        # constant was 30, which made dive/jump/lying-down windows look
+        # 17% faster than the reference game.
+        from backend.game.constants import FPS
+
+        assert FPS == 25
+
 
 # ─── Ball-player collision distance boundary ──────────────────────────────────
 
@@ -517,10 +525,22 @@ class TestJumpAndDive:
         assert game._state.player1.is_diving
         assert game._state.player1.diving_direction == 1
 
+    def test_dive_direction_tracks_left_input(self) -> None:
+        # physics.js:597 — player.divingDirection = userInput.xDirection.
+        # Left input (x_dir=-1) must record -1, not default 0 or the
+        # absolute value. FE dive sprite orientation depends on the sign.
+        game = PikachuVolleyball()
+        game.reset()
+        dive_left = PlayerInput(x_dir=-1, y_dir=0, power_hit=True)
+        game.step(dive_left, NOOP)
+        assert game._state.player1.is_diving
+        assert game._state.player1.diving_direction == -1
+
     def test_dive_landing_starts_lying_down(self) -> None:
         game = PikachuVolleyball()
         game.reset()
-        game._state.player1.is_diving = True
+        # state=3 is "diving" per the port (physics.js Player.state).
+        game._state.player1.state = 3
         game._state.player1.diving_direction = 1
         game._state.player1.y = PLAYER_GROUND_Y - 3
         game._state.player1.vy = 10  # will hit ground
@@ -531,7 +551,11 @@ class TestJumpAndDive:
     def test_lying_down_blocks_movement(self) -> None:
         game = PikachuVolleyball()
         game.reset()
-        game._state.player1.lying_down_duration = 3
+        # state=4 is "lying down after diving"; lying_down_duration_left
+        # drives the internal counter that the port decrements each frame.
+        game._state.player1.state = 4
+        game._state.player1.lying_down_duration_left = 3
+        game._state.player1.sync_derived_flags()
         initial_x = game._state.player1.x
         move_right = PlayerInput(x_dir=1, y_dir=0, power_hit=False)
         game.step(move_right, NOOP)
@@ -660,3 +684,174 @@ class TestPunchEffectMarkersDoNotMovePosition:
         dy = game._state.ball.y - ball_y_before
         assert abs(dx) < 50  # bounded by power-hit vx magnitude
         assert abs(dy) < 50
+
+
+class TestBallIsPowerHitFlag:
+    """Ball carries an is_power_hit flag for FE hyper/trail rendering.
+
+    Matches original physics.js: ball.isPowerHit is set true inside the
+    power-hit branch of processCollisionBetweenBallAndPlayer, false in
+    the non-power-hit branch. Persists between collisions until the next
+    collision flips it.
+    """
+
+    def test_flag_starts_false_on_fresh_ball(self) -> None:
+        game = PikachuVolleyball()
+        state = game.reset()
+        assert state.ball.is_power_hit is False
+
+    def test_power_hit_collision_sets_flag_true(self) -> None:
+        game = PikachuVolleyball()
+        game.reset()
+        # state=1 is "jumping" per the port. The power_hit input below
+        # then transitions state 1 → 2 inside _update_player, and the
+        # ball-player collision check keys off state==2 for the power
+        # branch (matches physics.js:709).
+        game._state.player1.state = 1
+        game._state.player1.sync_derived_flags()
+        game._state.player1.y = PLAYER_GROUND_Y - 40
+        game._state.ball.x = game._state.player1.x
+        game._state.ball.y = game._state.player1.y
+        game._state.ball.vx = 0
+        game._state.ball.vy = 3
+        power = PlayerInput(x_dir=1, y_dir=-1, power_hit=True)
+        state = game.step(power, NOOP)
+        assert state.ball.is_power_hit is True
+
+    def test_non_power_collision_sets_flag_false(self) -> None:
+        game = PikachuVolleyball()
+        game.reset()
+        # Not jumping — collision cannot be a power hit.
+        game._state.player1.is_jumping = False
+        game._state.ball.x = game._state.player1.x
+        game._state.ball.y = game._state.player1.y - PLAYER_HALF_LENGTH + 1
+        game._state.ball.vx = 0
+        game._state.ball.vy = 5
+        # Pre-seed True so we can observe the flip to False.
+        game._state.ball.is_power_hit = True
+        state = game.step(NOOP, NOOP)
+        assert state.ball.is_power_hit is False
+
+    def test_flag_persists_between_collisions(self) -> None:
+        """Flag keeps its last-collision value when no new collision occurs."""
+        game = PikachuVolleyball()
+        game.reset()
+        # Park the ball far from both players so no collision fires.
+        game._state.ball.x = NET_PILLAR_X
+        game._state.ball.y = 50
+        game._state.ball.vx = 0
+        game._state.ball.vy = 0
+        game._state.ball.is_power_hit = True  # prior power hit
+        state = game.step(NOOP, NOOP)
+        # No collision happened this frame → flag unchanged.
+        assert state.ball.is_power_hit is True
+
+
+class TestSoundFlags:
+    """Per-frame SFX triggers — port of physics.js player.sound / ball.sound.
+
+    Engine sets each flag True on the same physics branch the original plays
+    the sound (L472 ground-touch, L558 jump, L592 power-hit, L602 dive,
+    L640 winner, L723 power-hit collision) and clears all flags at the
+    start of the next step().
+    """
+
+    def test_all_sound_flags_start_false(self) -> None:
+        game = PikachuVolleyball()
+        state = game.reset()
+        assert state.player1.sound_pika is False
+        assert state.player1.sound_chu is False
+        assert state.player1.sound_pipikachu is False
+        assert state.player2.sound_pika is False
+        assert state.player2.sound_chu is False
+        assert state.player2.sound_pipikachu is False
+        assert state.ball.sound_power_hit is False
+        assert state.ball.sound_ball_touches_ground is False
+
+    def test_jump_fires_chu(self) -> None:
+        # physics.js:558 — `player.sound.chu = true` inside the jump branch.
+        game = PikachuVolleyball()
+        game.reset()
+        jump = PlayerInput(x_dir=0, y_dir=-1, power_hit=False)
+        state = game.step(jump, NOOP)
+        assert state.player1.sound_chu is True
+        assert state.player2.sound_chu is False
+
+    def test_dive_fires_chu(self) -> None:
+        # physics.js:602 — dive trigger (state 0 → 3) also fires chu.
+        game = PikachuVolleyball()
+        game.reset()
+        dive = PlayerInput(x_dir=1, y_dir=0, power_hit=True)
+        state = game.step(dive, NOOP)
+        assert state.player1.is_diving is True
+        assert state.player1.sound_chu is True
+
+    def test_power_hit_fires_pika_and_ball_power_hit(self) -> None:
+        # physics.js:592 — `player.sound.pika = true` on state 1 → 2.
+        # physics.js:723 — `ball.sound.powerHit = true` in state == 2 branch.
+        # Pre-seed the player into state=1 (jumping) airborne; feed power_hit
+        # input so the state transitions to 2 this frame.
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.player1.state = 1
+        game._state.player1.sync_derived_flags()
+        game._state.player1.y = PLAYER_GROUND_Y - 40
+        game._state.ball.x = game._state.player1.x
+        game._state.ball.y = game._state.player1.y
+        game._state.ball.vx = 0
+        game._state.ball.vy = 3
+        power = PlayerInput(x_dir=1, y_dir=-1, power_hit=True)
+        state = game.step(power, NOOP)
+        assert state.player1.sound_pika is True
+        assert state.ball.sound_power_hit is True
+
+    def test_ground_touch_fires_ball_touches_ground(self) -> None:
+        # physics.js:472 — set true on the frame the ball hits ground.
+        # Pre-seed score to MAX-1 so the scoring frame enters the gameEnd
+        # path (no serve-state swap) and we can observe the flag on the
+        # returned ball; mid-match ground touches swap in a fresh ball and
+        # the flag is by design not visible past the scoring frame.
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.score2 = MAX_SCORE - 1
+        game._state.ball.x = 100
+        game._state.ball.y = BALL_GROUND_Y - 1
+        game._state.ball.vx = 0
+        game._state.ball.vy = 5
+        state = game.step(NOOP, NOOP)
+        assert state.ball.sound_ball_touches_ground is True
+        assert state.is_round_over is True
+
+    def test_sound_flags_clear_on_next_step(self) -> None:
+        # Flags are single-frame edges — they must flip back to False on the
+        # next step() unless that step's physics re-fires them.
+        game = PikachuVolleyball()
+        game.reset()
+        jump = PlayerInput(x_dir=0, y_dir=-1, power_hit=False)
+        state = game.step(jump, NOOP)
+        assert state.player1.sound_chu is True
+        state = game.step(NOOP, NOOP)
+        assert state.player1.sound_chu is False
+
+    def test_winner_fires_pipikachu(self) -> None:
+        # physics.js:640 fires `pipikachu` on the state=0→5 winner-pose
+        # transition inside `_update_player`, NOT on the scoring frame.
+        # After _handle_scoring flips is_game_ended=True and player.game_ended,
+        # the next step() advances physics through the gameEnd window; the
+        # winner's state flips 0→5 that frame, raising sound_pipikachu.
+        game = PikachuVolleyball()
+        game.reset()
+        game._state.score1 = MAX_SCORE - 1
+        # Drop ball on p2's side → p1 scores.
+        game._state.ball.x = GROUND_WIDTH - 50
+        game._state.ball.y = BALL_GROUND_Y - 1
+        game._state.ball.vx = 0
+        game._state.ball.vy = 5
+        scoring = game.step(NOOP, NOOP)
+        assert scoring.score1 == MAX_SCORE
+        assert scoring.is_game_ended is True
+        # Next frame: _update_player runs the winner-pose transition and
+        # fires pipikachu exactly once on the state=0→5 edge.
+        after = game.step(NOOP, NOOP)
+        assert after.player1.sound_pipikachu is True
+        assert after.player2.sound_pipikachu is False

@@ -57,8 +57,56 @@ class ReplayService:
             files.pop(0).unlink()
 
 
-_PLAYER_DEFAULTS = {"is_jumping": False, "is_diving": False, "is_power_hitting": False}
-_BALL_DEFAULTS = {"rotation": 0}
+_PLAYER_DEFAULTS = {
+    "is_jumping": False,
+    "is_diving": False,
+    "is_power_hitting": False,
+    "diving_direction": 0,
+    # Pikachu sprite state for the FE renderer. Defaulted on legacy
+    # replays pickled before the engine emitted these — without the
+    # back-fill the FE renderer would KeyError during scrubbing.
+    "state": 0,
+    "frame_number": 0,
+    "is_winner": False,
+    "game_ended": False,
+}
+_BALL_DEFAULTS = {
+    "rotation": 0,
+    "is_power_hit": False,
+    "punch_effect_x": 0,
+    "punch_effect_y": 0,
+    "punch_effect_radius": 0,
+}
+# ``post_score_freeze_frames`` is kept in the back-fill defaults for legacy
+# replays pickled before the view port. Live replays no longer emit the
+# field; new fields (``is_game_ended`` / ``game_end_frame_counter``) plus
+# the display-state-machine fields (``state_name`` / ``slow_motion_frames_
+# left`` / ``fade_black_alpha`` / ``ready_message_visible``) added by
+# ``port(engine-state)`` are defaulted alongside so the frontend gets a
+# consistent schema regardless of replay vintage.
+_FRAME_DEFAULTS = {
+    "is_round_over": False,
+    "post_score_freeze_frames": 0,
+    "is_game_ended": False,
+    "game_end_frame_counter": 0,
+    "state_name": "round",
+    "slow_motion_frames_left": 0,
+    "fade_black_alpha": 0.0,
+    "ready_message_visible": False,
+    # Pre-FPS-fix replays were emitted at 30fps. Back-fill matches the
+    # constant the FE used to hard-code so old replays scrub at the
+    # rate they were originally recorded at.
+    "tick_rate": 30,
+}
+# Per-frame SFX triggers added by the be-sfx port. Legacy replays predate
+# all five flags; back-fill False so FE readers never KeyError.
+_SOUNDS_DEFAULTS = {
+    "pika": False,
+    "chu": False,
+    "pipikachu": False,
+    "power_hit": False,
+    "ball_touches_ground": False,
+}
 
 
 def _backfill_frame(frame: dict[str, Any]) -> dict[str, Any]:
@@ -70,4 +118,9 @@ def _backfill_frame(frame: dict[str, Any]) -> dict[str, Any]:
     if "ball" in frame:
         for field, default in _BALL_DEFAULTS.items():
             frame["ball"].setdefault(field, default)
+    for field, default in _FRAME_DEFAULTS.items():
+        frame.setdefault(field, default)
+    sounds = frame.setdefault("sounds", {})
+    for field, default in _SOUNDS_DEFAULTS.items():
+        sounds.setdefault(field, default)
     return frame

@@ -184,6 +184,38 @@ def test_training_timeseries_with_data(client, app_instance):
     # newest-last — i.e. ascending by step
     assert [p["step"] for p in points] == [100, 200, 300]
     assert points[-1]["value"] == 3.0
+    # Every point must carry a timestamp so the FE can render time-based
+    # tooltips and reconcile against the local WS clock. Timestamp is the
+    # server-stamped ISO-8601 UTC string, never null once persisted.
+    for p in points:
+        assert "timestamp" in p
+        assert p["timestamp"] is not None
+        # Parseable as ISO-8601 (fromisoformat accepts +00:00 / naive / offset).
+        from datetime import datetime as _dt
+        _dt.fromisoformat(p["timestamp"])
+
+
+def test_training_timeseries_default_limit_is_1000(client, app_instance):
+    """Unspecified limit must default to 1000 (product spec v0.2.4)."""
+    import asyncio
+
+    svc = app_instance.state.metrics_service
+    loop = asyncio.new_event_loop()
+    try:
+        # Seed 3 rows — fewer than the cap — so we can verify the endpoint
+        # accepts the no-limit default without 422ing.
+        for step in (100, 200, 300):
+            loop.run_until_complete(svc.record(
+                "exp-default-limit",
+                {"step": step, "mean_reward": float(step)},
+            ))
+    finally:
+        loop.close()
+
+    resp = client.get("/api/training/timeseries?metric=reward")
+    assert resp.status_code == 200
+    # 3 seeded points come back; default didn't truncate them.
+    assert len(resp.json()["points"]) == 3
 
 
 def test_training_timeseries_rejects_unknown_metric(client):
@@ -195,8 +227,13 @@ def test_training_timeseries_rejects_unknown_metric(client):
 def test_training_timeseries_respects_limit_bounds(client):
     # limit=0 is below the declared minimum.
     assert client.get("/api/training/timeseries?metric=reward&limit=0").status_code == 422
-    # 1001 is above the ceiling guarding against pathological responses.
-    assert client.get("/api/training/timeseries?metric=reward&limit=1001").status_code == 422
+    # 1001 used to be the ceiling; after the metrics-resolution bump
+    # (MetricsCallback log_interval 100→256 → ~3900 points per 1M-step
+    # run) the cap was raised to 10000 so a full run fits in one call.
+    assert client.get("/api/training/timeseries?metric=reward&limit=1001").status_code == 200
+    assert client.get("/api/training/timeseries?metric=reward&limit=10000").status_code == 200
+    # 10001 is now the pathological-response guard.
+    assert client.get("/api/training/timeseries?metric=reward&limit=10001").status_code == 422
 
 
 # --- GET /api/training/current_frame ---------------------------------------

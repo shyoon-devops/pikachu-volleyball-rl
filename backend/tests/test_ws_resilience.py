@@ -25,6 +25,10 @@ import pytest_asyncio
 import websockets
 import websockets.exceptions
 
+# Live-backend WebSocket resilience tests — deselected by default via
+# `-m 'not e2e'`. See 2026-04-17 incident note in pyproject.toml.
+pytestmark = pytest.mark.e2e
+
 
 @pytest.fixture(scope="session")
 def base_url(request: pytest.FixtureRequest) -> str:

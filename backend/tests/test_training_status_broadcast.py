@@ -152,7 +152,7 @@ async def test_training_start_status_reaches_all_clients():
     svc = _make_training_service(state="stopped")
     msg = ParsedMessage(
         type="training:start",
-        payload=WsTrainingStartPayload(bot_level=2, total_timesteps=5000),
+        payload=WsTrainingStartPayload(bot_level=2, total_timesteps=500_000),
     )
 
     await handlers_mod._dispatch(initiator, msg, svc, replay_service=AsyncMock(), manager=mgr)
@@ -203,6 +203,36 @@ async def test_training_resume_status_reaches_all_clients():
 
 
 @pytest.mark.asyncio
+async def test_training_start_without_bot_level_carries_over_current():
+    """Omitting bot_level on start must carry over status.bot_level, not reset to 1.
+
+    Option A wiring: the FE removes bot_level from the HyperparamForm and
+    owns it exclusively through training:set_level. If the dispatcher
+    defaulted a missing value to 1, every ``Start`` click would silently
+    erase the user's difficulty choice — the exact regression Option A
+    promised to avoid.
+    """
+    mgr = ConnectionManager()
+    initiator = _FakeWebSocket()
+    _register(mgr, initiator)
+
+    svc = _make_training_service(state="stopped", bot_level=4)
+    # Payload omits bot_level entirely (FE sends only hyperparams +
+    # total_timesteps after Option A lands).
+    msg = ParsedMessage(
+        type="training:start",
+        payload=WsTrainingStartPayload(total_timesteps=500_000),
+    )
+
+    await handlers_mod._dispatch(initiator, msg, svc, replay_service=AsyncMock(), manager=mgr)
+
+    # Manager saw the carried-over level, not the old default of 1.
+    start_calls = [c for c in svc.calls if c[0] == "start"]
+    assert len(start_calls) == 1
+    assert start_calls[0][1]["bot_level"] == 4
+
+
+@pytest.mark.asyncio
 async def test_training_set_level_status_reaches_all_clients():
     """Bot-level changes are session-wide — other dashboards must re-render."""
     mgr = ConnectionManager()
@@ -242,7 +272,7 @@ async def test_training_status_is_serialized_once_for_all_clients():
     svc = _make_training_service(state="stopped")
     msg = ParsedMessage(
         type="training:start",
-        payload=WsTrainingStartPayload(bot_level=1, total_timesteps=5000),
+        payload=WsTrainingStartPayload(bot_level=1, total_timesteps=500_000),
     )
 
     await handlers_mod._dispatch(clients[0], msg, svc, replay_service=AsyncMock(), manager=mgr)
@@ -274,7 +304,7 @@ async def test_already_running_error_is_not_broadcast():
     svc = _make_training_service(state="running")
     msg = ParsedMessage(
         type="training:start",
-        payload=WsTrainingStartPayload(bot_level=1, total_timesteps=5000),
+        payload=WsTrainingStartPayload(bot_level=1, total_timesteps=500_000),
     )
 
     await handlers_mod._dispatch(initiator, msg, svc, replay_service=AsyncMock(), manager=mgr)

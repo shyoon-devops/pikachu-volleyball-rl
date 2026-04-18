@@ -1,0 +1,366 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import type { ModelInfo, TrainingStatus } from '../../lib/types'
+import type { EvaluationJobAck, EvaluationJobStatus } from '../../lib/api'
+
+const getModels = vi.fn<(title?: string, limit?: number) => Promise<ModelInfo[]>>()
+const runEvaluation = vi.fn<(modelPath: string, botLevel: number, nGames: number) => Promise<EvaluationJobAck>>()
+const getEvaluationStatus = vi.fn<(jobId: string) => Promise<EvaluationJobStatus>>()
+const deleteModels = vi.fn<(paths: string[]) => Promise<{ deleted: string[]; failed: Array<{ path: string; reason: string }> }>>()
+// FC-R9b: results-history fetch; tests that exercise the run
+// detail mock this so the unrelated network path doesn't throw.
+const getEvalResults = vi.fn<() => Promise<import('../../lib/types').EvalResult[]>>()
+
+vi.mock('../../lib/api', () => ({
+  getModels: (title?: string, limit?: number) => getModels(title, limit),
+  runEvaluation: (modelPath: string, botLevel: number, nGames: number) =>
+    runEvaluation(modelPath, botLevel, nGames),
+  getEvaluationStatus: (jobId: string) => getEvaluationStatus(jobId),
+  deleteModels: (paths: string[]) => deleteModels(paths),
+  getEvalResults: () => getEvalResults(),
+}))
+
+// Shared training-state context is provided by TrainingStateProvider at
+// runtime; tests render outside it so we mock the hook directly.
+const mockTrainingState: { status: TrainingStatus } = {
+  status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+}
+vi.mock('../../hooks/useTrainingState', () => ({
+  useTrainingState: () => mockTrainingState,
+}))
+
+import { EvaluationRunDetail } from './EvaluationRunDetail'
+
+function renderAt(path: string) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/evaluation/:title" element={<EvaluationRunDetail />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+function model(overrides: Partial<ModelInfo> = {}): ModelInfo {
+  return {
+    path: 'exp-abc/run-baseline__exp-abc__200000.zip',
+    sizeBytes: 4 * 1024 * 1024,
+    filename: 'run-baseline__exp-abc__200000.zip',
+    slug: 'run-baseline',
+    title: 'run-baseline',
+    step: 200000,
+    createdAt: '2026-04-17T11:00:00Z',
+    ...overrides,
+  }
+}
+
+beforeEach(() => {
+  getModels.mockReset()
+  runEvaluation.mockReset()
+  getEvaluationStatus.mockReset()
+  deleteModels.mockReset()
+  getEvalResults.mockReset()
+  // Default: empty eval-results list so tests that don't assert on
+  // the history table don't hit an unhandled promise rejection.
+  getEvalResults.mockResolvedValue([])
+  try { sessionStorage.clear() } catch { /* ignore */ }
+  mockTrainingState.status = { state: 'stopped', currentStep: 0, currentEpisode: 0 }
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe('EvaluationRunDetail (FC-R7C level-2)', () => {
+  it('renders breadcrumb + title decoded from URL', async () => {
+    getModels.mockResolvedValueOnce([])
+    renderAt('/evaluation/run-with%20space')
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('run-with space')
+    // FC-R7F: breadcrumb renamed "All Trainings" → "Evaluation" to
+    // make the page context unambiguous.
+    expect(screen.getByRole('link', { name: 'Evaluation' })).toHaveAttribute(
+      'href', '/evaluation',
+    )
+    await waitFor(() => {
+      // getModels called with the decoded title so BE can slugify.
+      expect(getModels).toHaveBeenCalledWith('run-with space', undefined)
+    })
+  })
+
+  it('renders a row per checkpoint and lets the user select one', async () => {
+    getModels.mockResolvedValueOnce([
+      model({ path: 'p/a__e__100.zip', filename: 'a__e__100.zip', step: 100 }),
+      model({ path: 'p/a__e__200.zip', filename: 'a__e__200.zip', step: 200 }),
+    ])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(2))
+
+    // Run button disabled until a selection is made.
+    const runBtn = screen.getByRole('button', { name: /Run Evaluation/ })
+    expect(runBtn).toBeDisabled()
+    fireEvent.click(screen.getByLabelText('Select checkpoint step 200'))
+    expect(runBtn).not.toBeDisabled()
+  })
+
+  it('renders the active-run badge when the live training matches this title', async () => {
+    mockTrainingState.status = {
+      state: 'running',
+      currentStep: 1000,
+      currentEpisode: 5,
+      title: 'my-run',
+    } as TrainingStatus
+    getModels.mockResolvedValueOnce([])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => {
+      expect(screen.getByLabelText(/currently running/i)).toBeInTheDocument()
+    })
+  })
+
+  it('shows the running-empty state when no checkpoints + run is live', async () => {
+    mockTrainingState.status = {
+      state: 'running',
+      currentStep: 0,
+      currentEpisode: 0,
+      title: 'live-run',
+    } as TrainingStatus
+    getModels.mockResolvedValueOnce([])
+    renderAt('/evaluation/live-run')
+    await waitFor(() => {
+      expect(screen.getByText(/No checkpoints saved yet/)).toBeInTheDocument()
+    })
+  })
+
+  it('POSTs training:eval with selected checkpoint + bot_level + n_games', async () => {
+    getModels.mockResolvedValueOnce([
+      model({ path: 'exp/a__slug__500.zip', step: 500 }),
+    ])
+    runEvaluation.mockResolvedValueOnce({ jobId: 'job-1', state: 'pending' })
+    // Mock status poll — report pending indefinitely so the button
+    // stays in 'Running' state and doesn't flip back.
+    getEvaluationStatus.mockResolvedValue({
+      jobId: 'job-1',
+      state: 'running',
+      progress: { current: 0, total: 20 },
+      result: null,
+      error: null,
+    })
+
+    renderAt('/evaluation/my-run?bot_level=3')
+    await waitFor(() => expect(screen.getByLabelText('Select checkpoint step 500')).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('Select checkpoint step 500'))
+    // Bot level picked up from URL (3), default n_games = 20.
+    fireEvent.click(screen.getByRole('button', { name: /Run Evaluation/ }))
+
+    await waitFor(() => {
+      expect(runEvaluation).toHaveBeenCalledWith('exp/a__slug__500.zip', 3, 20)
+    })
+  })
+
+  // FC-R7I: poll checkpoints while the training run is active.
+  it('polls getModels every 10s while the run is active', async () => {
+    vi.useFakeTimers()
+    mockTrainingState.status = {
+      state: 'running',
+      currentStep: 1000,
+      currentEpisode: 5,
+      title: 'my-run',
+    } as TrainingStatus
+    getModels.mockResolvedValue([])
+    renderAt('/evaluation/my-run')
+    // Initial fetch.
+    await vi.waitFor(() => expect(getModels).toHaveBeenCalledTimes(1))
+
+    // Advance 10s → one more fetch; another 10s → one more.
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(getModels).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(getModels).toHaveBeenCalledTimes(3)
+    vi.useRealTimers()
+  })
+
+  it('does NOT poll when the run is not active', async () => {
+    vi.useFakeTimers()
+    mockTrainingState.status = { state: 'stopped', currentStep: 0, currentEpisode: 0 } as TrainingStatus
+    getModels.mockResolvedValue([])
+    renderAt('/evaluation/some-run')
+    await vi.waitFor(() => expect(getModels).toHaveBeenCalledTimes(1))
+    await vi.advanceTimersByTimeAsync(30000)
+    // No additional fetches — polling gated on isActiveRun.
+    expect(getModels).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('surfaces a fetch error when getModels rejects', async () => {
+    getModels.mockRejectedValueOnce(new Error('models endpoint down'))
+    renderAt('/evaluation/broken-run')
+    await waitFor(() => {
+      const alerts = screen.getAllByRole('alert').map(el => el.textContent ?? '')
+      expect(alerts.some(t => /models endpoint down/.test(t))).toBe(true)
+    })
+  })
+
+  // FC-R9b: evaluation-results history scoped to this run via the
+  // `trainingTitle` field. Rows from other runs must not leak in.
+  it('renders evaluation results filtered by trainingTitle', async () => {
+    getModels.mockResolvedValueOnce([])
+    getEvalResults.mockResolvedValueOnce([
+      {
+        modelPath: 'exp/my-run__e__100.zip',
+        botLevel: 3,
+        nGames: 20,
+        winRate: 0.75,
+        avgScore: 13.5,
+        avgRallyLength: 6.2,
+        timestamp: '2026-04-17T11:00:00Z',
+        trainingTitle: 'my-run',
+      },
+      {
+        modelPath: 'exp/other__e__100.zip',
+        botLevel: 2,
+        nGames: 10,
+        winRate: 0.5,
+        avgScore: 10,
+        avgRallyLength: 5,
+        timestamp: '2026-04-17T09:00:00Z',
+        trainingTitle: 'different-run',
+      },
+    ])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Evaluation Results/i })).toBeInTheDocument()
+    })
+    // Win-rate for the matching row renders; the non-matching row must not.
+    await waitFor(() => {
+      expect(screen.getByText('75.0%')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('50.0%')).toBeNull()
+  })
+
+  it('shows the empty placeholder when no results exist for this run', async () => {
+    getModels.mockResolvedValueOnce([])
+    getEvalResults.mockResolvedValueOnce([])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => {
+      expect(screen.getByText(/No evaluation results for this run yet/)).toBeInTheDocument()
+    })
+  })
+})
+
+// ── FC-R7D: bulk-delete via checkbox ───────────────────────────
+describe('EvaluationRunDetail — bulk delete (FC-R7D)', () => {
+  it('enters delete mode and shows the checkbox column', async () => {
+    getModels.mockResolvedValueOnce([
+      model({ path: 'p/a__e__100.zip', step: 100 }),
+      model({ path: 'p/a__e__200.zip', step: 200 }),
+    ])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(2))
+
+    // Pre-mode: no checkboxes.
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
+    // Post-mode: 1 header + N rows = N+1 checkboxes. Radio buttons
+    // still render but are disabled.
+    const checkboxes = screen.getAllByRole('checkbox')
+    expect(checkboxes).toHaveLength(3)
+  })
+
+  it('disables the delete-mode entry button when the run is active', async () => {
+    mockTrainingState.status = {
+      state: 'running',
+      currentStep: 1000,
+      currentEpisode: 5,
+      title: 'live-run',
+    } as TrainingStatus
+    getModels.mockResolvedValueOnce([model({ path: 'p/live__e__100.zip', step: 100 })])
+    renderAt('/evaluation/live-run')
+    await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(1))
+    const enterBtn = screen.getByRole('button', { name: /Delete selected/ })
+    expect(enterBtn).toBeDisabled()
+    expect(enterBtn).toHaveAttribute('title', expect.stringMatching(/active training run/i))
+  })
+
+  it('toggles selected checkboxes and updates the count', async () => {
+    getModels.mockResolvedValueOnce([
+      model({ path: 'p/a__e__100.zip', step: 100 }),
+      model({ path: 'p/a__e__200.zip', step: 200 }),
+      model({ path: 'p/a__e__300.zip', step: 300 }),
+    ])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(3))
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
+
+    fireEvent.click(screen.getByLabelText(/Select checkpoint step 100 for delete/))
+    fireEvent.click(screen.getByLabelText(/Select checkpoint step 200 for delete/))
+    expect(screen.getByText(/Selected: 2 \/ 3/)).toBeInTheDocument()
+    // Commit button label reflects the selection count.
+    expect(screen.getByRole('button', { name: /Delete 2 selected/ })).toBeEnabled()
+  })
+
+  it('opens the confirmation modal and calls deleteModels with selected paths', async () => {
+    getModels.mockResolvedValueOnce([
+      model({ path: 'exp/a__e__100.zip', step: 100 }),
+      model({ path: 'exp/a__e__200.zip', step: 200 }),
+    ])
+    deleteModels.mockResolvedValueOnce({
+      deleted: ['exp/a__e__100.zip'],
+      failed: [],
+    })
+    renderAt('/evaluation/my-run')
+    await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(2))
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
+    fireEvent.click(screen.getByLabelText(/Select checkpoint step 100 for delete/))
+    fireEvent.click(screen.getByRole('button', { name: /Delete 1 selected/ }))
+
+    // Modal opens with the file in its list + Delete commit button.
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+    expect(screen.getByText(/Permanently delete 1 file/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Delete$/ }))
+    await waitFor(() => {
+      expect(deleteModels).toHaveBeenCalledWith(['exp/a__e__100.zip'])
+    })
+    // Toast surfaces + mode exits.
+    await waitFor(() => {
+      expect(screen.getByText(/1 file deleted/)).toBeInTheDocument()
+    })
+  })
+
+  it('shows the latest-checkpoint warning when the highest step is in the selection', async () => {
+    getModels.mockResolvedValueOnce([
+      model({ path: 'exp/a__e__100.zip', step: 100 }),
+      model({ path: 'exp/a__e__200.zip', step: 200 }),
+    ])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(2))
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
+    fireEvent.click(screen.getByLabelText(/Select checkpoint step 200 for delete/))
+    fireEvent.click(screen.getByRole('button', { name: /Delete 1 selected/ }))
+    await waitFor(() => {
+      expect(screen.getByText(/Selection includes the latest checkpoint/)).toBeInTheDocument()
+    })
+  })
+
+  it('rolls back optimistic removal on 409 active-run rejection', async () => {
+    getModels.mockResolvedValueOnce([
+      model({ path: 'exp/a__e__100.zip', step: 100 }),
+    ])
+    deleteModels.mockRejectedValueOnce(new Error('409 Refusing to delete'))
+    renderAt('/evaluation/my-run')
+    await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(1))
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
+    fireEvent.click(screen.getByLabelText(/Select checkpoint step 100 for delete/))
+    fireEvent.click(screen.getByRole('button', { name: /Delete 1 selected/ }))
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^Delete$/ }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Cannot delete checkpoints of an active training run/)).toBeInTheDocument()
+    })
+    // Row restored after rollback — radio for step 100 still present.
+    expect(screen.getByLabelText(/Select checkpoint step 100$/)).toBeInTheDocument()
+  })
+})

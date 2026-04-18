@@ -14,16 +14,57 @@
 #   last_verified_at   : when this YAML entry was last confirmed via curl + docker inspect
 
 schema_version: 1
-last_file_update: 2026-04-12T16:40:00+09:00   # v0.2.3 tag cut — supersedes v0.2.2 (never deployed)
+last_file_update: 2026-04-12T23:55:00+09:00   # v0.2.5 post-deploy doc update + main advance
 authoritative_source: docs/VERSIONS.yml       # this file supersedes README + DEPLOYMENT-STATUS on port/version conflicts
 
 release_history:
+  - version: v0.2.5
+    tag_target: cd1e6a39                      # actual runtime source (match-end freeze P0 hotfix merged on top of Phase 2)
+    doc_head: 09a3f99d                        # dev HEAD with CHANGELOG/release note/README for v0.2.5 + post-merge cleanup
+    cut_at: 2026-04-12T22:45:00+09:00
+    deployed_envs: [dev, qa, prod]
+    superseded_by: null
+    supersedes: v0.2.4
+    scope: "Phase 2 bug bundle — gameplay FX (D11-D15, dive, punch ring, freeze-frame), bot L1-L5 upgrade, metrics chart hydration + /timeseries cap + sampling cadence label, legacy games backfill, sky RGB stripe (NEAREST filter), P0 match-end freeze tick, deploy-frontend auto-advance + docker log rotation"
+    bundle: assets/index-CFGidFNF.js
+    env_tags:
+      v0.2.5-dev: cd1e6a39
+      v0.2.5-qa: cd1e6a39
+      v0.2.5-prod: cd1e6a39
+    notes: >
+      3 env byte-identical bundle (index-CFGidFNF.js) deployed over 2 windows:
+      (1) Phase 2 FE+BE @ 22:03-22:05 → runtime 6f4a057f, (2) match-end freeze
+      P0 hotfix → runtime cd1e6a39. BE image rebuilt at ~23:20 (qa/prod) + ~23:40
+      (dev after PR #42 revert). 3 env health/live verified 23:55, uptimes
+      dev ~14min, qa ~35min, prod ~35min. main fast-forwarded from 018a2be1 to
+      cd1e6a39 — v0.2.5 tag reachable from main. PR #42 trainer attempt
+      (be4001eb) reverted in ffe1ae6a due to trainer.py:455 SyntaxError —
+      NOT in this release.
+  - version: v0.2.4
+    tag_target: dabd84a1                      # actual runtime source (built container image)
+    doc_head: d4a89231                        # dev HEAD with CHANGELOG + release note expansion on top of dabd84a1
+    cut_at: 2026-04-12T18:20:00+09:00
+    deployed_envs: [dev, qa, prod]
+    superseded_by: v0.2.5
+    scope: "4 CRITICAL (live-UI hydration, optimistic controls, BE stop/pause halt, rally-timeout safety valve) + hyper-ball power-hit visual + /timeseries endpoint + bot_level Option A single source + promote.sh backend restart fix"
+    bundle: assets/index-DqBsWzf5.js
+    env_tags:
+      v0.2.4-dev: dabd84a1
+      v0.2.4-qa: dabd84a1
+      v0.2.4-prod: dabd84a1
+    notes: >
+      DevOps Option A (2026-04-12 ~18:30): qa branch fast-forwarded to dabd84a1,
+      prod branch advanced to d4a89231 (docs-ahead by 2 commits — runtime unchanged).
+      main branch advance to d4a89231 pending DevOps push. All env tags anchor to
+      dabd84a1 = actual runtime image source; CHANGELOG + release note content
+      lives at d4a89231 (docs-only delta).
   - version: v0.2.3
-    tag_target: 77b871dd
+    tag_target: 737a088f
     cut_at: 2026-04-12T16:40:00+09:00
-    deployed_envs: []                         # pending DevOps
+    deployed_envs: [dev, qa, prod]
     supersedes: v0.2.2                        # v0.2.2 tagged but never deployed
     scope: "v0.2.2 QA blocker hotfix bundle (BE-6 WS broadcast + net-collision + bot variance)"
+    superseded_by: v0.2.4
   - version: v0.2.2
     tag_target: 2582886b
     cut_at: 2026-04-12T16:03:00+09:00
@@ -35,6 +76,7 @@ release_history:
     cut_at: 2026-04-12T00:00:00+09:00
     deployed_envs: [dev, qa]
     scope: "Sprint 1 (16 bugs + BE-1/BE-2/BE-3 + BUG-1..7)"
+    superseded_by: v0.2.3
   - version: v0.2.0
     tag_target: d8fc62e
     cut_at: 2026-04-11T00:00:00+09:00
@@ -45,6 +87,7 @@ release_history:
     cut_at: 2026-04-11T00:00:00+09:00
     deployed_envs: [prod]
     scope: "Initial release"
+    superseded_by: v0.2.4
 
 environments:
   dev:
@@ -52,97 +95,125 @@ environments:
     host_frontend: 192.168.0.248
     backend:
       port: 8001
-      status: stale            # v0.2.2 tagged in git but deploy not executed yet — dev server still running v0.2.1 (482df2d1)
+      status: up                              # P0 hotfix — match-end freeze tick (cd1e6a39)
       health_endpoint: /api/health
-      live_endpoint: /api/health/live   # present (BE-3 verified in v0.2.1)
-      ready_endpoint: /api/health/ready # present
-      openapi_version_field: "0.1.0"    # hardcoded in FastAPI app, not reliable
-      commit: UNKNOWN          # DevOps to fill in (#38 + v0.2.2 redeploy)
-      image: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
-      training_state: stopped  # verified 2026-04-12
+      live_endpoint: /api/health/live
+      ready_endpoint: /api/health/ready
+      openapi_version_field: "0.2.4"
+      commit: cd1e6a39                        # P0 hotfix runtime (e9f72459 engine fix merged)
+      image: sha256:d577fb9ab05cf013c6f43b4f64253210bf27b850d5da1177a78c9bd527ed9f16
+      built_at: 2026-04-12T22:42:29+09:00
+      deployed_at: 2026-04-12T22:42:29+09:00
+      training_state: stopped
+      runtime_verified:
+        - "post_score_freeze_frames tick BEFORE match-over guard (engine.py:219-220)"
+        - "P0 regression fixed: game no longer wedges at 15pt match-winning point"
+        - "punch_effect_radius (6 matches), is_diving (engine.py:48, 350)"
+        - "log_interval: int = 256 at callbacks.py:88"
     frontend:
       port: 3000
-      status: stale            # serving v0.2.1 bundle index-CAYlGd5L.js until v0.2.2 frontend rebuild
-      bundle: assets/index-CAYlGd5L.js
-      commit: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
+      status: up
+      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; FE delta = 0 from 6f4a057f
+      commit: cd1e6a39                        # FE built on cd1e6a39 but produced byte-identical bundle
+      built_at: 2026-04-12T22:40:00+09:00
+      deployed_at: 2026-04-12T22:40:00+09:00
     mongodb:
-      port: UNKNOWN            # documented :27018 — unverified
+      port: 27018
       status: UNKNOWN
     git_branch: dev
-    git_branch_head: 77b871dd  # v0.2.3 tag target — 3 hotfixes on top of 2582886b (v0.2.2)
-    tag_at_head: v0.2.3        # tag points here (annotated). v0.2.2 tag at 2582886b retained but superseded.
-    deploy_pending: true       # runtime still v0.2.1 until DevOps executes v0.2.3 deploy-{backend,frontend}.sh dev
-    notes: >
-      v0.2.3 tag cut at 77b871dd on 2026-04-12 16:40 +09:00. Supersedes v0.2.2
-      (tagged at 2582886b but never deployed). Includes Sprint 2 scope + 3 QA
-      blocker hotfixes (BE-6 WS broadcast 91c7233d, net-collision vx bf6397cc,
-      bot variance knobs 6af36c0c). Runtime still on v0.2.1 — waiting on
-      DevOps to execute v0.2.3 full-stack deploy (dev→qa→prod). Trainer PR #42
-      + Evaluator PR #44 deferred to post-v0.2.3.
+    git_branch_head: 09a3f99d                 # dev has 3 docs commits on top of cd1e6a39 runtime: v0.2.5 release docs + PR #42 revert (ffe1ae6a) + CHANGELOG cleanup (09a3f99d)
+    tag_at_head: null                         # v0.2.5 annotated tag is on cd1e6a39 (runtime); docs-only delta above
+    env_tag: v0.2.5-dev                       # → cd1e6a39 (matches runtime exactly)
+    deploy_pending: false                     # all 3 envs in sync at cd1e6a39
 
   qa:
     host_backend: 192.168.0.250
     host_frontend: 192.168.0.248
     backend:
-      port: 8002               # documented; currently DOWN
-      status: down             # verified via curl 2026-04-12 — ISSUE #38
-      commit: UNKNOWN
-      image: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
+      port: 8002
+      status: up                              # P0 hotfix — match-end freeze tick (cd1e6a39)
+      health_endpoint: /api/health
+      live_endpoint: /api/health/live
+      ready_endpoint: /api/health/ready
+      openapi_version_field: "0.2.4"
+      commit: cd1e6a39
+      image: sha256:304a259dc121e657fab69bf961e824cc0f3ae893e6aa9373a956c42c00ad1312
+      built_at: 2026-04-12T22:42:29+09:00
+      deployed_at: 2026-04-12T22:42:29+09:00
+      training_state: stopped
+      runtime_verified:
+        - "post_score_freeze_frames tick BEFORE match-over guard (engine.py:219-220)"
+        - "WS /ws training:start end-to-end smoke OK (state=running, metrics @256/512/768/1024)"
+        - "POST /api/training/stop cleanup OK (final step=10000, state=stopped)"
+        - "log_interval: int = 256 at callbacks.py:88 (confirmed by live metric stream)"
+        - "punch_effect_radius (6), is_diving (48, 350) still present"
     frontend:
       port: 3001
       status: up
-      bundle: assets/index-CAYlGd5L.js   # byte-identical to dev + prod
-      commit: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
+      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; FE delta = 0 from 6f4a057f
+      commit: cd1e6a39                        # FE built on cd1e6a39 but produced byte-identical bundle
+      built_at: 2026-04-12T22:40:00+09:00
+      deployed_at: 2026-04-12T22:40:00+09:00
     mongodb:
-      port: UNKNOWN
+      port: 27019
       status: UNKNOWN
     git_branch: qa
-    git_branch_head: 1baa3e3b  # "chore: promote dev to qa" (includes BE-2/BE-3)
-    tag_at_head: null
+    git_branch_head: cd1e6a39                 # P0 hotfix — auto-advanced by deploy-frontend.sh step [6/6] (was 6f4a057f)
+    tag_at_head: v0.2.5                       # v0.2.5 annotated tag is on cd1e6a39 = qa branch HEAD
+    env_tag: v0.2.5-qa                        # → cd1e6a39 (matches runtime)
+    deploy_pending: false
     notes: >
-      Backend currently down. Git branch includes v0.2.1 scope via re-promotion,
-      but nothing is actually serving.
+      2026-04-12 ~22:42 (BE) + ~22:40 (FE): P0 hotfix redeploy — match-end
+      freeze tick fix (engine.py:219-220). qa branch auto-advanced
+      6f4a057f → cd1e6a39 via deploy-frontend.sh step [6/6]. Bundle
+      byte-identical across dev/qa/prod (BE-only change). Smoke verified:
+      WS /ws training:start end-to-end (metrics @ 256/512/768/1024,
+      clean stop at step=10000). REST mutation paths all 200 OK.
 
   prod:
     host_backend: 192.168.0.250
     host_frontend: 192.168.0.248
     backend:
-      port: 8003               # VERIFIED — previously documented :8000 was wrong
-      status: up
+      port: 8003
+      status: up                              # P0 hotfix — match-end freeze tick (cd1e6a39)
       health_endpoint: /api/health
-      live_endpoint: MISSING   # /api/health/live returns 404 — pre-BE-3 code
-      ready_endpoint: MISSING  # /api/health/ready returns 404
-      openapi_version_field: "0.1.0"
-      commit: UNKNOWN          # DevOps to fill; feature set suggests pre-v0.2.1
-      image: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
+      live_endpoint: /api/health/live         # v0.2.4 runtime has BE-3 split
+      ready_endpoint: /api/health/ready
+      openapi_version_field: "0.2.4"
+      commit: cd1e6a39                        # P0 hotfix runtime (e9f72459 engine fix merged)
+      image: sha256:10e7b3b315e7037f39a08066c999674677b118db0e6a67d13e340a69822bbc84
+      built_at: 2026-04-12T22:42:31+09:00
+      deployed_at: 2026-04-12T22:42:31+09:00
       training_state: stopped
+      runtime_verified:
+        - "post_score_freeze_frames tick BEFORE match-over guard (engine.py:219-220)"
+        - "P0 regression fixed: game no longer wedges at 15pt match-winning point"
+        - "punch_effect_radius (6 matches), is_diving (engine.py:48, 350)"
+        - "log_interval: int = 256 at callbacks.py:88"
+        - "built from same cd1e6a39 SHA as dev/qa (cache-reuse)"
     frontend:
-      port: 3002               # VERIFIED — previously documented :5173 was wrong
+      port: 3002
       status: up
-      bundle: assets/index-CAYlGd5L.js   # byte-identical to dev + qa
-      commit: UNKNOWN
-      built_at: UNKNOWN
-      deployed_at: UNKNOWN
+      bundle: assets/index-CFGidFNF.js        # unchanged — P0 hotfix is BE-only; byte-identical across 3 envs
+      commit: cd1e6a39                        # FE built on cd1e6a39 but produced byte-identical bundle
+      built_at: 2026-04-12T22:40:00+09:00
+      deployed_at: 2026-04-12T22:40:00+09:00
     mongodb:
-      port: 27020              # per PM report, unverified by curl (mongodb wire protocol)
+      port: 27020
       status: UNKNOWN
     git_branch: prod
-    git_branch_head: 41f4fdb1
-    tag_at_head: null          # v0.1.0 tag is on main (fdc41de), prod has drifted
+    git_branch_head: cd1e6a39                 # P0 hotfix — auto-advanced by deploy-frontend.sh (was 6f4a057f)
+    tag_at_head: v0.2.5                       # v0.2.5 annotated tag is on cd1e6a39 = prod branch HEAD
+    env_tag: v0.2.5-prod                      # → cd1e6a39 (matches runtime)
+    deploy_pending: false
+    prod_branch_advance_pending: false        # DONE — main also advanced to cd1e6a39 (2026-04-12 ~23:55)
     notes: >
-      Running pre-BE-3 / pre-BUG-2 code. v0.2.1 NOT deployed despite v0.2.1 tag
-      existing on github/dev. Prod backend returns hardcoded {"status":"ok"} to
-      /api/health (the exact behavior BUG-2 was filed against).
+      2026-04-12 ~22:42 (BE) + ~22:40 (FE): P0 hotfix redeploy — match-end
+      freeze tick fix (engine.py:219-220). prod branch auto-advanced
+      6f4a057f → cd1e6a39. Runtime carries P0 fix (e9f72459) on top of
+      full v0.2.4 + FE Phase 2 + AI sky-stripe + BE Phase 2 stack.
+      Bundle byte-identical to dev/qa (BE-only change). main branch
+      advance to cd1e6a39 completed by PM ~23:55.
 
 # =========================================================================
 # DevOps update protocol:

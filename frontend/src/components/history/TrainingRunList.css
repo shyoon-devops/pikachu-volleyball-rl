@@ -1,0 +1,386 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  TrainingRunList.css
+ *  (docs/DESIGN-HISTORY-DRILLDOWN.md §1 / §6)
+ * ═══════════════════════════════════════════════════════════
+ *  className map:
+ *    .training-run-list, .training-run-list-header,
+ *    .training-run-list-title, .training-run-list-search,
+ *    .training-run-list-search-input,
+ *    .training-run-list-table-wrapper, .training-run-list-table,
+ *    .training-run-list-row, .training-run-list-cell-*,
+ *    .training-run-list-title-link,
+ *    .training-run-list-cards, .training-run-card, .training-run-card-row-*,
+ *    .training-run-status-chip, .training-run-status-chip--*,
+ *    .training-run-winrate, .training-run-winrate-bar, .training-run-winrate-bar-fill,
+ *    .training-run-highlight,
+ *    .training-run-list-loading, .training-run-list-empty,
+ *    .training-run-list-clear, .training-run-list-cta,
+ *    .training-run-list-error
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.training-run-list {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.training-run-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.training-run-list-title {
+  margin: 0;
+  font-size: var(--text-xl);
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.training-run-list-search {
+  display: inline-flex;
+  align-items: center;
+}
+
+.training-run-list-search-input {
+  height: 36px;
+  padding: 0 12px;
+  min-width: 240px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-input, var(--color-bg-elevated));
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.training-run-list-search-input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.training-run-list-error {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.training-run-list-loading {
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.training-run-list-empty {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.training-run-list-empty p {
+  margin: 0;
+}
+
+.training-run-list-clear {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.training-run-list-clear:hover {
+  color: var(--color-accent);
+}
+
+.training-run-list-cta {
+  min-width: 140px;
+}
+
+/* ── Desktop table (≥768px) ───────────────────────────── */
+
+.training-run-list-table-wrapper {
+  overflow: hidden;
+}
+
+.training-run-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.training-run-list-table th {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+
+.training-run-list-table th:last-child,
+.training-run-list-cell-numeric {
+  text-align: right;
+}
+
+.training-run-list-table td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.training-run-list-row {
+  transition: background var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.training-run-list-row:hover,
+.training-run-list-row:focus-within {
+  background: var(--color-bg-hover);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.training-run-list-title-link {
+  color: var(--color-text-primary);
+  text-decoration: none;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-base);
+}
+
+.training-run-list-title-link:hover {
+  color: var(--color-accent);
+}
+
+.training-run-list-title-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.training-run-list-cell-started {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.training-run-list-cell-numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Win-rate bar ───────────────────────────────────────── */
+
+.training-run-winrate {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 60px;
+}
+
+.training-run-winrate-value {
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.training-run-winrate-bar {
+  display: inline-block;
+  width: 40px;
+  height: 4px;
+  background: var(--color-bg-elevated);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.training-run-winrate-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-success, #22c55e);
+  transition: width var(--duration-normal) var(--ease-out);
+}
+
+/* ── Status chip ───────────────────────────────────────── */
+
+.training-run-status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.03em;
+}
+
+.training-run-status-chip--running {
+  background: var(--color-warning, #fbbf24);
+  color: var(--color-text-inverse, #1a1d29);
+  animation: training-run-status-chip-pulse 1.2s ease-in-out infinite;
+}
+
+.training-run-status-chip--done {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.training-run-status-chip--stopped {
+  background: var(--color-danger-dim, rgba(239, 68, 68, 0.15));
+  color: var(--color-danger, #ef4444);
+  border: 1px solid var(--color-danger-border, rgba(239, 68, 68, 0.4));
+}
+
+@keyframes training-run-status-chip-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .training-run-status-chip--running {
+    animation: none;
+  }
+}
+
+/* ── Highlight inside the title on search match ──────── */
+
+.training-run-highlight {
+  background: var(--color-accent-dim, rgba(255, 215, 0, 0.2));
+  color: var(--color-text-primary);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* ── Mobile card stack (<768px) ──────────────────────── */
+
+.training-run-list-cards {
+  display: none;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.training-run-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-3);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.training-run-card:hover {
+  background: var(--color-bg-hover);
+}
+
+.training-run-card-row-1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.training-run-card-title {
+  font-size: 16px;
+  font-weight: var(--weight-semibold);
+}
+
+.training-run-card-row-2 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.training-run-card-row-3 {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Breakpoint swap: table on ≥768px, card stack below. */
+@media (max-width: 767px) {
+  .training-run-list-table-wrapper {
+    display: none;
+  }
+  .training-run-list-cards {
+    display: flex;
+  }
+}
+
+/* Drop Avg Rally column on medium widths per spec §6. */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .training-run-list-table th:last-child,
+  .training-run-list-table td:last-child {
+    display: none;
+  }
+}
+
+/*
+ * ── FC-R7F: evaluation variant ───────────────────────────────
+ * Distinguish the /evaluation landing from /history: accent shifts
+ * to the blue-line (eval intent) and a small "EVAL" hint rides
+ * under the title. Row-level disable state for 0-checkpoint runs.
+ */
+.training-run-list--evaluation .training-run-list-title::before {
+  content: '🎯';
+  margin-right: 6px;
+  filter: saturate(0.8);
+}
+
+.training-run-list--evaluation .training-run-list-table th {
+  /* Swap the header underline color so the eval page reads
+     differently at a glance from the history page. */
+  border-bottom-color: var(--color-blue, #3b82f6);
+}
+
+.training-run-list-checkpoints {
+  display: inline-block;
+  min-width: 42px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.training-run-list-checkpoints--loading {
+  color: var(--color-text-muted);
+}
+
+.training-run-list-checkpoints--some {
+  color: var(--color-blue, #3b82f6);
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.1));
+}
+
+.training-run-list-checkpoints--zero {
+  color: var(--color-text-muted);
+  background: var(--color-bg-elevated);
+}
+
+.training-run-list-row--disabled {
+  opacity: 0.55;
+}
+
+.training-run-list-row--disabled:hover {
+  background: transparent !important;
+}
+
+.training-run-list-title-disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+  font-family: var(--font-mono);
+}
+
+.training-run-card--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

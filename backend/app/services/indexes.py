@@ -64,6 +64,49 @@ _GAME_INDEXES = _IndexSpec(
             [("experiment_id", ASCENDING), ("timestamp", DESCENDING)],
             name="games_experiment_timestamp",
         ),
+        # Per-env history — BE-A2. ``env_id`` is "demo" for the demo
+        # callback's game or "0".."7" for the parallel training envs.
+        # Partial index over docs that actually carry the field so legacy
+        # records (no env_id) don't consume index space.
+        IndexModel(
+            [("env_id", ASCENDING), ("timestamp", DESCENDING)],
+            name="games_env_timestamp",
+            partialFilterExpression={"env_id": {"$type": "string"}},
+        ),
+        # Title drill-down — BE-T3. Partial over string titles so the
+        # legacy pre-title games don't bloat the index. Sort pairing
+        # matches the list query (``find({title: ...}).sort(timestamp)``).
+        IndexModel(
+            [("title", ASCENDING), ("timestamp", DESCENDING)],
+            name="games_title_timestamp",
+            partialFilterExpression={"title": {"$type": "string"}},
+        ),
+    ),
+)
+
+_TRAINING_RUN_INDEXES = _IndexSpec(
+    collection="training_runs",
+    models=(
+        # Unique title lookup — spec §0 (uniqueness scope: global for
+        # single-user dev setup). Partial over strings so two rows with
+        # NULL title don't violate uniqueness during migration windows.
+        IndexModel(
+            [("title", ASCENDING)],
+            name="training_runs_title_unique",
+            unique=True,
+            partialFilterExpression={"title": {"$type": "string"}},
+        ),
+        # Recent-first listing for /api/training/titles autocomplete.
+        IndexModel(
+            [("started_at", DESCENDING)],
+            name="training_runs_started_desc",
+        ),
+        # Reverse lookup from experiment_id → title record.
+        IndexModel(
+            [("experiment_id", ASCENDING)],
+            name="training_runs_experiment",
+            partialFilterExpression={"experiment_id": {"$type": "string"}},
+        ),
     ),
 )
 
@@ -74,6 +117,13 @@ _EVAL_INDEXES = _IndexSpec(
         IndexModel(
             [("model_path", ASCENDING), ("timestamp", DESCENDING)],
             name="evaluations_model_timestamp",
+        ),
+        # Title-scoped eval history — BE-T3. Matches the FE drill-down
+        # from training detail → evaluation records (spec §5).
+        IndexModel(
+            [("training_title", ASCENDING), ("timestamp", DESCENDING)],
+            name="evaluations_title_timestamp",
+            partialFilterExpression={"training_title": {"$type": "string"}},
         ),
     ),
 )
@@ -91,7 +141,12 @@ _METRIC_INDEXES = _IndexSpec(
     ),
 )
 
-_ALL_INDEXES: tuple[_IndexSpec, ...] = (_GAME_INDEXES, _EVAL_INDEXES, _METRIC_INDEXES)
+_ALL_INDEXES: tuple[_IndexSpec, ...] = (
+    _GAME_INDEXES,
+    _EVAL_INDEXES,
+    _METRIC_INDEXES,
+    _TRAINING_RUN_INDEXES,
+)
 
 
 async def ensure_indexes(db: AsyncIOMotorDatabase) -> dict[str, list[str]]:

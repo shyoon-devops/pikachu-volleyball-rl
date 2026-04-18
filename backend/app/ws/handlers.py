@@ -125,15 +125,100 @@ async def _dispatch(
             })
             return
         params: WsTrainingStartPayload = msg.payload  # type: ignore[assignment]
-        experiment_id = await training_service.start(
-            hyperparams=params.hyperparams,
-            bot_level=params.bot_level,
-            total_timesteps=params.total_timesteps,
+        # If the caller omitted bot_level, carry over the current difficulty
+        # from status instead of silently dropping to L1 — the dashboard is
+        # the single source of truth for difficulty via training:set_level.
+        effective_bot_level = (
+            params.bot_level
+            if params.bot_level is not None
+            else current["bot_level"]
         )
-        logger.info("Training started: experiment=%s bot_level=%d", experiment_id, params.bot_level)
+        # Title allocation (BE-T1): caller-supplied title wins if valid
+        # and unique; otherwise the server generates one. The final
+        # title is surfaced in the training:status broadcast below so
+        # the FE can display what actually got allocated.
+        from backend.app.services.title_service import (
+            TrainingRunsService,
+            allocate_title,
+            slugify,
+        )
+
+        runs_service = getattr(training_service, "runs_service", None)
+        # Accept only a real TrainingRunsService instance — MagicMocks
+        # from older test harnesses auto-create attributes and would
+        # otherwise expose a non-awaitable "service" here. Fall back to
+        # a db-less registry so allocate_title still runs (no
+        # collision check possible without Mongo — acceptable).
+        if not isinstance(runs_service, TrainingRunsService):
+            runs_service = TrainingRunsService(db=None)
+
+        final_title = await allocate_title(runs_service, params.title)
+        final_slug = slugify(final_title)
+        # Extended PPO hyperparams (2026-04-18): n_epochs / ent_coef /
+        # gae_lambda are already consumed from the hp dict by
+        # ``TrainingManager._train_loop``, but the WS envelope used to
+        # expose them only via the free-form ``hyperparams`` blob. Now
+        # each has a first-class range-validated field on the payload;
+        # merge any supplied top-level field into the hp dict so the
+        # trainer path stays a single source of truth and explicit
+        # top-level fields win over ``hyperparams``-blob duplicates.
+        hp: dict[str, Any] = dict(params.hyperparams or {})
+        if params.n_epochs is not None:
+            hp["n_epochs"] = params.n_epochs
+        if params.ent_coef is not None:
+            hp["ent_coef"] = params.ent_coef
+        if params.gae_lambda is not None:
+            hp["gae_lambda"] = params.gae_lambda
+        # n_envs is NOT a PPO ctor arg — it configures make_vec_env, so
+        # it travels as a separate kwarg to manager.start (below). None
+        # means "use the manager default".
+        start_kwargs: dict[str, Any] = {
+            "hyperparams": hp,
+            "bot_level": effective_bot_level,
+            "total_timesteps": params.total_timesteps,
+            "title": final_title,
+            "slug": final_slug,
+        }
+        if params.n_envs is not None:
+            start_kwargs["n_envs"] = params.n_envs
+        experiment_id = await training_service.start(**start_kwargs)
+        # Persist the run record (BE-T1) so future uniqueness checks
+        # see this title. Best-effort — failure logs but doesn't fail
+        # the start; the in-memory manager already knows the title.
+        # Hyperparams snapshot (BE-T10): merge the client's top-level +
+        # hyperparams blob plus the top-level training dials so the
+        # /api/training/runs join has a complete picture without a
+        # separate fetch. ``None``-valued entries (caller didn't
+        # specify, defaults applied) are preserved so FE can tell
+        # "defaulted" from "explicit".
+        hp_snapshot: dict[str, Any] = dict(hp)
+        hp_snapshot["total_timesteps"] = params.total_timesteps
+        if params.n_envs is not None:
+            hp_snapshot["n_envs"] = params.n_envs
+        try:
+            from datetime import datetime, timezone
+
+            await runs_service.register(
+                experiment_id=experiment_id,
+                title=final_title,
+                slug=final_slug,
+                bot_level=effective_bot_level,
+                started_at=datetime.now(timezone.utc),
+                hyperparams=hp_snapshot,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("training_runs register failed for %s", experiment_id)
+        logger.info(
+            "Training started: experiment=%s bot_level=%d title=%s",
+            experiment_id, effective_bot_level, final_title,
+        )
         await _emit_status(ws, manager, {
             "type": "training:status",
-            "payload": {"state": "running", "experiment_id": experiment_id},
+            "payload": {
+                "state": "running",
+                "experiment_id": experiment_id,
+                "title": final_title,
+            },
         })
 
     elif msg.type == "training:stop":
@@ -248,6 +333,27 @@ async def frames_push_loop(
         await manager.broadcast({"type": "training:frame", "payload": data})
 
 
+async def env_frames_push_loop(
+    manager: ConnectionManager,
+    training_service: TrainingServiceWrapper,
+) -> None:
+    """Drain per-env frame queue and broadcast to all WS clients.
+
+    Separate channel from ``training:frame`` (the demo game) — each
+    payload is ``{env_id, frame, score, state_name, step}`` so the FE
+    can render all 8 parallel envs side-by-side. Graceful degradation:
+    if the manager has no ``env_frames_queue`` attribute (older
+    manager, or a test fake), this loop parks idle.
+    """
+    queue = getattr(training_service.manager, "env_frames_queue", None)
+    if queue is None:
+        logger.info("env_frames_push_loop: no env_frames_queue attribute; idle")
+        return
+    while True:
+        data = await queue.get()
+        await manager.broadcast({"type": "training:env_frame", "payload": data})
+
+
 SAVE_RETRY_ATTEMPTS = 3
 SAVE_RETRY_BASE_DELAY = 0.5  # seconds; doubled each attempt (0.5, 1.0, 2.0)
 DEAD_LETTER_PATH = Path(os.getenv("FAILED_RESULTS_PATH", "data/failed_results.jsonl"))
@@ -300,16 +406,46 @@ async def results_push_loop(
     queue = training_service.manager.results_queue
     while True:
         data = await queue.get()
+        # bot_level and experiment_id MUST be present on the wire — the
+        # producer (LiveFrameCallback._on_step) snapshots both from the
+        # TrainingManager before the demo runs. If either is missing we
+        # fall through to the exception branch → dead-letter, rather
+        # than silently coercing to L1 (the previous default) which
+        # masked the "every game saved as L1" regression FE reported.
+        if "bot_level" not in data:
+            logger.warning(
+                "results_push_loop received payload without bot_level "
+                "(game_id=%s) — routing to dead-letter",
+                data.get("game_id", "?"),
+            )
+        if "experiment_id" not in data:
+            logger.warning(
+                "results_push_loop received payload without experiment_id "
+                "(game_id=%s) — routing to dead-letter",
+                data.get("game_id", "?"),
+            )
         try:
             record = GameRecord(
                 game_id=data.get("game_id", ""),
-                experiment_id=data.get("experiment_id", ""),
-                bot_level=data.get("bot_level", 1),
+                experiment_id=data["experiment_id"],
+                bot_level=data["bot_level"],
                 score1=data["score1"],
                 score2=data["score2"],
                 winner=data["winner"],
                 duration_frames=data["duration_frames"],
                 rally_count=data.get("rally_count", 0),
+                # env_id: "demo" for the demo callback; "0".."7" for
+                # parallel training envs (BE-A2). Legacy producers that
+                # never learned the field are treated as demo — matches
+                # pre-A2 behavior since only the demo saved games.
+                env_id=data.get("env_id"),
+                # Denormalised title snapshot (BE-T1) — empty string
+                # from legacy pre-title producers is stored as None so
+                # pydantic/serde consumers can render "-" cleanly.
+                title=data.get("title") or None,
+                # Episode counter snapshot (BE-T6). Absent from legacy
+                # payloads; coerced to None so FE "-" fallback kicks in.
+                episode=data.get("episode"),
             )
         except Exception as e:
             logger.exception("Invalid game result payload, routing to dead-letter")
@@ -343,4 +479,30 @@ async def results_push_loop(
             })
         else:
             GAME_SAVE_SUCCESS.inc()
+            # BE-T7: emit a structured `training:game_end` frame so the
+            # FE history view can prepend this row in real time without
+            # re-polling /api/games. Stable subset of the record (the
+            # FE documents these fields). Timestamp is stamped here
+            # (not from the manager) so it's JSON-ready.
+            await manager.broadcast({
+                "type": "training:game_end",
+                "payload": {
+                    "record": {
+                        "game_id": record.game_id,
+                        "title": record.title,
+                        "env_id": record.env_id,
+                        "score1": record.score1,
+                        "score2": record.score2,
+                        "winner": record.winner,
+                        "episode": record.episode,
+                        "duration_frames": record.duration_frames,
+                        "experiment_id": record.experiment_id,
+                        "timestamp": (
+                            record.timestamp.isoformat()
+                            if record.timestamp is not None
+                            else None
+                        ),
+                    },
+                },
+            })
         await manager.broadcast({"type": "game:result", "payload": data})

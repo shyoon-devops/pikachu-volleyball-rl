@@ -7,35 +7,294 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-v0.2.4 이후 scope. Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) + Evaluator PR #44 (E1-E10 baseline comparator / batch eval / history / timeseries / Elo tracker) 후속 릴리스 후보.
+v1.0.0 이후 scope. self-play league + SAC 전환은 차기 메이저 후보.
 
-## [0.2.4] - 2026-04-12 (post-v0.2.3 live-UI hotfix bundle / dev HEAD ee1b48ae)
+## [1.0.0] - 2026-04-19 (v1.x — faithful port + unified runs + refactor sprint / dev HEAD 547ff663)
 
-v0.2.3 을 3 환경(dev/qa/prod)에 배포한 직후 PM 의 실사용 테스트에서 확인된 3 CRITICAL 이슈 긴급 수정. WS 상태 동기화, 새로고침 복원, Stop/Pause 실제 중단 동작 — 어느 하나도 해소되지 않으면 사용자가 훈련을 제어할 수 없는 상태.
+v0.2.5 이후 5주 동안 누적된 212 commit 의 메이저 릴리스. 크게 4 축: (1) **faithful port** — `gorisanson/pikachu-volleyball` 1997 원본 physics.js + view.js + cloud_and_wave.js 를 1:1 포팅하여 engine parity 11k assertion 기반 픽스, (2) **Evaluator E1-E10** (PR #44) — Elo + baseline comparator + batch eval + history + timeseries + async report, (3) **unified /runs navigation** — 기존 `/history` + `/evaluation` 분리 → Training Runs 단일 화면 (Overview/Games/Evaluation sub-tabs), (4) **refactor sprint A1-A8** — BE reward/callbacks 분해, FE WS discriminated union + zod, shared component 추출, ADR 체계화. QA 19/19 PASS.
 
-### Fixed — Live-UI CRITICAL
+### Added — Game Engine Faithful Port (gorisanson/pikachu-volleyball 1997)
 
-- **FE REST hydration on mount + reconnect** (`bd6cea5a`): `fix(ui): sync training status from REST on mount + reconnect (CRITICAL)` — `useTrainingStateImpl` 이 `status={state:'stopped', ...}` 하드코딩으로 시작하고 `training:status` WS 메시지는 *state change* 시에만 브로드캐스트되었기 때문에, 훈련이 돌아가는 중에 페이지를 새로고침하면 Start 버튼만 보이고 Stop 버튼이 없어서 사용자가 개입할 수 없었음. mount 시 `GET /api/training/status` + 재연결 시 re-fetch 로 복원
-- **FE optimistic Stop/Pause/level + REST hydration for graphs/games** (`06519a42`): `fix(ui): optimistic Stop/Pause/level + REST hydration for graphs/games (CRITICAL)` — 4 user-reported 버그 해소 (Stop 무반응, Pause 무반응, 새로고침 시 그래프/최근경기 패널 공백, Bot Level 버튼 선택 표시 없음). `wsSend` 를 optimistic local state 로 감싸고 mount 시 `/api/training/metrics/aggregate` + `/api/games?limit=20` + 게임 캔버스 REST seed 로 즉시 복원
-- **BE stop/pause 실제 중단 + step/episode metrics broadcast** (`ee1b48ae`): `fix(training): stop/pause actually halt training + broadcast step/episode metrics` — QA 의 Stop/Pause no-op + step/episode counter 0/0 고착 원인 근본 해결. `TrainingManager` 에 `threading.Event` pair (stop + pause) 를 SB3 `CallbackList` 를 통해 worker thread 에 연결 → 실제 unwinding. `LiveFrameCallback` 이 `last_frame` 을 갱신해 새로고침 시 캔버스 즉시 repaint. `GET /api/training/status` 에 `bot_level`/`experiment_id`/`started_at` 추가. 상태변이 REST 엔드포인트(`/stop`, `/pause`, `/resume`, `/set_level`) 가 `training:status` 를 broadcast 하도록 통일 — WS control surface 와 REST control surface 가 완전 대칭
+- **Physics.js 포팅** (`1fb72169`) — collision/gravity/bounce/net-hit 모든 상수·분기 1:1 매핑. 원본 pikavolley.js 의 game loop ordering 준수
+- **view.js gameEnd 211-frame intro-return flow** (`d8dc8bb6`) — post-score freeze drop + 원본 winpose 시퀀스 복원
+- **State machine 확장** (`d2427add`) — `slowMotion`, `afterEndOfRound`, `beforeStartOfNextRound` 3 state 추가해 pikavolley.js 와 1:1
+- **`player.state` / `is_winner` / `game_ended` 와이어 emit** (`a49acffb`) — FE 가 state 기반 render 가능
+- **25fps game loop alignment** (`12967dee`) — 원본 tick rate 정합
+- **Sliding state cooldown** (`574442a4`) — 원본 physics.js 타이밍 재현
+- **Winner/loser pose freeze** (`56a61fed`) — gameEnd 동안 양 player freeze (control source 무관)
+- **Bot L5 regression fix after physics port** (`51d93c0c`) — 포팅 결과 L5 가 지나치게 약해진 회귀 수정
+- **Golden test harness** (`8add0ea6`) — 10 scenario + determinism regression pinning
+- **Original-parity audit 3종** (`68f18b85`, `d8f775f7`, `c3912faa`) — constants inventory / port-vs-original diff / state-machine cross-walk
+- **Frame-by-frame parity test** (`bc2225ea`) — upstream physics.js 와 11k assertion 대조
 
-### Changed — Deploy infra (related)
+### Added — FE Port (view.js main loop)
 
-- **`scripts/promote.sh` backend container restart 누락 수정** (`63e29b58`): v0.2.3 배포 시 frontend bundle 만 교체되고 backend 컨테이너는 옛 이미지로 유지되던 인시던트 대응. 자세한 내용은 `docs/incidents/20260412-dev-backend-stale.md`
+- **view.js 1:1 포팅** (`6f11838c`) — main loop + sprite indexing 원본 로직 재현
+- **punch effect helper + trail reset on round edge** (`19612cb8`)
+- **cloud_and_wave.js 1:1 port → cloudAndWave.ts** (`a144d164`)
+- **game_end overlay with 50-frame expanding intro** (`2d47daca`)
+- **PikaAudio + BGM loop + SFX trigger timing** (`ef0dce64`)
+- **Playwright visual regression harness + 4 scenes** (`acf2bad7`)
+- **slowmotion fade-ready + score-transition sequence** (`98233517`)
+- **winpose render on game_ended** (`bdd7d19e`)
+- **Diving sprite direction mirror** (`59d54f49`)
+- **Replay metadata display** (`c7d6380e`) — level/final score/duration
 
-### Deployment
+### Added — BE diving + SFX wire protocol
 
-- **v0.2.4 는 v0.2.3 위 3 commit 누적 번들** — DevOps 3 환경 재배포 진행 중. env tag `v0.2.4-{dev,qa,prod}` 각 배포 완료 시점 생성
-- **prod 는 v0.2.3 → v0.2.4 patch** — v0.2.3 이 prod 도달한 최초 릴리스가 된 직후의 hotfix
-- **frontend bundle prefix**: `JHqpaRFn` (v0.2.3 배포분에서 확인) — v0.2.4 rebuild 후 해시 갱신 예정
+- **`player.divingDirection` in state JSON** (`4a57ddb9`)
+- **Per-frame SFX flags in state JSON** (`a5cd5df0`)
+- **FE consume `diving_direction`** (`92c2011f`) — state 3/4 pose flip
+- **FE wire 5 BE SFX flags** (`f09416d5`) — pi/pikachu SFX은 scope 에서 drop
 
-### Not in v0.2.4 (deferred)
+### Added — Evaluator system E1-E10 (PR #44 `f9ffdd2d`)
 
-- Trainer PR #42 / Evaluator PR #44 (v0.2.5+ 후보)
+- **`backend/rl/elo.py`** — EloRatingSystem (L1=1200/L3=1500/L5=1800 seed, k-factor=32, leaderboard + to_dict)
+- **`backend/rl/baseline_comparator.py`** — prod-vs-candidate per-level deltas (IMPROVED/REGRESSED/NEUTRAL deadbands) + regression 교차검증
+- **`backend/rl/batch_evaluate.py`** — ProcessPoolExecutor 병렬 실행 + BatchFailure 기록
+- **`backend/rl/best_model_selector.py`** — verdict-tier ranking (PASS > CONDITIONAL > FAIL > CRITICAL) + regression_report veto
+- **`backend/rl/comparison_chart.py`** — matplotlib 2×2 비교 그리드 + single-level progression
+- **`backend/rl/report_generator.py`** — self-contained markdown 리포트 (verdict + charts + Elo leaderboard + threshold appendix)
+- **`backend/app/api/evaluations.py`** — POST/GET `/evaluations`, GET `/evaluations/{id}`, GET `/evaluations/checkpoints`
+- **`backend/app/services/evaluation_repository.py`** — Motor protocol-backed, `FakeCollection` test double
+- **`backend/app/services/evaluation_timeseries.py`** — `/evaluations/timeseries` (model_path, bot_level) 별 training_step + checkpoint_label
+- **`backend/app/services/elo_tracker.py`** — asyncio 백그라운드 tick, timestamp cursor restart dedup
+- **`EvalResult.dominance_score`** — win_rate(60%) + point_share(40%) 합성 메트릭
+- **Async job pattern for `/api/evaluation/run`** (`8ebbb9f3`) — 202 Accepted + `/status/{id}` polling
+- **nginx proxy_read_timeout extend** (`56d7473b`) — long-running eval job 지원
+
+### Added — Training Run Title + Management (BE-T1..T12)
+
+- **Training title 제출 + 전파** (`a7351e57` T1 / `8313f575` UI) — HyperparamForm 에서 입력 → training:start 와 함께 전파
+- **Model filename slug prefix** (`1ca89b91` T2) — title 유니크 slug 로 파일명 prefix 구성
+- **Title backward-compat + MongoDB indexes** (`d08571af` T3)
+- **Runs aggregation + games title filter** (`fc38f3d8` T4/T5)
+- **`GameRecord.current_episode`** (`bab96f14` T6) — game end 시점 episode 저장
+- **WS `training:game_end` emit** (`f506a887` T7) — 매 game 저장 직후 브로드캐스트
+- **`GET /api/models` title filter + enriched fields** (`cd16ef63` T8)
+- **`DELETE /api/models` bulk with active-run protection** (`dc80b557` T9 / `74c72b43` UI)
+- **Hyperparams in runs aggregation** (`be7c5b96` T10) — run detail 에 10 hyperparam 필드 표시
+- **`EvaluationRecord.title` + `.experiment_id`** (`59d72b33` T11)
+- **Eval title backfill via `/api/evaluation/results`** (`9fc59022` T12)
+- **Title auto-generate on empty** (design `646818dd`) — unique 보장
+
+### Added — Unified /runs navigation
+
+- **Unified Training Runs screen with Overview/Games/Evaluation sub-tabs** (`1c4779cd`) — 기존 `/history` + `/evaluation` 분리 종결
+- **Hyperparams display on run detail** (`dd747d76`) — n_envs / lr / batch / gamma / clip_range / ent_coef / gae_lambda / n_epochs / n_steps / total_timesteps
+- **2-level drill-down by training run** (`ef12e751` history, `385bfc1d` eval)
+- **Null-safe render for stopped/empty training state** (`e59944ed`)
+- **Live history from WS game_end** (`ed055f69`) — prepend + flicker-free keys (`e64604f5`)
+
+### Added — Batch / Multi-env training
+
+- **Per-env frame broadcast via `training:env_frame`** (`65dd7336`)
+- **Per-env game save with `env_id` on GameRecord** (`99259d68`)
+- **Batch tab bar + multi-env live view** (`97223658`)
+- **`env_id` filter + column on History** (`a583f17f`)
+- **Batch tab wrap layout + fixed-width score chip** (`32b95108`)
+- **Batch tab up/down arrow keys across wrap rows** (`5bedffbd`)
+- **Dynamic tab count from observed `n_envs`** (`d3413409`)
+
+### Added — Extended Hyperparameters
+
+- **Expand HyperparamForm** (`a62fbfe7`) — `total_timesteps`, `n_envs`, `n_epochs`, `ent_coef`, `gae_lambda` 추가
+- **BE accepts extended hyperparams in `training:start`** (`cc4daaf3`)
+- **Default `total_timesteps` raised to 2,000,000** (`88668eda`)
+
+### Added — Metrics / Observability
+
+- **`rally_count` per game in result payload** (`316d1eae`)
+- **Recent games expanded columns** (`488e550c`) — env + episode + score detail
+- **KST timestamp column + bot_level URL retention on Eval** (`7d052b0f`)
+
+### Added — i18n
+
+- **English UI translation** (`c46348fd`) — 전 UI 텍스트 영문화
+
+### Changed — Refactor Sprint A1-A8 (v1.x-prep)
+
+- **A1 BE reward decomposition** (9 commits, ending `7c4a8782`) — `_compute_reward` 를 8 helper 로 분해: `_game_outcome_reward`, `_approach_reward`, `_offensive_pressure_reward`, `_ready_position_reward`, `_net_crossing_reward`, `_score_reward`, `_touch_reward`, `_stall_penalty`
+- **A2 BE callbacks decomposition** (3 commits) — `LiveFrameCallback` 에서 `_play_demo_game`, `_build_demo_result`, `_snapshot_manager_fields` helper 추출
+- **A3 BE test coverage cleanup** (`f6f96778`, `bb75db60`) — test_physics.py 로 대체된 redundant test class 6 개 + coverage_gaps 중복 삭제
+- **A4 BE + FE dead code cleanup** — `delete_models` 미사용 `seen_traversal_or_invalid` flag 제거 (`70ae1162`), FE `getGame`/`getMetricsHistory` 미사용 export 제거 (`5a0f0aca`), `__resetPikaAudioForTests` helper 제거 (`464f2fa6`), `TrainingRunDetail` component 제거 — `UnifiedRunDetail` 로 대체됨 (`31b30301`)
+- **A5 FE shared components extract** (3 commits) — `ScoreCell` (`e495b917`), `TimestampText` (KST + em-dash fallback, `852598f1`), `EnvChip` (`cae1f3f4`) 를 Dashboard + ReplayList 에서 공용 분리
+- **A6 FE WS discriminated union + zod validation** (`de006c0b`, `daf38ad9`) — training WS payload 에 discriminated union + zod runtime validation (parse failure 시 log-only, dispatch 는 차단하지 않음)
+- **A7 deps minor/patch bumps** — `pixi.js` 8.17.1→8.18.1, `react-router-dom` 7.14.0→7.14.1, `typescript` 6.0.2→6.0.3, `typescript-eslint` 8.58.0→8.58.2, `eslint-plugin-react-hooks` 7.0.1→7.1.1, `globals` 17.4.0→17.5.0. 메이저 후보는 `docs/DEPS-MAJOR-BUMP-CANDIDATES.md` 로 defer
+- **A8 docs ADR migration + INDEX catalogue** — `NOTICE-*` 8개 파일을 ADR-0001..0010 으로 마이그레이션 (`68200778`, `6d7ba464`, `9d0ed7ad`), `docs/INDEX.md` master catalogue 신설 (`0eafef73`)
+
+### Changed — Internal organization
+
+- **`docs/` reorganize** (`64860e2c`) — `design/` + `audits/` + `reports/` + `reports/notices/` 하위 분리 (git mv 로 history 보존)
+
+### Fixed — User-reported bug rounds (R1-R9)
+
+다음 항목은 배포 후 PM/유저 실사용에서 발견된 회귀/미커버 결함:
+
+- **R1** (`2ab901cd`, `2eea3f84`) — Dashboard graph+text 리프레시 타이밍 sync, history 통합 리스트
+- **R2** (`59d54f49`, `0a8cdf91`, `c063a6bb`, `c7d6380e`, `488e550c`) — trail 방향 다이빙 미러, 모든 timestamp KST 적용, 새 훈련 시작 시 차트 초기화, 리플레이 메타데이터, Recent Games 상세 열
+- **R3** (`f900705b`, `5be3abe8`, `cd3b04d6`) — WS dynamic add 시 time 필드 undefined, timestamp uniform color, 하이드레이션 시 전체 메트릭 backfill
+- **R4** (`2b2a8475`, `7d8abd43`) — recent games text-muted 제거, # rank column 제거로 time-cell adjacency illusion 해소
+- **R5** (`6eb8dd9e`, `77f9271c`, `da304654`, `32b95108`, `a62fbfe7`, `5bedffbd`, `d3413409`, `5fd48120`) — 배치 탭 하이라이트 키보드 sync, episode/env column, eval active-job polling mount 복원, batch 탭 wrap, HyperparamForm 확장, arrow keys 다중행, 동적 탭 count, refresh 시 canvas/batch-tab guard
+- **R6** (`5195b83d`, `00a4c664` 외) — env filter 동적 max, title T1-T6 전파
+- **R7** (`e59944ed`, `dc80b557`, `385bfc1d`, `9f59739a`, `44d15440`, `33512833`, `a7307272`, `44557915`, `e77cb4e8`, `e64604f5`) — null-safe stopped/empty, bulk delete UI + active-run protection, eval drilldown, React hook order 위반 수정, drill-down 레이블, eval 체크포인트 poll, replay back context 보존, 탭이 현 run n_envs 매칭, 초기 status 에서 n_envs 하이드레이트, live history flicker-free keys + memo
+- **R8** (`06273e04`, `1c4779cd`) — run detail 에 10 hyperparam 필드 매핑 null-only fallback, unified runs nav
+- **R9** (`22e1fe55`, `c46348fd`) — run detail Evaluation tab 에 평가 결과 이력 노출, 전 UI 영문화
+
+### Fixed — History / Chart / Game
+
+- **History gameId join** (`36f016fc`) — games ↔ replays 를 Mongo `_id` 가 아니라 `gameId` 로 조인
+- **History KST render** (`070343e2`) — Asia/Seoul 시간 표시
+- **Chart x-axis anchor** (`8e59e3e9`) — unzoomed 기준 step 0 에 고정, refresh 와 무관
+- **Graceful "?" for missing rally count** (`97a71f7f`) — BE 응답 누락 방어
+
+### Fixed — Deploy / Ops / nginx
+
+- **nginx Cache-Control no-cache on HTML** (`0b5e1c1c`) — FE bundle 캐싱 스트레스 해소
+- **Rate limit relax for SPA navigation** (`f3bbf29d`, `6c1baaea`) — `/history`, `/runs` 등 정상 네비게이션이 429 맞던 문제. `X-Forwarded-For` honor 추가
+- **nginx burst enlarge for SPA burst traffic** (`7ab12372`)
+
+### Deprecated
+
+- `/history` + `/evaluation` 분리 라우트 — `/runs` 로 통합 대체 (링크 redirect 유지 필요 여부는 FE 라우터 확인)
+- `TrainingRunDetail` 컴포넌트 — `UnifiedRunDetail` 로 대체됨 (deleted)
+- FE `getGame` / `getMetricsHistory` export — 사용처 없음 (deleted)
+- `PikaAudio.__resetPikaAudioForTests` helper — 미사용 (deleted)
+
+### Security
+
+- **BE rate limit with X-Forwarded-For honor** (`6c1baaea`) — 정상 SPA 트래픽과 악성 버스트 구분 가능
+- **FE WS runtime validation via zod** (`daf38ad9`) — 서버 payload shape 검증 (parse 실패 시 로그; dispatch 는 통과)
+- **`DELETE /api/models` active-run protection** (`dc80b557`) — 현재 훈련 중인 모델은 삭제 불가 enforcement
+
+### Known Issues (minor)
+
+- `?tab=evaluation` ↔ `?tab=eval` URL inconsistency — QA flag. 내부 링크는 `?tab=evaluation`, 외부 공유 URL 은 `?tab=eval` 로 들어오는 경우 tab 이 활성화되지 않을 수 있음. v1.0.1 hotfix candidate
+- Keyboard input handler 미구현 (spec `docs/adr/0002-fe-keyboard-input-contract.md` 에 기록, v1.x+ feature)
+
+### Breaking Changes
+
+- `/history` + `/evaluation` 라우트는 `/runs` 로 대체. 외부 북마크/문서는 `/runs?tab=...` 형태로 업데이트 필요
+- `EvaluationRecord` 스키마에 `title` + `experiment_id` 추가 — 레거시 문서는 `/api/evaluation/results` 호출 시 `title` backfill (BE-T12). 직접 MongoDB 스캔 필요한 유저는 backfill 스크립트 실행 권장
 
 ### Rollback
 
-- target `v0.2.3` (`737a088f`). 단 v0.2.3 의 live-UI 이슈 3건이 다시 노출되므로 실제 롤백 시 사용자 훈련 제어 불가 복귀 → forward-fix 권장
+- target `v0.2.5` (`cd1e6a39`). Faithful port + unified nav + evaluator E1-E10 이 전부 재노출되므로 실질적으로 v1.0.0 은 forward-only 릴리스로 간주. DB 롤백 시 `title` 필드 보존되지만 뷰는 사라짐
+
+## [0.2.5] - 2026-04-12 (Phase 2 bug bundle — gameplay feel + metrics fidelity + match-end freeze / dev HEAD cd1e6a39)
+
+v0.2.4 배포 이후 Phase 2 재작업 번들. 핵심 축 4개: (1) 게임 감각 개선(강타 링/다이브 잔상/freeze-frame), (2) 봇 난이도 상향(L5 역전 이슈 해소), (3) 메트릭 차트 충실도(/timeseries hydration + cap 확장 + 'N pts · M steps' 라벨), (4) P0 match-end freeze tick 핫픽스(`cd1e6a39`). 2 배포 창(22:03 FE + 22:05 BE → runtime `6f4a057f`, 그리고 match-end freeze merge → `cd1e6a39`) 를 하나의 태그 번들로 닫음.
+
+### Fixed — Game engine / match end
+
+- **15점 match-end freeze tick** (`e9f72459`, merge `cd1e6a39`): 매치 최종 점수가 올라간 직후 freeze 타이머가 tick 되지 않아 마지막 포인트 장면이 무한 고착 → 다음 매치 진행 불가. `_tick_post_score_freeze` 가 match-winning point 에도 불리도록 교정
+- **Score hold grounded-ball frame** (`6ff911d9`): 득점 후 공이 지면에 닿은 프레임이 즉시 사라져 마지막 포인트 시각 피드백 상실. 득점 시 grounded frame 을 짧게 홀드하여 원본 가독성 회복
+- **`last_frame` seed on training start** (`ca4cb608`): 훈련 시작 직후 `/api/training/current_frame` 이 `None` 을 반환해 404 가 나던 문제. 시작 지점에서 첫 frame 을 즉시 시드
+
+### Fixed — Metrics chart / data fidelity
+
+- **Chart hydration from `/timeseries` on mount** (`917c53cc`): 새로고침 시 차트가 비었던 문제. mount 에서 `/api/training/timeseries` 로 전체 포인트 seed → WS incremental 로 자연스러운 이어붙이기
+- **`log_interval` 100 → 256 + `/timeseries` cap 1000 → 10000** (`856f689e`): 장기 실행 시 포인트 누락 방지 + 과샘플링 완화로 차트 해상도 실질 개선
+- **Sampling cadence label "N pts · M steps"** (`2ed23c94`): 사용자가 차트가 보여주는 샘플 밀도를 한눈에 파악하도록 노출
+- **WS dead-letter routing for missing `bot_level`/`experiment_id`** (`05ffd073`): 필드 누락 시 silent L1 fallback 이 L1 데이터로 보이게 만들던 문제. 이제 dead-letter 로 분리 → 데이터 품질 투명화
+
+### Fixed — FE UX polish
+
+- **Recent Games bot level fallback** (`b9819d5a`): 레거시 문서에 `bot_level` 가 없어 배지가 빈 "L" 로만 보이던 문제. 누락 시 fallback 렌더 — 빈 라벨 제거
+- **Legacy games backfill migration** (`2e6bf373` + purge mode `116dd6ae`): 과거 문서에 `bot_level` / `experiment_id` 재주입 + 회복 불가 케이스에 대한 `--mode=purge-pre-fix` Option B 제공
+- **Sky RGB stripe regression** (`ff24cc9a` / `f6e73e86`): PixiJS 필터/샘플링 이슈로 스카이 그라디언트가 RGB 줄무늬로 깨지던 현상. `NEAREST` 필터 + `antialias:false` + `roundPixels:true` 조합으로 픽셀 완전성 회복
+- **Build: exclude `*.test.{ts,tsx}` from `tsconfig.app.json`** (`630b66c5`): 프로덕션 번들에 테스트 타입이 끌려오지 않도록 tsconfig 분리
+
+### Added — Visual FX + Designer D11-D15
+
+- **Dive sprite + motion-blur afterimage (D11)** (`a8cd7c59`): `is_diving` 상태에서 다이브 스프라이트 + 잔상 렌더 — 원본의 역동성 복구
+- **Punch ring (D12) + power-hit trail overlay (D13)** (`34137663`): 지면/강타 타격점에 흰색 링, 강타 시 authoritative trail 렌더
+- **Recent Games bot level badges (D14)** (`bad997f1`): L1-L5 난이도 램프를 배지 색으로 시각화
+- **Score freeze-frame scoreboard flash (D15)** (`5f0b0cd7`): 득점 시 점수판이 freeze-frame 동안 플래시 — 관전 흐름 강조
+- **`ball.punchEffect{X,Y,Radius}` types** (`743dc8ae`): bottom-hit ring 의 optional payload 타입 노출
+- **`punch_effect_radius` emit on WS** (`982e3a80`): ground/power-hit 흰 링을 클라이언트 인퍼런스 없이 서버 권위로 전송
+
+### Changed — Bot difficulty
+
+- **L1-L5 난이도 상향 + aggression/net-bias 추가** (`d2436993`): 사용자 리포트 "L5 상대로 역전 가능" 이슈 해소. `aggression` + `net_bias` 로 네트 압박 + 반응 속도 두 축을 올림. L5 는 인간-사용자 승률 목표 <10% 로 재튜닝
+
+### Changed — Deploy / ops
+
+- **`scripts/deploy-frontend.sh` auto-advances `github/<env>` ref** (`6f96d7fd`): 배포 시 브랜치 head 가 자동으로 runtime SHA 로 정렬 — 지난 deploy window 에서 발견된 "branch lags runtime" 드리프트 재발 방지
+- **`docker-compose` json-file log rotation + Round-2 disk cleanup** (`63bc1ca1`): dev/qa docker log 가 다시 GB 단위로 불어나던 현상 방지. 추가 ~disk 정리
+- **Incident postmortem `20260412-dev-backend-stale` published** (`018a2be1`): v0.2.3 당시 promote.sh 백엔드 재기동 누락 인시던트 공식 기록화
+
+### Deployment
+
+- **3 환경(dev/qa/prod) 에 동일 bundle `index-CFGidFNF.js` 배포 완료** — 2 배포 창(22:03 FE + 22:05 BE) 으로 runtime 이 `6f4a057f` 에 도달. 이후 match-end freeze P0 hotfix (`e9f72459` merge `cd1e6a39`) 재배포 진행
+- **env tag `v0.2.5-{dev,qa,prod}`** — DevOps 재배포 완료 후 최종 runtime SHA 에 부착
+- **main advance** — prod → main 머지하여 `v0.2.5` tag main reachable 필수
+
+### Not in v0.2.5 (deferred)
+
+- Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum learning) — 여전히 v0.2.6+
+- Evaluator PR #44 (E1-E10 baseline / batch eval / history / timeseries / Elo) — 여전히 v0.2.6+
+- Keyboard input handler 실구현 (spec 은 v0.2.4 `15c702ca` 에 기록됨)
+
+### Rollback
+
+- target `v0.2.4` (`dabd84a1`). 단 Phase 2 로 해소된 (i) match-end freeze, (ii) 차트 새로고침 복구, (iii) Recent Games 빈 "L", (iv) L5 승률 이상, (v) 스카이 RGB 줄무늬, (vi) 강타/다이브 시각 피드백 누락 — 이상 6 건이 재노출되므로 forward-fix 권장
+
+## [0.2.4] - 2026-04-12 (post-v0.2.3 live-UI + engine + hyper-ball bundle / dev HEAD dabd84a1)
+
+v0.2.3 을 3 환경(dev/qa/prod)에 배포한 직후 PM 의 실사용 테스트 + 추가 UX 리서치로 식별한 4 CRITICAL 수정 + 6 UX/정합성 개선의 번들. 모두 같은 deploy window 에서 dev 에 착지했고 DevOps 가 전 환경에 `index-DqBsWzf5` bundle 로 단일 배포.
+
+### Fixed — Live-UI CRITICAL
+
+- **FE REST hydration on mount + reconnect** (`bd6cea5a`): `useTrainingStateImpl` 이 `status={state:'stopped', ...}` 하드코딩으로 시작하고 `training:status` WS 메시지는 *state change* 시에만 브로드캐스트되어, 훈련 중 새로고침 시 Start 버튼만 보이고 Stop 이 사라져 개입 불가. mount 시 `GET /api/training/status` + 재연결 시 re-fetch 로 복원
+- **FE optimistic Stop/Pause/level + REST hydration for graphs/games** (`06519a42`): 4 user-reported 버그 해소 (Stop 무반응, Pause 무반응, 새로고침 시 그래프/최근경기 패널 공백, Bot Level 버튼 선택 표시 없음). `wsSend` 를 optimistic local state 로 감싸고 mount 시 `/api/training/metrics/aggregate` + `/api/games?limit=20` + 게임 캔버스 REST seed 로 즉시 복원
+- **BE stop/pause 실제 중단 + step/episode metrics broadcast** (`ee1b48ae`): Stop/Pause no-op + step/episode counter 0/0 고착 근본 해결. `TrainingManager` 에 `threading.Event` pair (stop + pause) 를 SB3 `CallbackList` 에 연결 → worker thread 실제 unwinding. `LiveFrameCallback` 이 `last_frame` 갱신해 새로고침 시 캔버스 즉시 repaint. `GET /api/training/status` 에 `bot_level`/`experiment_id`/`started_at` 추가. REST `/stop`/`/pause`/`/resume`/`/set_level` 이 `training:status` broadcast 수행 → WS control surface 와 완전 대칭
+
+### Fixed — Engine/RL CRITICAL
+
+- **Rally-timeout safety valve + RL truncation** (`913fca5f`): weak RL policy 무한 self-toss deadlock 방지. (C) 엔진 600 frames (10s @ 60fps) net 미통과 시 ball 미보유 side 에 point + fresh serve (`GameState.frames_since_net_crossing` + `round_ended_by_timeout`). (D) env 에피소드 truncation + `_RALLY_TIMEOUT_PENALTY` 로 PPO 에 loss-shaped terminal 신호. `test_engine.py::TestRallyTimeout` 5 케이스
+
+### Fixed — Metrics chart consistency
+
+- **REST metrics hydration 비활성화 (P0 stopgap)** (`eaec7ba8`): 훈련 메트릭 차트가 새로고침 전후 같은 X(step) 에서 다른 Y 값을 보이던 문제. 원인은 WS `training:metrics`(per-snapshot raw) + REST `/metrics/aggregate`(1-min bucket AVG) 의 값 도메인 불일치. FE 가 REST 하이드레이션을 끄고 WS 만을 신뢰 — 후속 `/timeseries` 엔드포인트 (`581e2a58`) 가 정답 대체
+
+### Added — Hyper-ball (power hit) 시각 피드백
+
+- **Engine `ball.is_power_hit` authoritative flag** (`3b4303df`): FE `ballSpeed > 25` heuristic 이 실제 power hit 다수 누락 + 잔류 속도에서 false positive. gorisanson/pikachu-volleyball 원본의 `ball.isPowerHit` (physics.js:725/727, view.js:513) 를 BallState + WS `training:frame` payload 로 포트
+- **Types `BallState.isPowerHit` + `previousX/Y` + `previousPreviousX/Y`** (`d48d8a15`): FE 가 BE emitter 도착 전까지 undefined 로 기존 동작 유지하도록 Optional. 원본 t-1 / t-2 position 필드 정렬로 trail 렌더링 준비
+- **Canvas authoritative power-hit trail + 3-slot history** (`33f6b868`): `computePowerHitTrail(ball, history)` 순수 함수 + 3-slot 히스토리 버퍼. 원본 sprite 위치를 그대로 재현. `powerHitTrail.test.ts` 단위 스위트 신설
+- **FE keyboard-input spec 재조사** (`15c702ca`): "Enter 강타 unused" 사용자 피드백에 대한 원본 재조사 문서화. 현 FE 는 spectator-only 로 키보드 핸들러 없음 — 장래 인풋 구현 시 원본 바인딩 유지 (P1: D/G/R/V + Z power + F alt, P2: 대칭)
+
+### Added — Dashboard `/timeseries` 엔드포인트
+
+- **`GET /api/training/metrics/timeseries`** (`581e2a58`): FE-8 대시보드 하이드레이션 최종 계약 확정. `{step, value, timestamp}` 포인트 shape (timestamp 서버-스탬프 ISO-8601 UTC, persist 이후 non-null). default limit 100 → 1000 으로 확장 (새로고침 후 전체 trailing window 필요). `MetricsService.recent_points` 가 `timestamp` projection + naive datetime 을 UTC 로 정규화
+
+### Changed — Bot level single source of truth (Option A)
+
+- **WS `training:start.bot_level` Optional** (`d1728344`): 기존 기본값 1 로 인해 버튼으로 L5 선택 후 Start 시 L1 로 silent reset 되던 회귀 방지. Optional 시 dispatcher 가 `status.bot_level` 을 carry over
+- **FE Option A: `status.botLevel` single source** (`f63d7aab`): Training Controls L1-L5 + Hyperparameters dropdown 의 두 store 충돌 제거. PM 결정 (2026-04-12) — status.botLevel 이 유일한 진실
+- **Option A contract lock test** (`dabd84a1`): (1) dashboard `training:start` payload 가 bot_level 을 omit 하는지 + (2) L-buttons 이 stopped state 에서 clickable 유지되는지 불변 보호
+- **Fetch mock init param TS lint 통과** (`ca6c8fe3`): `_init?: RequestInit` drift 에서 `@typescript-eslint/no-unused-vars` 회피 — rest-arg + 명시적 void
+
+### Changed — Deploy infra (related)
+
+- **`scripts/promote.sh` backend container restart 누락 수정** (`63e29b58`): v0.2.3 배포 시 frontend bundle 만 교체되고 backend 컨테이너가 옛 이미지로 유지되던 인시던트 대응. 자세한 내용은 `docs/incidents/20260412-dev-backend-stale.md`
+
+### Deployment
+
+- **3 환경(dev/qa/prod) 에 동일 bundle `index-DqBsWzf5` 배포 완료** (DevOps 보고: 2026-04-12, backend uptime 2분, force-recreate 완료). 컨테이너 신 코드 검증: `/timeseries` + `ball.is_power_hit` + rally-timeout 모두 포함
+- **env tag `v0.2.4-{dev,qa,prod}`** — 동일 commit (dev HEAD `dabd84a1`) 에 부착 (3 환경이 byte-identical bundle)
+- **prod 브랜치 forward** — `github/prod` 는 v0.1.0-era `41f4fdbb` 에 고착되어 있었음. v0.2.4 런타임 정합을 위해 dev HEAD 로 advance + main 머지
+
+### Not in v0.2.4 (deferred)
+
+- Trainer PR #42 (TensorBoard + early stopping + reproducibility + grid search + curriculum) — v0.2.5+
+- Evaluator PR #44 (E1-E10 baseline / batch eval / history / timeseries / Elo) — v0.2.5+
+- Keyboard input handler 실구현 (이번은 spec 문서화만)
+
+### Rollback
+
+- target `v0.2.3` (`737a088f`). 단 live-UI 3 CRITICAL + 엔진 rally-deadlock + 차트 불일치 + L-level silent reset 이 재노출 → forward-fix 권장
 
 ## [0.2.3] - 2026-04-12 (v0.2.2 QA blocker 3 hotfix / dev HEAD 77b871dd)
 

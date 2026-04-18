@@ -59,8 +59,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app,
-        requests_per_minute: int = 60,
-        burst: int = 20,
+        requests_per_minute: int = 600,
+        burst: int = 200,
+        *,
+        trust_proxy: bool = False,
     ) -> None:
         super().__init__(app)
         self._rate = requests_per_minute / 60.0  # tokens per second
@@ -69,12 +71,30 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             lambda: _TokenBucket(capacity=burst, rate=self._rate)
         )
         self._last_cleanup = time.monotonic()
+        # Behind nginx (or any reverse proxy) every request reaches uvicorn
+        # from the proxy IP, so without ``trust_proxy`` every real user
+        # collapses into a single shared bucket and 429s start firing the
+        # moment two tabs sync. When this flag is on, the first hop in
+        # ``X-Forwarded-For`` is treated as the real client IP. MUST stay
+        # off for direct-internet deploys — XFF is trivially spoofable.
+        self._trust_proxy = trust_proxy
+
+    def _client_id(self, request: Request) -> str:
+        if self._trust_proxy:
+            xff = request.headers.get("x-forwarded-for")
+            if xff:
+                # Standard format: "client, proxy1, proxy2". First hop is
+                # the originating client; later hops are intermediate proxies.
+                first = xff.split(",", 1)[0].strip()
+                if first:
+                    return first
+        return request.client.host if request.client else "unknown"
 
     async def dispatch(self, request: Request, call_next):
         if _is_exempt(request.url.path):
             return await call_next(request)
 
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = self._client_id(request)
         bucket = self._buckets[client_ip]
 
         # Periodic cleanup of stale buckets (every 5 min)

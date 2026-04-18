@@ -199,3 +199,116 @@ class TestBotLevelNoiseMonotonic:
         assert p.angle_variance > 0
         assert p.hesitation_rate > 0
         assert p.trajectory_noise_scale > 0
+
+    def test_reaction_delay_non_increasing(self) -> None:
+        delays = [BOT_PARAMS[L].reaction_delay for L in (1, 2, 3, 4, 5)]
+        assert delays == sorted(delays, reverse=True), (
+            f"reaction_delay not monotone: {delays}"
+        )
+
+    def test_miss_probability_non_increasing(self) -> None:
+        misses = [BOT_PARAMS[L].miss_probability for L in (1, 2, 3, 4, 5)]
+        assert misses == sorted(misses, reverse=True), (
+            f"miss_probability not monotone: {misses}"
+        )
+
+    def test_move_range_non_decreasing(self) -> None:
+        ranges = [BOT_PARAMS[L].move_range for L in (1, 2, 3, 4, 5)]
+        assert ranges == sorted(ranges), (
+            f"move_range not monotone-non-decreasing: {ranges}"
+        )
+
+    def test_jump_timing_error_non_increasing(self) -> None:
+        errs = [BOT_PARAMS[L].jump_timing_error for L in (1, 2, 3, 4, 5)]
+        assert errs == sorted(errs, reverse=True), (
+            f"jump_timing_error not monotone: {errs}"
+        )
+
+
+class TestBotDifficultyUpgrade2026_04_12:
+    """Pins the PM 2026-04-12 difficulty-upgrade values.
+
+    Before this upgrade, mid/high-level bots reacted too slowly (L3
+    reaction_delay=3, L4=1) and under-predicted intercepts, causing
+    games to end too quickly with stale play. These tests lock in the
+    exact spec PM requested so a future refactor can't silently walk
+    the values back.
+    """
+
+    def test_l1_spec(self) -> None:
+        p = BOT_PARAMS[1]
+        assert p.reaction_delay == 6
+        assert p.miss_probability == 0.10
+
+    def test_l3_spec(self) -> None:
+        p = BOT_PARAMS[3]
+        assert p.reaction_delay == 1
+        assert p.prediction_error == 0.10
+        assert p.move_range == 0.95
+        assert p.jump_timing_error == 1
+        assert p.miss_probability == 0.02
+
+    def test_l4_spec(self) -> None:
+        p = BOT_PARAMS[4]
+        assert p.reaction_delay == 0
+        assert p.prediction_error == 0.04
+        assert p.move_range == 1.0
+        assert p.jump_timing_error == 0
+        assert p.miss_probability == 0.0
+
+    def test_l5_spec(self) -> None:
+        p = BOT_PARAMS[5]
+        assert p.prediction_error == 0.01
+        assert p.reaction_delay == 0
+        assert p.miss_probability == 0.0
+
+
+class TestSkillOrderingAgainstWeakerOpponent:
+    """Regression guard for the pre-upgrade L5<L3 inversion.
+
+    Three-phase history:
+      * Pre-upgrade (dev HEAD, pre-2026-04-12): L5 vs L3 = 40% (inverted).
+      * Post-upgrade: target ≥80% (12/15) achieved.
+      * Post-physics-port (2026-04-13): regressed to 5/15 because the
+        pre-port bot tuning assumed instantaneous power-hit semantics;
+        the ported state=2 dwell window changed optimal jump timing.
+      * Current: L5 retuned with jump_timing_error=-1 + zero stochastic
+        noise, restoring ≥12/15 across tested seed bases.
+
+    Both RNGs (bot's global random, engine's own random.Random) are
+    seeded explicitly so this test is reproducible in and out of the
+    pytest harness — earlier iterations were confusingly flaky because
+    only the bot RNG was seeded, leaving the engine's zero-vx tiebreak
+    and computer_boldness draws at the mercy of process entropy.
+    """
+
+    def test_l5_comfortably_beats_l3(self) -> None:
+        # Seed BOTH RNGs explicitly for reproducibility. The bot uses
+        # the global random module (seeded via rng.seed); the engine has
+        # its own random.Random instance that must be seeded separately
+        # (zero-vx ball-player tiebreak + computer_boldness draws). Without
+        # an engine seed the test was flaky — the pytest process env was
+        # producing a different engine-entropy sequence than a standalone
+        # python -c invocation, driving 5/15 vs 15/15 across runs with the
+        # same bot seed.
+        rng.seed(42)
+        l5_wins = 0
+        n_games = 15
+        scores: list[tuple[int, int]] = []
+        for game_idx in range(n_games):
+            game = PikachuVolleyball(seed=1000 + game_idx)
+            state = game.reset()
+            bot_l3 = RuleBasedBot(level=3)
+            bot_l5 = RuleBasedBot(level=5)
+            for _step in range(50000):
+                a1 = bot_l3.get_action(state, is_player2=False)
+                a2 = bot_l5.get_action(state, is_player2=True)
+                state = game.step(a1, a2)
+                if state.score1 >= 15 or state.score2 >= 15:
+                    break
+            scores.append((state.score1, state.score2))
+            if state.score2 > state.score1:
+                l5_wins += 1
+        assert l5_wins >= 12, (
+            f"L5 won only {l5_wins}/{n_games} vs L3 (baseline: 40%) — {scores=}"
+        )
