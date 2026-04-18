@@ -26,10 +26,22 @@ import {
 } from '../../lib/hyperparams'
 import './Dashboard.css'
 
-/** Default env count. BE's training run defaults to 8 parallel envs;
- *  this value drives the BatchTabBar when `/api/training/status` hasn't
- *  surfaced a different count yet. Spec §1 supports 1..16. */
+/**
+ * Baseline env count before WS data arrives or when the user hasn't
+ * yet started a training run. Spec supports 1..16; 8 matches BE's
+ * training run default and the HyperparamForm's baseline for n_envs.
+ *
+ * Effective count is `max(baseline, params.n_envs, observed+1)` —
+ * see `effectiveNEnvs` below. The derivation lives FE-side because
+ * `/api/training/status` doesn't expose `n_envs` today;
+ * [BE-WAITING] adding `"n_envs": self.manager._n_envs` to
+ * `backend/app/services/training_service.py::status()` would let us
+ * drop the observed-map derivation. For now the observed path
+ * catches any count the user configured, including values above the
+ * form default (n_envs=16 when the user bumps it).
+ */
 const DEFAULT_N_ENVS = 8
+const MAX_N_ENVS = 16
 /** Matches the 180ms canvas crossfade per Designer spec §3. */
 const CANVAS_FADE_MS = 180
 
@@ -69,6 +81,27 @@ export function Dashboard() {
     if (envFrame?.frame) return envFrame.frame
     return latestFrame
   }, [envFrames, activeEnvId, latestFrame])
+
+  /**
+   * Effective env count = max of:
+   *   - baseline (DEFAULT_N_ENVS)
+   *   - user's configured form value (params.n_envs)
+   *   - observed envFrames max id + 1 (catches runs where user
+   *     bumped n_envs beyond the form default, or where BE
+   *     dispatches more envs than the status payload suggests)
+   *
+   * Clamped to MAX_N_ENVS (spec ceiling, 16). Without this FC-R6B
+   * derivation a run with n_envs=16 rendered only the first 8 chips
+   * because the old code hardcoded the baseline.
+   */
+  const effectiveNEnvs = useMemo(() => {
+    const observed = Object.keys(envFrames)
+      .map(Number)
+      .filter(n => Number.isFinite(n) && n >= 0)
+      .reduce((max, id) => Math.max(max, id + 1), 0)
+    const requested = Number.isFinite(params.n_envs) ? params.n_envs : DEFAULT_N_ENVS
+    return Math.max(1, Math.min(MAX_N_ENVS, Math.max(DEFAULT_N_ENVS, requested, observed)))
+  }, [envFrames, params.n_envs])
 
   const score1 = displayFrame?.score1 ?? 0
   const score2 = displayFrame?.score2 ?? 0
@@ -168,7 +201,7 @@ export function Dashboard() {
 
         <BatchTabBar
           envFrames={envFrames}
-          nEnvs={DEFAULT_N_ENVS}
+          nEnvs={effectiveNEnvs}
           activeEnvId={activeEnvId}
           onSelect={handleEnvSelect}
         />
