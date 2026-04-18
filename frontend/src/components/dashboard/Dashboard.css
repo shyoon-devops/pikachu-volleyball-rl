@@ -201,3 +201,25 @@
   outline-offset: 2px;
   border-radius: 2px;
 }
+
+/* FC-R8a: Placeholder shown in place of BatchTabBar when no live
+   env frames exist — either training is idle (no active run) or
+   the first frame hasn't landed yet. Keeps the layout stable so
+   the canvas doesn't reflow when the tab bar toggles. */
+.dashboard-batch-tab-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  min-height: 40px;
+  background: var(--color-bg-elevated);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.dashboard-batch-tab-placeholder--idle {
+  font-style: italic;
+}
