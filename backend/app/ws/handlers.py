@@ -432,6 +432,9 @@ async def results_push_loop(
                 # from legacy pre-title producers is stored as None so
                 # pydantic/serde consumers can render "-" cleanly.
                 title=data.get("title") or None,
+                # Episode counter snapshot (BE-T6). Absent from legacy
+                # payloads; coerced to None so FE "-" fallback kicks in.
+                episode=data.get("episode"),
             )
         except Exception as e:
             logger.exception("Invalid game result payload, routing to dead-letter")

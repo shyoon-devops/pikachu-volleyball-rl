@@ -31,6 +31,12 @@ class GameRecord(BaseModel):
     # orphan history (spec §5). None for pre-title legacy records — FE
     # renders "-".
     title: str | None = Field(default=None, max_length=60)
+    # Training episode counter at the moment this game completed
+    # (BE-T6). Snapshotted from ``TrainingManager.current_episode`` so
+    # the Recent Games view + per-run drill-down can render the
+    # episode-in-run axis without a separate fetch. Optional so legacy
+    # pre-T6 rows (FE already ships a "-" fallback) keep loading.
+    episode: int | None = Field(default=None, ge=0)
 
     model_config = {"populate_by_name": True}
 

@@ -299,6 +299,11 @@ class EnvResultCallback(BaseCallback):
         )
         bot_level = int(getattr(mgr, "_bot_level", 1)) if mgr is not None else 1
         title = str(getattr(mgr, "_title", "") or "") if mgr is not None else ""
+        # Episode counter snapshot at drain time (BE-T6). All env games
+        # drained on this tick share the same counter value — episode
+        # granularity in SB3 is per rollout, not per env, so that's
+        # semantically correct. 0 when the manager isn't wired.
+        episode = int(getattr(mgr, "current_episode", 0) or 0) if mgr is not None else 0
 
         for env_id, results in enumerate(per_env):
             if not results:
@@ -320,6 +325,8 @@ class EnvResultCallback(BaseCallback):
                     "env_id": str(env_id),
                     # Title denormalised onto every game row (BE-T1).
                     "title": title,
+                    # Episode counter at game save-time (BE-T6).
+                    "episode": episode,
                 }
                 _safe_enqueue(self.loop, self.results_queue, payload)
         return True
@@ -483,6 +490,13 @@ class LiveFrameCallback(BaseCallback):
             # don't orphan historical rows. Empty string for runs
             # started before title support landed.
             "title": current_title,
+            # Episode counter at demo-save time (BE-T6). Read off the
+            # manager (the same counter /api/training/status surfaces
+            # and MetricsCallback appends to). 0 when the manager isn't
+            # wired or is freshly started.
+            "episode": int(
+                getattr(self._manager, "current_episode", 0) or 0
+            ) if self._manager is not None else 0,
         }
         _safe_enqueue(self.loop, self.results_queue, result)
 
