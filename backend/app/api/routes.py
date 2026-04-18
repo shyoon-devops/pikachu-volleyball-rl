@@ -355,6 +355,31 @@ async def training_level_get(request: Request):
     return {"level": training_service.status()["bot_level"]}
 
 
+@router.get("/training/titles")
+@endpoint_guard("training_titles")
+async def training_titles(
+    request: Request,
+    q: str | None = Query(default=None, max_length=60),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """List training titles for FE autocomplete / duplicate check.
+
+    Spec references DESIGN-TRAINING-TITLE.md §1 (debounced uniqueness
+    lookup) and §3 (autocomplete combobox). ``q`` is a case-insensitive
+    substring filter — missing ``q`` returns the most recent ``limit``
+    titles. The service returns plain dicts so the FE can render the
+    "prior run's date" hint on a duplicate without a second fetch.
+    """
+    runs_service = getattr(request.app.state, "training_runs_service", None)
+    if runs_service is None:
+        # Training runs collection hasn't been initialized (likely a
+        # no-Mongo test harness). Surface an empty list rather than 503
+        # so the FE autocomplete degrades gracefully.
+        return {"titles": []}
+    titles = await runs_service.list_titles(q=q, limit=limit)
+    return {"titles": titles}
+
+
 @router.patch("/training/level")
 @endpoint_guard("training_level_patch")
 async def training_level_patch(request: Request, body: TrainingLevelPatch):

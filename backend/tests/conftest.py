@@ -72,6 +72,7 @@ class FakeEvalService:
         n_games: int = 50,
         *,
         progress_callback=None,
+        training_title=None,
     ):
         if ".." in model_path or model_path.startswith("/"):
             raise FileNotFoundError(f"Invalid model path: {model_path}")

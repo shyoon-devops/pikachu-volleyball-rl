@@ -26,6 +26,11 @@ class GameRecord(BaseModel):
     # (all demo-only) still validate — missing value is treated as "demo"
     # by downstream consumers.
     env_id: str | None = None
+    # Denormalised training title snapshot. Carries the human label from
+    # the time the match was saved so later renames don't retroactively
+    # orphan history (spec §5). None for pre-title legacy records — FE
+    # renders "-".
+    title: str | None = Field(default=None, max_length=60)
 
     model_config = {"populate_by_name": True}
 
@@ -56,6 +61,11 @@ class EvaluationRecord(BaseModel):
     avg_score: float
     avg_rally_length: float
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    # Denormalised snapshot of the source training's title at eval time
+    # (spec §5). Stored here rather than joined so a later title rename
+    # doesn't retroactively rewrite historical evaluation rows. None
+    # for evals of legacy pre-title models.
+    training_title: str | None = Field(default=None, max_length=60)
 
     model_config = {"populate_by_name": True, "protected_namespaces": ()}
 
@@ -90,6 +100,13 @@ class PaginatedResponse(BaseModel):
 
 
 class WsTrainingStartPayload(BaseModel):
+    # Human-readable label the user assigns to this training run
+    # (DESIGN-TRAINING-TITLE.md §0). Optional — empty / whitespace /
+    # missing → the server auto-generates ``run-{adj}-{noun}-{4hex}``
+    # via ``title_service.allocate_title``. Max 60 chars matches the
+    # FE input's maxlength so over-length payloads fail parse-side and
+    # never hit the handler.
+    title: str | None = Field(default=None, max_length=60)
     hyperparams: dict | None = None
     # Bot level is optional so the frontend can own the difficulty dial
     # exclusively via training:set_level / PATCH /api/training/level. When

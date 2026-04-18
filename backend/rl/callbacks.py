@@ -282,6 +282,7 @@ class EnvResultCallback(BaseCallback):
             str(getattr(mgr, "_experiment_id", "") or "") if mgr is not None else ""
         )
         bot_level = int(getattr(mgr, "_bot_level", 1)) if mgr is not None else 1
+        title = str(getattr(mgr, "_title", "") or "") if mgr is not None else ""
 
         for env_id, results in enumerate(per_env):
             if not results:
@@ -301,6 +302,8 @@ class EnvResultCallback(BaseCallback):
                     # env_id stringified so "demo" and "0".."7" share the
                     # same column in /api/games + Mongo index.
                     "env_id": str(env_id),
+                    # Title denormalised onto every game row (BE-T1).
+                    "title": title,
                 }
                 _safe_enqueue(self.loop, self.results_queue, payload)
         return True
@@ -368,9 +371,11 @@ class LiveFrameCallback(BaseCallback):
         if self._manager is not None:
             current_bot_level = int(getattr(self._manager, "_bot_level", self.bot_level))
             current_experiment_id = str(getattr(self._manager, "_experiment_id", "") or "")
+            current_title = str(getattr(self._manager, "_title", "") or "")
         else:
             current_bot_level = self.bot_level
             current_experiment_id = ""
+            current_title = ""
 
         game = PikachuVolleyball()
         bot = RuleBasedBot(level=current_bot_level)
@@ -458,6 +463,10 @@ class LiveFrameCallback(BaseCallback):
             # Tag this as the standalone demo so BE-A2 can distinguish
             # demo results from parallel-env gradient games in /api/games.
             "env_id": "demo",
+            # Title snapshot (BE-T1): denormalised so later renames
+            # don't orphan historical rows. Empty string for runs
+            # started before title support landed.
+            "title": current_title,
         }
         _safe_enqueue(self.loop, self.results_queue, result)
 

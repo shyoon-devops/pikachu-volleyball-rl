@@ -133,6 +133,27 @@ async def _dispatch(
             if params.bot_level is not None
             else current["bot_level"]
         )
+        # Title allocation (BE-T1): caller-supplied title wins if valid
+        # and unique; otherwise the server generates one. The final
+        # title is surfaced in the training:status broadcast below so
+        # the FE can display what actually got allocated.
+        from backend.app.services.title_service import (
+            TrainingRunsService,
+            allocate_title,
+            slugify,
+        )
+
+        runs_service = getattr(training_service, "runs_service", None)
+        # Accept only a real TrainingRunsService instance — MagicMocks
+        # from older test harnesses auto-create attributes and would
+        # otherwise expose a non-awaitable "service" here. Fall back to
+        # a db-less registry so allocate_title still runs (no
+        # collision check possible without Mongo — acceptable).
+        if not isinstance(runs_service, TrainingRunsService):
+            runs_service = TrainingRunsService(db=None)
+
+        final_title = await allocate_title(runs_service, params.title)
+        final_slug = slugify(final_title)
         # Extended PPO hyperparams (2026-04-18): n_epochs / ent_coef /
         # gae_lambda are already consumed from the hp dict by
         # ``TrainingManager._train_loop``, but the WS envelope used to
@@ -155,17 +176,38 @@ async def _dispatch(
             "hyperparams": hp,
             "bot_level": effective_bot_level,
             "total_timesteps": params.total_timesteps,
+            "title": final_title,
+            "slug": final_slug,
         }
         if params.n_envs is not None:
             start_kwargs["n_envs"] = params.n_envs
         experiment_id = await training_service.start(**start_kwargs)
+        # Persist the run record (BE-T1) so future uniqueness checks
+        # see this title. Best-effort — failure logs but doesn't fail
+        # the start; the in-memory manager already knows the title.
+        try:
+            from datetime import datetime, timezone
+
+            await runs_service.register(
+                experiment_id=experiment_id,
+                title=final_title,
+                slug=final_slug,
+                bot_level=effective_bot_level,
+                started_at=datetime.now(timezone.utc),
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("training_runs register failed for %s", experiment_id)
         logger.info(
-            "Training started: experiment=%s bot_level=%d",
-            experiment_id, effective_bot_level,
+            "Training started: experiment=%s bot_level=%d title=%s",
+            experiment_id, effective_bot_level, final_title,
         )
         await _emit_status(ws, manager, {
             "type": "training:status",
-            "payload": {"state": "running", "experiment_id": experiment_id},
+            "payload": {
+                "state": "running",
+                "experiment_id": experiment_id,
+                "title": final_title,
+            },
         })
 
     elif msg.type == "training:stop":
@@ -386,6 +428,10 @@ async def results_push_loop(
                 # never learned the field are treated as demo — matches
                 # pre-A2 behavior since only the demo saved games.
                 env_id=data.get("env_id"),
+                # Denormalised title snapshot (BE-T1) — empty string
+                # from legacy pre-title producers is stored as None so
+                # pydantic/serde consumers can render "-" cleanly.
+                title=data.get("title") or None,
             )
         except Exception as e:
             logger.exception("Invalid game result payload, routing to dead-letter")

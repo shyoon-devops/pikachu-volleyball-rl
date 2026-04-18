@@ -19,6 +19,8 @@ class TrainingServiceWrapper:
         bot_level: int = 1,
         total_timesteps: int = 2_000_000,
         n_envs: int = 8,
+        title: str = "",
+        slug: str = "",
     ) -> str:
         """Start a new training run.
 
@@ -26,12 +28,19 @@ class TrainingServiceWrapper:
         ``hyperparams``) because it drives ``make_vec_env`` — not the
         PPO constructor — and defaults to the manager's 8-env baseline
         when the caller does not specify.
+
+        ``title`` and ``slug`` are allocated by the WS handler layer
+        via ``title_service.allocate_title`` + ``slugify``; forwarding
+        them here keeps the manager the single owner of the run's
+        identity fields.
         """
         return await self.manager.start(
             hyperparams=hyperparams,
             bot_level=bot_level,
             total_timesteps=total_timesteps,
             n_envs=n_envs,
+            title=title,
+            slug=slug,
         )
 
     async def stop(self, *, force: bool = True) -> dict[str, Any]:
@@ -89,6 +98,10 @@ class TrainingServiceWrapper:
             "experiment_id": self.manager._experiment_id or None,
             "bot_level": self.manager._bot_level,
             "started_at": started_at.isoformat() if started_at else None,
+            # Title surfaced here so the dashboard header + breadcrumbs
+            # (spec §4) can render on /api/training/status alone, no
+            # separate fetch. Empty string when no run has started yet.
+            "title": getattr(self.manager, "_title", "") or "",
         }
 
     def last_frame(self) -> dict[str, Any] | None:

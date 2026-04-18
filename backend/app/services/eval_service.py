@@ -47,6 +47,7 @@ class EvalServiceWrapper:
         n_games: int = 50,
         *,
         progress_callback: Callable[[int, int], None] | None = None,
+        training_title: str | None = None,
     ) -> dict[str, Any]:
         """Run a full evaluation and persist the aggregated record.
 
@@ -55,6 +56,10 @@ class EvalServiceWrapper:
         loop). The caller is responsible for marshaling back to the loop
         if it needs to touch async-only state — the async job registry
         uses ``asyncio.run_coroutine_threadsafe`` for exactly this.
+
+        ``training_title`` is the human title of the source training run
+        (BE-T1). Stored as a denormalised snapshot on the saved record
+        so later renames don't retroactively rewrite evaluation history.
         """
         full_path = self.validate_model_path(model_path)
 
@@ -72,6 +77,7 @@ class EvalServiceWrapper:
             win_rate=result.win_rate,
             avg_score=result.avg_score,
             avg_rally_length=result.avg_rally_length,
+            training_title=training_title or None,
         )
         doc = record.model_dump(by_alias=True, exclude_none=True)
         await with_mongo_retry(
