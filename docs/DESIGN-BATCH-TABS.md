@@ -4,18 +4,20 @@ Show `n_envs` (default 8, range 1–16) concurrent training envs; user picks one
 
 ## 1. Layout
 
-- **Placement**: directly beneath `GameCanvas` (canvas aspect 432/304). Full-width row, same horizontal bounds as canvas container. Not a sidebar — maintains the arcade-framed focal point.
-- **Strip height**: 56 px desktop, 48 px tablet, 40 px mobile.
-- **Gap between tabs**: 8 px desktop, 6 px mobile. Outer padding 12 px horizontal / 8 px vertical.
-- **Dynamic count**: CSS grid `repeat(var(--n-envs), minmax(0, 1fr))` ≤ 8 envs; ≥ 9 switch to horizontal scroll strip with snap (see §5).
-- **Container**: same card surface as dashboard (`--color-bg-card`, `--color-border`, 12 px radius).
+- **Placement**: directly beneath `GameCanvas` (canvas aspect 432/304). Full-width block, same horizontal bounds as canvas container. Not a sidebar — maintains the arcade-framed focal point.
+- **Wrap layout** (revised): `display: flex; flex-wrap: wrap; justify-content: flex-start`. No horizontal scroll. Rows grow downward as `n_envs` increases.
+- **Max tabs per row**: 4 desktop (≥1024 px) → 3 tablet (≥768 px) → 2 mobile (<768 px). Achieved via `flex-basis: calc((100% - (cols - 1) * gap) / cols)` per breakpoint.
+- **Row height (single row)**: 56 px desktop, 48 px tablet, 40 px mobile. Multi-row keeps same per-chip height; row gap 8 px.
+- **Gap between tabs (column)**: 8 px desktop, 6 px mobile. Outer padding 12 px horizontal / 10 px vertical.
+- **Container**: same card surface as dashboard (`--color-bg-card`, `--color-border`, 12 px radius). No `max-height` / no scroll — card grows with content.
 
 ## 2. Tab visual
 
-Each tab is a 2-row chip (`min-width: 72 px`):
+Each tab is a 2-row chip (`min-width: 72 px`, fixed — chip never shrinks below this even inside flex):
 
 - Row 1: `ENV 0` … `ENV 7` (mono 11px, `--color-text-secondary`, letter-spacing 0.08em).
-- Row 2: live score `12 : 8` (mono 14px semibold, `--color-text-primary`). Updates from WS `training:env_state` @ ≤10 Hz.
+- Row 2: live score. **Width-stable rules**: `font-variant-numeric: tabular-nums`, `white-space: nowrap`, `overflow: hidden`, `text-overflow: ellipsis`. Digits don't re-layout when scores tick 9→10 etc. Updates from WS `training:env_state` @ ≤10 Hz.
+- **Score format**: `NN : NN`, two-digit max per side (baseline cap `15:15` — game end at 15). If a side ever exceeds 99 (shouldn't happen), ellipsis clips; fallback compact form `99+:99+` for theoretical overruns.
 - Right-edge status dot (8×8, 4 px margin):
   - in-progress → `--color-warning` (#fbbf24), soft pulse 1.2 s
   - win (just scored point) → `--color-success` flash 400 ms then return to warning
@@ -35,11 +37,13 @@ Each tab is a 2-row chip (`min-width: 72 px`):
 - Reuses existing tokens — **no new palette**. Warning/Success/Danger for state dot; Pikachu-yellow accent for active; chart-purple (`#a855f7`) reserved as "recently switched-to" subtle halo (600 ms fade) so user tracks their own click.
 - Dark-theme only (project baseline). Contrast: score text ≥ 7:1 on card.
 
-## 5. Responsive
+## 5. Responsive (wrap grid)
 
-- ≥1024 px: 8 tabs fit evenly across ~520 px canvas width. 16 envs would be 32 px per tab = too narrow → overflow-x scroll with snap and right-edge fade mask.
-- 768 px: 8 tabs still fit (tab min-width drops to 60 px, hide row 1 letters, keep numeric `0..7`).
-- ≤375 px mobile: horizontal scroll strip, 56 px per tab, snap-mandatory, edge-fade; active tab auto-scrolls into view on ← / → or programmatic switch.
+- ≥1024 px (desktop): **4 per row**. 8 envs → 2 rows; 16 envs → 4 rows. Chip flex-basis `calc((100% - 3*8px) / 4)`.
+- ≥768 px (tablet): **3 per row**. 8 envs → 3 rows (last row has 2 left-aligned); chip basis `calc((100% - 2*8px) / 3)`.
+- <768 px (mobile, incl. 375 px): **2 per row**, chip basis `calc((100% - 6px) / 2)`, min-width honored at 72 px (wraps sooner if container narrower). Row gap 6 px.
+- **Alignment**: `justify-content: flex-start` so trailing partial row is left-aligned (no stretched-odd-chip artifact). `align-items: stretch` keeps all rows equal height.
+- **No scroll, no snap**: vertical growth only. Active tab never needs auto-scroll — always visible.
 
 ## 6. History page extensions
 
