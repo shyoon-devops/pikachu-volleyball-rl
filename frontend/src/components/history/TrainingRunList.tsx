@@ -85,7 +85,10 @@ export function TrainingRunList() {
   const filteredRuns = useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase()
     if (q === '') return runs
-    return runs.filter(r => r.title.toLowerCase().includes(q))
+    // FC-R7A null-safety: a runs-aggregate row with `title: null`
+    // would crash `r.title.toLowerCase()`. Treat null/missing as
+    // the empty string so the search gracefully excludes them.
+    return runs.filter(r => (r.title ?? '').toLowerCase().includes(q))
   }, [runs, debouncedQuery])
 
   const hasQuery = debouncedQuery.trim() !== ''
@@ -163,53 +166,66 @@ interface RunRowProps {
 }
 
 function RunRow({ run, query }: RunRowProps) {
+  // FC-R7A null-safety: every scalar falls back to a safe value
+  // before any method access. BE sends `null` for untitled legacy
+  // records + empty aggregates; a null `title.toLowerCase()` or
+  // `totalGames.toLocaleString()` crashes the whole table otherwise.
+  const safeTitle = run.title && run.title.trim() !== '' ? run.title : 'untitled'
+  const safeTotalGames = run.totalGames ?? 0
+  const safeWinRate = Number.isFinite(run.winRate) ? run.winRate : 0
+  const safeAvgRally = Number.isFinite(run.avgRallyLength) ? run.avgRallyLength : 0
   return (
     <tr className="training-run-list-row">
       <td className="training-run-list-cell-title">
         <Link
-          to={`/history/${encodeURIComponent(run.title)}`}
+          to={`/history/${encodeURIComponent(safeTitle)}`}
           className="training-run-list-title-link"
         >
-          <HighlightedText text={run.title} query={query} />
+          <HighlightedText text={safeTitle} query={query} />
         </Link>
       </td>
       <td className="training-run-list-cell-started">
         {run.startedAt ? formatKstDateTime(run.startedAt) : '—'}
       </td>
       <td>
-        <StatusChip status={run.status} />
+        <StatusChip status={run.status ?? 'done'} />
       </td>
       <td className="training-run-list-cell-numeric">
-        {run.totalGames.toLocaleString()}
+        {safeTotalGames.toLocaleString()}
       </td>
       <td className="training-run-list-cell-numeric">
-        <WinRateBar rate={run.winRate} />
+        <WinRateBar rate={safeWinRate} />
       </td>
       <td className="training-run-list-cell-numeric">
-        {run.avgRallyLength.toFixed(1)}
+        {safeAvgRally.toFixed(1)}
       </td>
     </tr>
   )
 }
 
 function RunCard({ run, query }: RunRowProps) {
+  // Same null-safety as RunRow — mobile card stack reuses the
+  // same fallback rules.
+  const safeTitle = run.title && run.title.trim() !== '' ? run.title : 'untitled'
+  const safeTotalGames = run.totalGames ?? 0
+  const safeWinRate = Number.isFinite(run.winRate) ? run.winRate : 0
   return (
     <Link
-      to={`/history/${encodeURIComponent(run.title)}`}
+      to={`/history/${encodeURIComponent(safeTitle)}`}
       className="training-run-card card"
     >
       <div className="training-run-card-row-1">
         <span className="training-run-card-title">
-          <HighlightedText text={run.title} query={query} />
+          <HighlightedText text={safeTitle} query={query} />
         </span>
-        <StatusChip status={run.status} />
+        <StatusChip status={run.status ?? 'done'} />
       </div>
       <div className="training-run-card-row-2 text-muted">
         <span>{run.startedAt ? formatKstDateTime(run.startedAt) : '—'}</span>
-        <span> · {run.totalGames.toLocaleString()} games</span>
+        <span> · {safeTotalGames.toLocaleString()} games</span>
       </div>
       <div className="training-run-card-row-3">
-        <WinRateBar rate={run.winRate} />
+        <WinRateBar rate={safeWinRate} />
       </div>
     </Link>
   )
@@ -255,10 +271,12 @@ function WinRateBar({ rate }: { rate: number }) {
  * returns non-matching slices as unmatched text.
  */
 function HighlightedText({ text, query }: { text: string; query: string }) {
+  // FC-R7A: guard against callers that haven't yet filtered nulls.
+  const safeText = text ?? ''
   const q = query.trim()
-  if (q === '') return <>{text}</>
+  if (q === '') return <>{safeText}</>
   const regex = new RegExp(`(${escapeRegExp(q)})`, 'ig')
-  const parts = text.split(regex)
+  const parts = safeText.split(regex)
   return (
     <>
       {parts.map((part, idx) =>

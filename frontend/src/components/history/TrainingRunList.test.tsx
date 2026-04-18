@@ -172,4 +172,37 @@ describe('TrainingRunList (FC-R6H level-1)', () => {
       expect(screen.getByRole('alert')).toHaveTextContent(/runs endpoint down/)
     })
   })
+
+  // FC-R7A regression guard: qa-observed crash where runs
+  // aggregate returned rows with null fields (title / numeric /
+  // status) — rendering must not throw.
+  it('renders a row whose every nullable field is null/zero without crashing', async () => {
+    getTrainingRuns.mockResolvedValueOnce(
+      page([
+        {
+          title: null as unknown as string,
+          experimentId: null,
+          startedAt: null,
+          endedAt: null,
+          totalGames: null as unknown as number,
+          winRate: Number.NaN,
+          avgRallyLength: null as unknown as number,
+          status: null as unknown as string,
+        },
+      ]),
+    )
+    render(
+      <MemoryRouter>
+        <TrainingRunList />
+      </MemoryRouter>,
+    )
+    // Title falls back to "untitled"; numeric cells fall back to 0.
+    await waitFor(() => {
+      expect(screen.getAllByRole('link', { name: /untitled/ }).length).toBeGreaterThan(0)
+    })
+    // No error banner.
+    expect(screen.queryByRole('alert')).toBeNull()
+    // Status chip defaults to "Finished" when BE status is null.
+    expect(screen.getAllByText('Finished').length).toBeGreaterThan(0)
+  })
 })
