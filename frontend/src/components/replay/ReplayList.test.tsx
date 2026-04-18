@@ -10,12 +10,12 @@ import type { GameRecord, ReplayInfo } from '../../lib/types'
 // on the same row.
 
 const getGames = vi.fn<
-  (page: number, limit: number) => Promise<{ data: GameRecord[]; total: number; page: number; limit: number }>
+  (page: number, limit: number, title?: string) => Promise<{ data: GameRecord[]; total: number; page: number; limit: number }>
 >()
 const getAvailableReplays = vi.fn<() => Promise<ReplayInfo[]>>()
 
 vi.mock('../../lib/api', () => ({
-  getGames: (page: number, limit: number) => getGames(page, limit),
+  getGames: (page: number, limit: number, title?: string) => getGames(page, limit, title),
   getAvailableReplays: () => getAvailableReplays(),
 }))
 
@@ -462,6 +462,68 @@ describe('ReplayList — episode column (FC-R2, 2026-04-18)', () => {
       // At least one em-dash (from Episode + maybe other missing fields).
       const dashes = screen.getAllByText('—')
       expect(dashes.length).toBeGreaterThanOrEqual(1)
+    })
+  })
+})
+
+describe('ReplayList — titleFilter prop (FC-R6H level-2 reuse)', () => {
+  it('forwards titleFilter into getGames so BE filters server-side', async () => {
+    getGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 20 })
+    getAvailableReplays.mockResolvedValueOnce([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList titleFilter="my-run" />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(getGames).toHaveBeenCalled()
+    })
+    // Third arg is the title filter.
+    expect(getGames.mock.calls[0][2]).toBe('my-run')
+  })
+
+  it('hides the Title column when hideTitleColumn is true', async () => {
+    getGames.mockResolvedValueOnce({
+      data: [gameRow({ title: 'my-run', envId: '0' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValueOnce([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList titleFilter="my-run" hideTitleColumn />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Env 0')).toBeInTheDocument()
+    })
+    // "Title" header is NOT rendered in this mode.
+    expect(screen.queryByRole('columnheader', { name: 'Title' })).toBeNull()
+  })
+
+  it('uses the emptyStateOverride message when no games are found', async () => {
+    getGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 20 })
+    getAvailableReplays.mockResolvedValueOnce([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList
+          titleFilter="empty-run"
+          hideTitleColumn
+          emptyStateOverride="이 학습에는 아직 기록된 게임이 없습니다."
+        />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('이 학습에는 아직 기록된 게임이 없습니다.'),
+      ).toBeInTheDocument()
     })
   })
 })

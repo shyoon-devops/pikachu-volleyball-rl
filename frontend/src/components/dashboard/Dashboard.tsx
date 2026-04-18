@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { BatchTabBar } from '../game/BatchTabBar'
@@ -374,7 +375,18 @@ export function Dashboard() {
                         className="recent-games-title-cell"
                         title={g.title ?? undefined}
                       >
-                        {g.title && g.title.trim() !== '' ? g.title : '—'}
+                        {g.title && g.title.trim() !== '' ? (
+                          // R6H spec §0: Recent Games rows deep-link
+                          // to the level-2 drill-down for their run.
+                          <Link
+                            to={`/history/${encodeURIComponent(g.title)}`}
+                            className="recent-games-title-link"
+                          >
+                            {g.title}
+                          </Link>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td>
                         <span

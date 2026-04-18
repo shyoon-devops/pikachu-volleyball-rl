@@ -68,7 +68,34 @@ function parseEnvParam(raw: string | null): string | null {
  * banner only appears for a games-fetch failure, since that's the
  * only data the table can't render around.
  */
-export function ReplayList() {
+export interface ReplayListProps {
+  /**
+   * Scope the page to a single training run (R6H, spec §2). When
+   * set, the component fetches `getGames(page, limit, titleFilter)`
+   * so BE filters server-side. Mostly used by
+   * `TrainingRunDetail` — when omitted the component behaves as
+   * the legacy unified history list.
+   */
+  titleFilter?: string
+  /**
+   * Hide the Title column (R6H, §2b — redundant once the scope is
+   * already a single run). Defaults to false (unfiltered list
+   * keeps the column).
+   */
+  hideTitleColumn?: boolean
+  /**
+   * Override the "no games" empty-state message. Level-2 uses
+   * "이 학습에는 아직 기록된 게임이 없습니다." per §2c; unfiltered
+   * view keeps the generic "No games recorded yet." default.
+   */
+  emptyStateOverride?: string
+}
+
+export function ReplayList({
+  titleFilter,
+  hideTitleColumn = false,
+  emptyStateOverride,
+}: ReplayListProps = {}) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [games, setGames] = useState<GameRecord[]>([])
@@ -106,7 +133,10 @@ export function ReplayList() {
     // `.catch(() => [])` on the replays call lets games still render
     // when the filesystem inventory endpoint hiccups.
     Promise.all([
-      getGames(page, PAGE_LIMIT),
+      // R6H: `titleFilter` forwards to BE `GET /api/games?title=X`
+      // (T5 fc38f3d8). When omitted the endpoint returns the
+      // unified list.
+      getGames(page, PAGE_LIMIT, titleFilter),
       getAvailableReplays().catch(() => [] as ReplayInfo[]),
     ])
       .then(([gamesRes, replaysRes]) => {
@@ -124,7 +154,7 @@ export function ReplayList() {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [page])
+  }, [page, titleFilter])
 
   /**
    * Build a `Map<gameId, ReplayInfo>` once per replays change so the
@@ -186,6 +216,9 @@ export function ReplayList() {
     [games],
   )
 
+  /** Column count — shrinks by 1 when the Title column is hidden. */
+  const columnCount = hideTitleColumn ? 11 : 12
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT))
 
   const changePage = (next: number) => {
@@ -238,9 +271,11 @@ export function ReplayList() {
             <tr>
               {([
                 ['Date'],
-                // FC-R6G: same Title column as the Dashboard's
-                // Recent Games. Ellipsis + tooltip on overflow.
-                ['Title'],
+                // FC-R6G: Title column (Dashboard's Recent Games
+                // mirror). Redundant in level-2 drill-down where
+                // the page is already scoped to one run — hidden
+                // there via the `hideTitleColumn` prop (R6H §2b).
+                ...(hideTitleColumn ? [] : [['Title'] as [string]]),
                 ['Env'],
                 // FC-R6D: em-dash values are BE-WAITING — GameRecord
                 // has no `episode` field yet. Tooltip explains to
@@ -262,14 +297,14 @@ export function ReplayList() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={12} className="replay-list-empty">Loading...</td>
+                <td colSpan={columnCount} className="replay-list-empty">Loading...</td>
               </tr>
             ) : filteredGames.length === 0 ? (
               <tr>
-                <td colSpan={12} className="replay-list-empty empty-state">
-                  {envFilter === null
-                    ? 'No games recorded yet.'
-                    : `No games match env_id=${envFilter} on this page.`}
+                <td colSpan={columnCount} className="replay-list-empty empty-state">
+                  {envFilter !== null
+                    ? `No games match env_id=${envFilter} on this page.`
+                    : emptyStateOverride ?? 'No games recorded yet.'}
                 </td>
               </tr>
             ) : (
@@ -293,12 +328,14 @@ export function ReplayList() {
                     <td>
                       {formatKstDateTime(g.timestamp)}
                     </td>
-                    <td
-                      className="replay-list-title-cell"
-                      title={g.title ?? undefined}
-                    >
-                      {g.title && g.title.trim() !== '' ? g.title : '—'}
-                    </td>
+                    {hideTitleColumn ? null : (
+                      <td
+                        className="replay-list-title-cell"
+                        title={g.title ?? undefined}
+                      >
+                        {g.title && g.title.trim() !== '' ? g.title : '—'}
+                      </td>
+                    )}
                     <td>
                       <span
                         className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}

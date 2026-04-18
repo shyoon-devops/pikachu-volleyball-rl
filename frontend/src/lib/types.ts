@@ -273,6 +273,25 @@ export interface GameRecord {
   episode?: number
 }
 
+/**
+ * Per-title training run summary from `GET /api/training/runs`
+ * (BE T4, commit fc38f3d8). Powers the history page's level-1
+ * drill-down list.
+ */
+export interface TrainingRun {
+  title: string
+  experimentId: string | null
+  startedAt: string | null
+  endedAt: string | null
+  totalGames: number
+  winRate: number
+  avgRallyLength: number
+  /** BE emits "running" when the live training manager's current
+   *  title matches this row; "done" otherwise. Legacy records with
+   *  no status default to "done". */
+  status: 'running' | 'done' | string
+}
+
 export interface EvalResult {
   modelPath: string
   botLevel: number

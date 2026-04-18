@@ -8,6 +8,7 @@ import type {
   TimeseriesPoint,
   TrainingMetrics,
   TrainingStatus,
+  TrainingRun,
 } from './types'
 
 /**
@@ -65,8 +66,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export async function getGames(page = 1, limit = 20): Promise<PaginatedResponse<GameRecord>> {
-  const raw = await request<{ data: unknown[]; total: number; page: number; limit: number }>(`/api/games?page=${page}&limit=${limit}`)
+/**
+ * List games. `title` filter (BE T5, commit fc38f3d8) restricts to a
+ * single training run. Pass `"untitled"` to hit the BE's stable
+ * bucket for legacy rows without a title.
+ */
+export async function getGames(
+  page = 1,
+  limit = 20,
+  title?: string,
+): Promise<PaginatedResponse<GameRecord>> {
+  const qs = new URLSearchParams({ page: String(page), limit: String(limit) })
+  if (title !== undefined && title !== '') qs.set('title', title)
+  const raw = await request<{ data: unknown[]; total: number; page: number; limit: number }>(
+    `/api/games?${qs.toString()}`,
+  )
   return {
     data: snakeToCamel<GameRecord[]>(raw.data),
     total: raw.total,
@@ -172,6 +186,29 @@ export interface TrainingTitleInfo {
  * (BE max 500). Returns `[]` when the training_runs collection is
  * uninitialized (BE degrades gracefully to empty rather than 503).
  */
+/**
+ * Paginated per-title training-run aggregates (BE T4, fc38f3d8).
+ * Powers the `/history` drill-down level-1 list. BE sorts desc by
+ * `started_at`; FE keeps that order.
+ */
+export async function getTrainingRuns(
+  page = 1,
+  limit = 20,
+): Promise<PaginatedResponse<TrainingRun>> {
+  const raw = await request<{
+    data: unknown[]
+    total: number
+    page: number
+    limit: number
+  }>(`/api/training/runs?page=${page}&limit=${limit}`)
+  return {
+    data: snakeToCamel<TrainingRun[]>(raw.data),
+    total: raw.total,
+    page: raw.page,
+    limit: raw.limit,
+  }
+}
+
 export async function getTrainingTitles(
   q?: string,
   limit = 100,
