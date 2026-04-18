@@ -71,7 +71,17 @@ class EvaluationRecord(BaseModel):
     # (spec §5). Stored here rather than joined so a later title rename
     # doesn't retroactively rewrite historical evaluation rows. None
     # for evals of legacy pre-title models.
+    #
+    # ``training_title`` is the legacy field name (BE-T1). ``title``
+    # (BE-T11) mirrors the name FE actually filters on — both fields
+    # are populated when either is supplied, so the API response shape
+    # is stable for readers that key off either name.
     training_title: str | None = Field(default=None, max_length=60)
+    title: str | None = Field(default=None, max_length=60)
+    # UUID of the source training run (BE-T11). Lets FE cross-reference
+    # /api/training/runs without parsing model_path. None for evals of
+    # ad-hoc uploaded models that weren't produced by a tracked run.
+    experiment_id: str | None = Field(default=None)
 
     model_config = {"populate_by_name": True, "protected_namespaces": ()}
 

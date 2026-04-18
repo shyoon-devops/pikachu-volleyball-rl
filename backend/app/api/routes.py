@@ -1056,11 +1056,86 @@ class EvalRunRequest(BaseModel):
     n_games: int = Field(default=50, ge=1, le=500)
 
 
+def _experiment_id_from_model_path(model_path: str) -> str | None:
+    """Extract the experiment_id from a model_path (BE-T11).
+
+    ``model_path`` is served as ``{experiment_id}/{slug}__{exp8}__{step}.zip``
+    per the T2 checkpoint layout. The first path segment IS the
+    experiment_id. Returns ``None`` when the path doesn't match this
+    shape (ad-hoc uploads, legacy flat layouts) so the caller can
+    degrade gracefully to a title-less record.
+    """
+    if not model_path:
+        return None
+    # Normalise back-slashes that might slip in from a Windows client.
+    rel = model_path.replace("\\", "/")
+    # Strip optional leading ./ and any ``models/`` prefix — the FE may
+    # send either form depending on which endpoint it first hit.
+    rel = rel.removeprefix("./")
+    if rel.startswith("models/"):
+        rel = rel.split("models/", 1)[1]
+    head, _, _ = rel.partition("/")
+    if not head or "." in head:
+        # Flat layout like ``final.zip`` — no experiment_id to extract.
+        return None
+    return head
+
+
+async def _resolve_training_identity(
+    request: Any, model_path: str
+) -> tuple[str | None, str | None]:
+    """Return ``(title, experiment_id)`` for a model path (BE-T11).
+
+    Used by the evaluation job to denormalise training identity onto
+    the saved eval record. Resolution order:
+
+      1. Extract ``experiment_id`` from the path's first segment.
+      2. If the live TrainingManager is running that experiment, read
+         its ``title`` directly (fastest + handles the in-flight case).
+      3. Otherwise look the title up in the ``training_runs``
+         collection via ``TrainingRunsService.get_by_experiment_ids``.
+      4. Any step missing → ``(None, None)`` so the record is simply
+         title-less.
+    """
+    exp_id = _experiment_id_from_model_path(model_path)
+    if exp_id is None:
+        return None, None
+
+    # Live-training fast-path.
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is not None:
+        try:
+            status = training_service.status()
+            if (
+                status.get("experiment_id") == exp_id
+                and (status.get("title") or "")
+            ):
+                return status["title"], exp_id
+        except Exception:  # noqa: BLE001 — defensive; fall through to db
+            logger.debug("training_service.status() threw during eval job setup")
+
+    # Persisted lookup for stopped runs.
+    runs_service = getattr(request.app.state, "training_runs_service", None)
+    if runs_service is None:
+        return None, exp_id
+    try:
+        lookup = await runs_service.get_by_experiment_ids([exp_id])
+    except Exception:  # noqa: BLE001
+        logger.exception("training_runs lookup failed for exp=%s", exp_id)
+        return None, exp_id
+    doc = lookup.get(exp_id)
+    if doc is None:
+        return None, exp_id
+    return (doc.get("title") or None), exp_id
+
+
 async def _run_evaluation_job(
     job_id: str,
     eval_service: Any,
     body: EvalRunRequest,
     loop: asyncio.AbstractEventLoop,
+    training_title: str | None = None,
+    experiment_id: str | None = None,
 ) -> None:
     """Background task body for a single evaluation.
 
@@ -1089,6 +1164,8 @@ async def _run_evaluation_job(
                 bot_level=body.bot_level,
                 n_games=body.n_games,
                 progress_callback=_on_progress,
+                training_title=training_title,
+                experiment_id=experiment_id,
             )
         except FileNotFoundError as e:
             logger.info("eval job %s: %s", job_id, e)
@@ -1137,17 +1214,29 @@ async def run_evaluation(request: Request, body: EvalRunRequest):
             logger.info("run_evaluation rejected: %s", e)
             raise HTTPException(status_code=404, detail=str(e))
 
+    # Resolve training identity SYNCHRONOUSLY before accepting the job
+    # (BE-T11): the POST returns 202 immediately, so the background
+    # task can't ask the event-loop to read request.app.state once the
+    # request context is gone.
+    training_title, experiment_id = await _resolve_training_identity(
+        request, body.model_path
+    )
+
     job_id = await _eval_jobs.create()
     loop = asyncio.get_running_loop()
     # Detach the task — we never await it; the response must return now
     # so nginx's upstream timeout does not eat the HTTP connection.
     asyncio.create_task(
-        _run_evaluation_job(job_id, eval_service, body, loop),
+        _run_evaluation_job(
+            job_id, eval_service, body, loop,
+            training_title=training_title,
+            experiment_id=experiment_id,
+        ),
         name=f"eval-job-{job_id}",
     )
     logger.info(
-        "eval job %s accepted model=%s bot_level=%d n_games=%d",
-        job_id, body.model_path, body.bot_level, body.n_games,
+        "eval job %s accepted model=%s bot_level=%d n_games=%d title=%s",
+        job_id, body.model_path, body.bot_level, body.n_games, training_title,
     )
     return {"job_id": job_id, "state": "pending"}
 

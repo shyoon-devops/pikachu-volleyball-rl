@@ -48,6 +48,7 @@ class EvalServiceWrapper:
         *,
         progress_callback: Callable[[int, int], None] | None = None,
         training_title: str | None = None,
+        experiment_id: str | None = None,
     ) -> dict[str, Any]:
         """Run a full evaluation and persist the aggregated record.
 
@@ -57,9 +58,11 @@ class EvalServiceWrapper:
         if it needs to touch async-only state — the async job registry
         uses ``asyncio.run_coroutine_threadsafe`` for exactly this.
 
-        ``training_title`` is the human title of the source training run
-        (BE-T1). Stored as a denormalised snapshot on the saved record
-        so later renames don't retroactively rewrite evaluation history.
+        ``training_title`` / ``experiment_id`` (BE-T11) are snapshots of
+        the source training run. Persisted on the saved record so the
+        FE can filter / cross-reference without joining against
+        ``training_runs`` at read time. Both are optional — ad-hoc
+        evaluations of uploaded models leave them None.
         """
         full_path = self.validate_model_path(model_path)
 
@@ -77,7 +80,12 @@ class EvalServiceWrapper:
             win_rate=result.win_rate,
             avg_score=result.avg_score,
             avg_rally_length=result.avg_rally_length,
+            # Both field names populated so API consumers keying off
+            # either one see the same value. Empty string → None so
+            # exclude_none drops the key rather than storing "".
             training_title=training_title or None,
+            title=training_title or None,
+            experiment_id=experiment_id or None,
         )
         doc = record.model_dump(by_alias=True, exclude_none=True)
         await with_mongo_retry(

@@ -131,6 +131,7 @@ class FakeEvalService:
         *,
         progress_callback=None,
         training_title=None,
+        experiment_id=None,
     ):
         if ".." in model_path or model_path.startswith("/"):
             raise FileNotFoundError(f"Invalid model path: {model_path}")
