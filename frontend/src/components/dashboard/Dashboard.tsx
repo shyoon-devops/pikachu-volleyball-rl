@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { BatchTabBar } from '../game/BatchTabBar'
+import { ErrorBoundary } from '../ErrorBoundary'
 import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
@@ -95,13 +96,19 @@ export function Dashboard() {
    * because the old code hardcoded the baseline.
    */
   const effectiveNEnvs = useMemo(() => {
-    const observed = Object.keys(envFrames)
+    // FC-R6C defensive: `envFrames` is always `{}` out of the hook
+    // but a future refactor could nullify it accidentally.
+    // `Object.keys(undefined)` throws — the only render-error trigger
+    // a user could plausibly hit on refresh before WS data lands.
+    const source = envFrames ?? {}
+    const observed = Object.keys(source)
       .map(Number)
       .filter(n => Number.isFinite(n) && n >= 0)
       .reduce((max, id) => Math.max(max, id + 1), 0)
-    const requested = Number.isFinite(params.n_envs) ? params.n_envs : DEFAULT_N_ENVS
+    const rawRequested = Number(params?.n_envs)
+    const requested = Number.isFinite(rawRequested) ? rawRequested : DEFAULT_N_ENVS
     return Math.max(1, Math.min(MAX_N_ENVS, Math.max(DEFAULT_N_ENVS, requested, observed)))
-  }, [envFrames, params.n_envs])
+  }, [envFrames, params])
 
   const score1 = displayFrame?.score1 ?? 0
   const score2 = displayFrame?.score2 ?? 0
@@ -150,7 +157,14 @@ export function Dashboard() {
    * here — the BE dispatcher carries `status.bot_level` forward.
    */
   const formInvalid = useMemo(
-    () => HYPERPARAM_SCHEMA.some(f => !validateHyperparam(f.key, params[f.key as HyperparamKey]).valid),
+    () =>
+      // FC-R6C defensive: coerce explicitly through `Number()` so a
+      // stale-state `params` object missing a freshly-added key
+      // (e.g. NaN → invalid) surfaces cleanly via the form's error
+      // UI instead of crashing the render.
+      HYPERPARAM_SCHEMA.some(
+        f => !validateHyperparam(f.key, Number(params?.[f.key as HyperparamKey])).valid,
+      ),
     [params],
   )
 
@@ -184,27 +198,39 @@ export function Dashboard() {
           onStart={handleStart}
         />
 
-        <div
-          className={`dashboard-game-wrapper${canvasFading ? ' batch-canvas-fading' : ''}`}
-          role="tabpanel"
-          aria-labelledby={`batch-tab-${activeEnvId}`}
-          aria-label={`Live game canvas — Env ${activeEnvId}`}
-        >
-          <GameCanvas gameState={displayFrame} />
-          <GameOverlay score1={score1} score2={score2} />
-          {!displayFrame && status.state === 'running' && (
-            <div className="dashboard-game-waiting" role="status" aria-live="polite">
-              Waiting for game frames...
-            </div>
-          )}
-        </div>
+        {/*
+          Local ErrorBoundary (FC-R6C, 2026-04-18): a refresh
+          before any WS frame lands occasionally threw inside the
+          canvas + batch-tab subtree ("Something unexpected..."
+          message users reported). Global ErrorBoundary blanked
+          the whole page; this local one contains any render
+          failure so the controls + metrics + recent-games
+          surfaces stay usable. The user can hit "Try again" on
+          the boundary to remount just the canvas.
+        */}
+        <ErrorBoundary>
+          <div
+            className={`dashboard-game-wrapper${canvasFading ? ' batch-canvas-fading' : ''}`}
+            role="tabpanel"
+            aria-labelledby={`batch-tab-${activeEnvId}`}
+            aria-label={`Live game canvas — Env ${activeEnvId}`}
+          >
+            <GameCanvas gameState={displayFrame} />
+            <GameOverlay score1={score1} score2={score2} />
+            {!displayFrame && status.state === 'running' && (
+              <div className="dashboard-game-waiting" role="status" aria-live="polite">
+                Waiting for game frames...
+              </div>
+            )}
+          </div>
 
-        <BatchTabBar
-          envFrames={envFrames}
-          nEnvs={effectiveNEnvs}
-          activeEnvId={activeEnvId}
-          onSelect={handleEnvSelect}
-        />
+          <BatchTabBar
+            envFrames={envFrames ?? {}}
+            nEnvs={effectiveNEnvs}
+            activeEnvId={activeEnvId}
+            onSelect={handleEnvSelect}
+          />
+        </ErrorBoundary>
 
         {isStopped && (
           <HyperparamForm
