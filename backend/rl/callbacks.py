@@ -403,39 +403,14 @@ class LiveFrameCallback(BaseCallback):
         state, frames, rally_count = self._play_demo_game(current_bot_level)
 
         game_id = str(uuid.uuid4())
-        # No "type" key — handlers.results_push_loop wraps the payload.
-        # bot_level and experiment_id MUST be present: the ws handler no
-        # longer coerces missing values to a silent L1 default (that was
-        # the root cause of every saved game appearing as L1 in
-        # /api/games regardless of the user's actual training level).
-        result = {
-            "game_id": game_id,
-            "experiment_id": current_experiment_id,
-            "bot_level": current_bot_level,
-            "score1": state.score1,
-            "score2": state.score2,
-            "winner": 1 if state.score1 >= MAX_SCORE else 2,
-            "duration_frames": state.frame,
-            # Net-crossing total over the whole match. The dashboard
-            # "Rallies" counter and the GameRecord doc both pull this
-            # field; the handler used to default to 0, which is why every
-            # game in /api/games showed 0 rallies.
-            "rally_count": rally_count,
-            # Tag this as the standalone demo so BE-A2 can distinguish
-            # demo results from parallel-env gradient games in /api/games.
-            "env_id": "demo",
-            # Title snapshot (BE-T1): denormalised so later renames
-            # don't orphan historical rows. Empty string for runs
-            # started before title support landed.
-            "title": current_title,
-            # Episode counter at demo-save time (BE-T6). Read off the
-            # manager (the same counter /api/training/status surfaces
-            # and MetricsCallback appends to). 0 when the manager isn't
-            # wired or is freshly started.
-            "episode": int(
-                getattr(self._manager, "current_episode", 0) or 0
-            ) if self._manager is not None else 0,
-        }
+        result = self._build_demo_result(
+            game_id=game_id,
+            state=state,
+            rally_count=rally_count,
+            current_bot_level=current_bot_level,
+            current_experiment_id=current_experiment_id,
+            current_title=current_title,
+        )
         _safe_enqueue(self.loop, self.results_queue, result)
 
         # Save replay
@@ -449,6 +424,49 @@ class LiveFrameCallback(BaseCallback):
     # replay persistence. Broadcast timing + addition order against the
     # pre-refactor monolith are load-bearing; the helpers preserve them.
     # ------------------------------------------------------------------
+    def _build_demo_result(
+        self,
+        *,
+        game_id: str,
+        state: Any,
+        rally_count: int,
+        current_bot_level: int,
+        current_experiment_id: str,
+        current_title: str,
+    ) -> dict[str, Any]:
+        """Build the demo game's result payload for ``results_queue``.
+
+        No "type" key — handlers.results_push_loop wraps the payload.
+        ``bot_level`` and ``experiment_id`` MUST be present: the ws
+        handler no longer coerces missing values to a silent L1 default
+        (that was the root cause of every saved game appearing as L1 in
+        /api/games regardless of the user's actual training level).
+
+        Denormalised snapshots carried on the record:
+          * ``env_id="demo"`` — distinguishes from parallel-env
+            gradient games saved by EnvResultCallback (BE-A2).
+          * ``title`` — prevents later title-rename from orphaning
+            historical rows (BE-T1).
+          * ``episode`` — read off the manager each save so FE's
+            Recent Games view can render the episode-in-run axis
+            without a separate fetch (BE-T6). 0 when no manager.
+        """
+        return {
+            "game_id": game_id,
+            "experiment_id": current_experiment_id,
+            "bot_level": current_bot_level,
+            "score1": state.score1,
+            "score2": state.score2,
+            "winner": 1 if state.score1 >= MAX_SCORE else 2,
+            "duration_frames": state.frame,
+            "rally_count": rally_count,
+            "env_id": "demo",
+            "title": current_title,
+            "episode": int(
+                getattr(self._manager, "current_episode", 0) or 0
+            ) if self._manager is not None else 0,
+        }
+
     def _play_demo_game(
         self, current_bot_level: int
     ) -> tuple[Any, list[dict[str, Any]], int]:
