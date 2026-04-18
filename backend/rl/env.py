@@ -434,11 +434,7 @@ class PikachuVolleyballEnv(gymnasium.Env):
         reward += self._offensive_pressure_reward(state)
 
         # --- AUX 6: ready position (defensive positioning) ---
-        if ball.x > NET_PILLAR_X and not state.is_round_over:
-            ready_x = NET_PILLAR_X * 0.5
-            dist_from_ready = abs(float(p1.x) - ready_x)
-            max_dist = NET_PILLAR_X * 0.5
-            reward += self._READY_REWARD * max(0.0, 1.0 - dist_from_ready / max_dist)
+        reward += self._ready_position_reward(state)
 
         return float(reward)
 
@@ -448,6 +444,24 @@ class PikachuVolleyballEnv(gymnasium.Env):
     # byte-identical to the pre-refactor monolith. Pure helpers (no state
     # mutation) are extracted first; mutation-carrying ones follow.
     # ------------------------------------------------------------------
+    def _ready_position_reward(self, state: Any) -> float:
+        """Defensive positioning bonus: stand near center while the ball
+        is on the opponent's side. Pure — no state mutation.
+
+        Ready-x is half the court (``NET_PILLAR_X * 0.5``); the reward
+        decays linearly from full at ready-x to zero at either wall.
+        ``max(0.0, ...)`` guards against the (impossible under clamp)
+        case of ``dist_from_ready > max_dist``.
+        """
+        ball = state.ball
+        p1 = state.player1
+        if ball.x > NET_PILLAR_X and not state.is_round_over:
+            ready_x = NET_PILLAR_X * 0.5
+            dist_from_ready = abs(float(p1.x) - ready_x)
+            max_dist = NET_PILLAR_X * 0.5
+            return self._READY_REWARD * max(0.0, 1.0 - dist_from_ready / max_dist)
+        return 0.0
+
     def _offensive_pressure_reward(self, state: Any) -> float:
         """Distance-weighted bonus when the ball is over the opponent's
         half, above the net, and still moving forward. Pure — no state
