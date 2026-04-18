@@ -1,5 +1,5 @@
 import { memo, useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getGames, getAvailableReplays } from '../../lib/api'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { GameRecord, ReplayInfo } from '../../lib/types'
@@ -138,6 +138,7 @@ export function ReplayList({
   emptyStateOverride,
 }: ReplayListProps = {}) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   // FC-R7B live-history: bumps on each ws `game:result`; added to the
   // fetch effect's deps so the table pulls fresh `/api/games` data as
@@ -370,7 +371,15 @@ export function ReplayList({
                     game={g}
                     replay={replay}
                     hideTitleColumn={hideTitleColumn}
-                    onWatch={() => navigate(`/replay/${joinKey}`)}
+                    onWatch={() => {
+                      // FC-R7J: preserve the current path+query so the
+                      // replay player's Back button can return to the
+                      // right drill-down (e.g. /history/my-run) instead
+                      // of the top-level /history.
+                      navigate(`/replay/${joinKey}`, {
+                        state: { from: `${location.pathname}${location.search}` },
+                      })
+                    }}
                   />
                 )
               })
