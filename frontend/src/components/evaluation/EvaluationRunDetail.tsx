@@ -32,6 +32,9 @@ import './EvaluationRunDetail.css'
  *  badge live without flooding the BE. */
 const EVAL_POLL_INTERVAL_MS = 2000
 
+/** FC-R7I checkpoint poll — BE `save_interval` is 10k PPO steps. */
+const CHECKPOINT_POLL_INTERVAL_MS = 10000
+
 /** sessionStorage scope — survives tab navigation in the same tab. */
 const ACTIVE_EVAL_JOB_KEY = 'eval:active_job_id'
 
@@ -147,6 +150,22 @@ export function EvaluationRunDetail() {
     })
     return () => { cancelled = true }
   }, [fetchModels])
+
+  // FC-R7I: poll /api/models while this training run is active so
+  // newly-saved checkpoints show up without a manual refresh. BE
+  // writes a new file every `save_interval` PPO steps (10,000 by
+  // default per T2 filename spec), so 10 s polling lands checkpoints
+  // within one cadence. When the run transitions away from running /
+  // paused the interval tears down on the next effect cycle.
+  //
+  // [BE-WAITING] Once BE emits a `model_saved` ws event (T10), this
+  // poll can be replaced with a hook subscription. The current cost
+  // is one GET per 10 s per open drill-down — cheap.
+  useEffect(() => {
+    if (!isActiveRun) return
+    const id = setInterval(() => { void fetchModels() }, CHECKPOINT_POLL_INTERVAL_MS)
+    return () => clearInterval(id)
+  }, [isActiveRun, fetchModels])
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
