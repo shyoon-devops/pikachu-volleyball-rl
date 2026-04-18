@@ -75,7 +75,7 @@ export function TrainingRunDetail() {
       */}
       <ErrorBoundary>
         <ReplayList titleFilter={decoded} hideTitleColumn emptyStateOverride={
-          `이 학습에는 아직 기록된 게임이 없습니다.`
+          `No games recorded for this training run yet.`
         } />
       </ErrorBoundary>
     </div>

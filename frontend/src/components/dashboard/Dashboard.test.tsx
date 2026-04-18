@@ -296,7 +296,7 @@ describe('Dashboard loading state', () => {
     renderDashboard()
     // No tabs rendered — placeholder surfaces instead.
     expect(screen.queryAllByRole('tab')).toHaveLength(0)
-    expect(screen.getByText(/활성 학습 없음/)).toBeInTheDocument()
+    expect(screen.getByText(/No active training/)).toBeInTheDocument()
   })
 
   it('shows exactly as many tabs as observed envFrames while running', () => {
@@ -338,6 +338,6 @@ describe('Dashboard loading state', () => {
     })
     renderDashboard()
     expect(screen.queryAllByRole('tab')).toHaveLength(0)
-    expect(screen.getByText(/학습 환경 정보 대기 중/)).toBeInTheDocument()
+    expect(screen.getByText(/Waiting for environment data/)).toBeInTheDocument()
   })
 })

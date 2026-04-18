@@ -228,11 +228,11 @@ export function TrainingRunList({
       <header className="training-run-list-header">
         <h2 className="training-run-list-title">{headerTitle}</h2>
         <label className="training-run-list-search">
-          <span className="sr-only">학습 제목 검색</span>
+          <span className="sr-only">Search training runs by title</span>
           <input
             type="search"
             className="training-run-list-search-input"
-            placeholder="제목 검색…"
+            placeholder="Search title…"
             value={searchInput}
             onChange={e => setSearchInput(e.target.value)}
             aria-label="Search training runs by title"
@@ -328,7 +328,7 @@ const RunRow = memo(function RunRow({ run, query, linkBase, evalMode = false, ch
   const titleCell = disabled ? (
     <span
       className="training-run-list-title-disabled"
-      title="저장된 모델 없음"
+      title="No saved checkpoints"
       aria-disabled="true"
     >
       <HighlightedText text={safeTitle} query={query} />
@@ -377,9 +377,9 @@ function CheckpointCountBadge({ count }: { count: number | null }) {
     <span
       className={`training-run-list-checkpoints training-run-list-checkpoints--${kind}`}
       aria-label={`${count} checkpoint${count === 1 ? '' : 's'}`}
-      title={count === 0 ? '저장된 모델 없음' : undefined}
+      title={count === 0 ? 'No saved checkpoints' : undefined}
     >
-      {`${count}개`}
+      {count}
     </span>
   )
 }
@@ -418,7 +418,7 @@ const RunCard = memo(function RunCard({ run, query, linkBase, evalMode = false, 
     return (
       <div
         className="training-run-card card training-run-card--disabled"
-        title="저장된 모델 없음"
+        title="No saved checkpoints"
         aria-disabled="true"
       >
         {cardInner}
@@ -507,18 +507,18 @@ function EmptyState({ query, onClear }: EmptyStateProps) {
   if (query !== null) {
     return (
       <div className="training-run-list-empty" role="status">
-        <p>{`'${query}' 검색 결과가 없습니다.`}</p>
+        <p>{`No results for '${query}'.`}</p>
         <button type="button" className="training-run-list-clear" onClick={onClear}>
-          검색 지우기
+          Clear search
         </button>
       </div>
     )
   }
   return (
     <div className="training-run-list-empty" role="status">
-      <p>학습 내역이 없습니다. 새 학습을 시작하면 여기에 나타납니다.</p>
+      <p>No training runs yet. Start a new one and it will appear here.</p>
       <Link to="/" className="training-run-list-cta btn btn-primary">
-        학습 시작
+        Start Training
       </Link>
     </div>
   )

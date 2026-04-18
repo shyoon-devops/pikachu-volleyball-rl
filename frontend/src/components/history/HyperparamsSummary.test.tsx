@@ -30,9 +30,9 @@ describe('HyperparamsSummary (FC-R8b)', () => {
     expect(screen.getByText('0.9950')).toBeInTheDocument() // gamma 4dp
   })
 
-  it('renders the BE-WAITING placeholder when hyperparams is null', () => {
+  it('renders the placeholder when hyperparams is null', () => {
     render(<HyperparamsSummary hyperparams={null} />)
-    expect(screen.getByText(/학습 파라미터 정보 준비 중/)).toBeInTheDocument()
+    expect(screen.getByText(/Hyperparameter data not available/)).toBeInTheDocument()
     // No dd values — the absent-data branch skips the grid entirely.
     expect(screen.queryByText('n_envs')).toBeNull()
   })
@@ -43,7 +43,55 @@ describe('HyperparamsSummary (FC-R8b)', () => {
         hyperparams={{ total_timesteps: Number.NaN, n_envs: undefined as unknown as number }}
       />,
     )
-    expect(screen.getByText(/학습 파라미터 정보 준비 중/)).toBeInTheDocument()
+    expect(screen.getByText(/Hyperparameter data not available/)).toBeInTheDocument()
+  })
+
+  // FC-R9a: the shared `snakeToCamel` transform in api.ts rewrites
+  // every response key to camelCase before it lands here. The bug
+  // this guards against: only `gamma` rendered because it has no
+  // underscore and survives the transform — every other knob
+  // showed `—` because the component looked up `total_timesteps`
+  // on an object that actually carried `totalTimesteps`.
+  it('reads camelCase keys from the wire payload (post snakeToCamel)', () => {
+    render(
+      <HyperparamsSummary
+        hyperparams={{
+          totalTimesteps: 1_000_000,
+          nEnvs: 4,
+          learningRate: 3e-4,
+          nSteps: 2048,
+          batchSize: 64,
+          nEpochs: 10,
+          gamma: 0.995,
+          clipRange: 0.2,
+          entCoef: 1e-2,
+          gaeLambda: 0.95,
+          // `as any` because TS Hyperparams uses snake_case but the
+          // runtime reality (after snakeToCamel) is camelCase.
+        } as unknown as Hyperparams}
+      />,
+    )
+    expect(screen.getByText('1,000,000')).toBeInTheDocument()
+    expect(screen.getByText('4')).toBeInTheDocument()
+    expect(screen.getByText('3.0e-4')).toBeInTheDocument()
+    expect(screen.getByText('0.9950')).toBeInTheDocument()
+    expect(screen.getByText('0.950')).toBeInTheDocument() // gae_lambda 3dp
+  })
+
+  // FC-R9a: `0` is a valid hyperparam (e.g. zero-entropy training);
+  // the truthy-check pattern `value && <Span>` would mis-render it
+  // as `—`. isPresent uses Number.isFinite which accepts 0 finite.
+  it('renders zero values (ent_coef = 0, not em-dash)', () => {
+    render(
+      <HyperparamsSummary
+        hyperparams={{ ent_coef: 0, n_envs: 1, total_timesteps: 0 }}
+      />,
+    )
+    // ent_coef formatted scientific: 0e+0
+    expect(screen.getByText('0.0e+0')).toBeInTheDocument()
+    // total_timesteps locale-formatted: "0"
+    const zeros = screen.getAllByText('0')
+    expect(zeros.length).toBeGreaterThan(0)
   })
 
   it('renders em-dash for missing fields when partial hyperparams arrive', () => {

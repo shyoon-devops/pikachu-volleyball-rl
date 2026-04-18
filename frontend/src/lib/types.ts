@@ -321,6 +321,14 @@ export interface EvalResult {
    * em-dash when absent.
    */
   timestamp?: string
+  /**
+   * Training run this eval belongs to (BE EvaluationRecord's
+   * `training_title`). Populated by BE when the eval was launched
+   * from the /runs drill-down; older results may omit it. The FE
+   * uses this to filter the Evaluation sub-tab's results history
+   * down to the current run.
+   */
+  trainingTitle?: string | null
 }
 
 /**

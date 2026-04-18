@@ -7,9 +7,9 @@ import './DeleteCheckpointsModal.css'
  * `DESIGN-BULK-DELETE.md §5`).
  *
  * Focus trap: we move focus to the Cancel button on open and restore
- * focus on close, per the spec's "initial focus on 취소" rule. `Esc`
+ * focus on close, per the spec's "initial focus on Cancel" rule. `Esc`
  * closes without committing. Commit is gated behind an explicit click
- * on `삭제` — no `Enter` shortcut (stray-key guard).
+ * on `Delete` — no `Enter` shortcut (stray-key guard).
  *
  * Latest-checkpoint warning surfaces in the body when the selection
  * includes the highest-step file the caller passed in via
@@ -59,7 +59,7 @@ export function DeleteCheckpointsModal({
 
   useEffect(() => {
     if (!open) return
-    // Initial focus lands on Cancel per spec §5 "취소 ghost (initial focus)".
+    // Initial focus lands on Cancel per spec §5 "Cancel ghost (initial focus)".
     cancelRef.current?.focus()
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -93,12 +93,12 @@ export function DeleteCheckpointsModal({
     >
       <div className="delete-modal-panel">
         <h2 id="delete-modal-title" className="delete-modal-title">
-          {`${count}개 파일을 영구 삭제합니다`}
+          {`Permanently delete ${count} file${count === 1 ? '' : 's'}`}
         </h2>
-        <p className="delete-modal-body text-muted">이 작업은 되돌릴 수 없습니다.</p>
+        <p className="delete-modal-body text-muted">This action cannot be undone.</p>
         {includingLatest && (
           <p className="delete-modal-warning" role="alert">
-            최신 체크포인트가 포함되어 있습니다. 이후 학습 재개 시 필요할 수 있습니다.
+            Selection includes the latest checkpoint. You may need it to resume training later.
           </p>
         )}
         <ul className="delete-modal-file-list">
@@ -123,7 +123,7 @@ export function DeleteCheckpointsModal({
             className="delete-modal-btn delete-modal-btn-ghost"
             disabled={inflight}
           >
-            취소
+            Cancel
           </button>
           <button
             type="button"
@@ -131,7 +131,7 @@ export function DeleteCheckpointsModal({
             className="delete-modal-btn delete-modal-btn-danger"
             disabled={inflight || count === 0}
           >
-            {inflight ? '삭제 중…' : '삭제'}
+            {inflight ? 'Deleting…' : 'Delete'}
           </button>
         </div>
       </div>

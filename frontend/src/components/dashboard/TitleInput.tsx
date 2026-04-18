@@ -13,8 +13,8 @@ import './TitleInput.css'
  * Validation:
  *   - empty / whitespace-only → treated as empty (auto-gen path,
  *     no error, submit allowed)
- *   - length > 60                  → `최대 60자` (block submit)
- *   - duplicate (user-typed match) → `이미 존재하는 제목` (block)
+ *   - length > 60                  → `Max 60 characters` (block submit)
+ *   - duplicate (user-typed match) → `Title already in use` (block)
  *
  * Debounced uniqueness check (300 ms) via the titles endpoint. The
  * FE compares case-insensitively against returned titles; if BE
@@ -131,8 +131,8 @@ export function TitleInput({
         id={fieldId}
         className={`title-input${state.kind === 'tooLong' || state.kind === 'duplicate' ? ' title-input--invalid' : ''}`}
         type="text"
-        maxLength={MAX_LEN + 40 /* slack over the hard cap so we can show "최대 60자" rather than silently truncate */}
-        placeholder="예: my-run-baseline"
+        maxLength={MAX_LEN + 40 /* slack over the hard cap so we can show "Max 60 characters" rather than silently truncate */}
+        placeholder="e.g. my-run-baseline"
         value={value}
         onChange={e => onChange(e.target.value)}
         disabled={disabled}
@@ -140,7 +140,7 @@ export function TitleInput({
         aria-invalid={state.kind === 'tooLong' || state.kind === 'duplicate'}
       />
       <p id={hintId} className="title-input-hint">
-        비워두면 자동으로 이름이 생성됩니다. 원하는 이름이 있다면 직접 입력.
+        Leave blank for an auto-generated name, or type your own.
       </p>
       {!isEmpty && (
         <span
@@ -158,15 +158,15 @@ export function TitleInput({
       )}
       {state.kind === 'tooLong' && (
         <span id={errorId} className="title-input-error" role="alert">
-          최대 60자
+          Max 60 characters
         </span>
       )}
       {state.kind === 'duplicate' && (
         <span id={errorId} className="title-input-error" role="alert">
-          이미 존재하는 제목
+          Title already in use
           {state.priorStartedAt && (
             <span className="title-input-error-sub">
-              {' · '}이전 실행: {new Date(state.priorStartedAt).toLocaleDateString('ko-KR')}
+              {' · '}previous run: {new Date(state.priorStartedAt).toLocaleDateString('en-US')}
             </span>
           )}
         </span>
