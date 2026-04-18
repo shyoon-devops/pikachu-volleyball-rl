@@ -5,7 +5,7 @@ import { GameOverlay } from '../game/GameOverlay'
 import { ReplayControls } from './ReplayControls'
 import { getReplay, getGames } from '../../lib/api'
 import { formatBotLevel, formatRallyCount } from '../../lib/formatGame'
-import { formatKstDateTime } from '../../lib/formatTime'
+import { TimestampText } from '../shared/TimestampText'
 import type { GameRecord, GameState } from '../../lib/types'
 import './ReplayPlayer.css'
 
@@ -283,7 +283,7 @@ export function ReplayPlayer() {
         {meta?.timestamp && (
           <div className="replay-player-meta-item">
             <dt>Recorded</dt>
-            <dd className="text-muted">{formatKstDateTime(meta.timestamp)}</dd>
+            <dd className="text-muted"><TimestampText ts={meta.timestamp} /></dd>
           </div>
         )}
         {meta?.experimentId && (

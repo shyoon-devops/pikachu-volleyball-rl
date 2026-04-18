@@ -1,6 +1,7 @@
 import { memo, useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { ScoreCell } from '../shared/ScoreCell'
+import { TimestampText } from '../shared/TimestampText'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { BatchTabBar } from '../game/BatchTabBar'
@@ -21,7 +22,6 @@ import {
   formatEnvId,
   formatEpisode,
 } from '../../lib/formatGame'
-import { formatKstDateTime } from '../../lib/formatTime'
 import {
   HYPERPARAM_SCHEMA,
   HYPERPARAM_WIRE_POSITION,
@@ -421,7 +421,7 @@ export function Dashboard() {
 const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecord }) {
   return (
     <tr>
-      <td>{formatKstDateTime(g.timestamp)}</td>
+      <td><TimestampText ts={g.timestamp} /></td>
       <td className="recent-games-title-cell" title={g.title ?? undefined}>
         {g.title && g.title.trim() !== '' ? (
           <Link

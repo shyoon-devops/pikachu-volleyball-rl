@@ -51,8 +51,8 @@ import {
   formatEnvId,
   formatEpisode,
 } from '../../lib/formatGame'
-import { formatKstDateTime } from '../../lib/formatTime'
 import { ScoreCell } from '../shared/ScoreCell'
+import { TimestampText } from '../shared/TimestampText'
 import './ReplayList.css'
 
 const PAGE_LIMIT = 20
@@ -438,7 +438,7 @@ const GameRow = memo(
     const joinKey = g.gameId ?? g.id
     return (
       <tr>
-        <td>{formatKstDateTime(g.timestamp)}</td>
+        <td><TimestampText ts={g.timestamp} /></td>
         {hideTitleColumn ? null : (
           <td className="replay-list-title-cell" title={g.title ?? undefined}>
             {g.title && g.title.trim() !== '' ? g.title : '—'}

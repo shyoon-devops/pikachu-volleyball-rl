@@ -6,7 +6,7 @@ import { EvaluationRunDetail } from '../evaluation/EvaluationRunDetail'
 import { HyperparamsSummary } from '../history/HyperparamsSummary'
 import { getTrainingRuns } from '../../lib/api'
 import { useTrainingState } from '../../hooks/useTrainingState'
-import { formatKstDateTime } from '../../lib/formatTime'
+import { TimestampText } from '../shared/TimestampText'
 import type { TrainingRun } from '../../lib/types'
 import './UnifiedRunDetail.css'
 
@@ -143,7 +143,7 @@ export function UnifiedRunDetail() {
                 </div>
                 <div className="unified-run-overview-meta-item">
                   <dt>Started</dt>
-                  <dd>{run?.startedAt ? formatKstDateTime(run.startedAt) : '—'}</dd>
+                  <dd><TimestampText ts={run?.startedAt} /></dd>
                 </div>
                 <div className="unified-run-overview-meta-item">
                   <dt>Experiment</dt>
