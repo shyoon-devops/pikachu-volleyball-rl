@@ -567,17 +567,61 @@ async def training_metrics_aggregate(
 
 @router.get("/games")
 @endpoint_guard("list_games")
-@cache_ttl(seconds=5, max_entries=64, include=("page", "limit"))
+@cache_ttl(seconds=5, max_entries=64, include=("page", "limit", "title"))
 async def list_games(
     request: Request,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    title: str | None = Query(default=None, max_length=60),
 ):
+    """List completed games, optionally filtered by title (BE-T5).
+
+    ``title`` — exact-match filter for the drill-down from the
+    per-run aggregation view. ``title=untitled`` buckets pre-title
+    legacy rows so the FE has a stable click-through.
+    """
     game_service = getattr(request.app.state, "game_service", None)
     if game_service is None:
         logger.warning("list_games called but game_service is not initialized")
         raise HTTPException(status_code=503, detail="Game service not available")
-    return await game_service.get_games(page=page, limit=limit)
+    return await game_service.get_games(page=page, limit=limit, title=title)
+
+
+@router.get("/training/runs")
+@endpoint_guard("training_runs_aggregate")
+@cache_ttl(seconds=5, max_entries=16, include=("page", "limit"))
+async def list_training_runs(
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Per-title training-run aggregates (BE-T4).
+
+    Powers the history page's 1st-level drill-down view. Delegates
+    grouping to MongoDB so a multi-GB ``games`` collection doesn't
+    stream into Python. Status is overlayed with "running" when the
+    row matches the live training manager's current title.
+    """
+    game_service = getattr(request.app.state, "game_service", None)
+    if game_service is None:
+        raise HTTPException(status_code=503, detail="Game service not available")
+
+    aggregated = await game_service.aggregate_by_title(page=page, limit=limit)
+
+    # Overlay "running" on the currently-live title (if any). Reading
+    # the manager's status is a cheap in-memory lookup; doing it once
+    # here avoids pushing training-state knowledge into the service.
+    training_service = getattr(request.app.state, "training_service", None)
+    live_title = ""
+    if training_service is not None:
+        status = training_service.status()
+        if status.get("state") == "running":
+            live_title = (status.get("title") or "").strip()
+    if live_title:
+        for row in aggregated.data:
+            if (row.get("title") or "") == live_title:
+                row["status"] = "running"
+    return aggregated
 
 
 @router.get("/games/{game_id}")
