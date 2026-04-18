@@ -46,7 +46,33 @@ class FakeGameService:
 
 
 class FakeEvalService:
-    async def run(self, model_path: str, bot_level: int = 1, n_games: int = 50):
+    # Sentinel: paths starting with this prefix pass the synchronous
+    # preflight (validate_model_path returns OK) but fail inside the
+    # background ``run`` call. Used by test_eval_async to exercise the
+    # 202 → poll → failed lifecycle end-to-end without a real model on
+    # disk. Regular test paths still 404 at preflight as before.
+    _PASS_PREFLIGHT_PREFIX = "bgfail/"
+
+    def validate_model_path(self, model_path: str):
+        # Mirrors EvalServiceWrapper.validate_model_path so the async
+        # run endpoint's pre-flight check rejects bad paths synchronously
+        # against the test fake too. Without this the preflight would
+        # short-circuit via the ``hasattr`` guard and security/traversal
+        # tests would observe a 202 instead of the expected 404.
+        if ".." in model_path or model_path.startswith("/"):
+            raise FileNotFoundError(f"Invalid model path: {model_path}")
+        if model_path.startswith(self._PASS_PREFLIGHT_PREFIX):
+            return None  # preflight OK, background task will raise
+        raise FileNotFoundError(f"Model not found: {model_path}")
+
+    async def run(
+        self,
+        model_path: str,
+        bot_level: int = 1,
+        n_games: int = 50,
+        *,
+        progress_callback=None,
+    ):
         if ".." in model_path or model_path.startswith("/"):
             raise FileNotFoundError(f"Invalid model path: {model_path}")
         raise FileNotFoundError(f"Model not found: {model_path}")

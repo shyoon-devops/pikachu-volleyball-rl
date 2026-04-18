@@ -17,7 +17,7 @@ class TrainingServiceWrapper:
         self,
         hyperparams: dict[str, Any] | None = None,
         bot_level: int = 1,
-        total_timesteps: int = 1_000_000,
+        total_timesteps: int = 2_000_000,
     ) -> str:
         return await self.manager.start(
             hyperparams=hyperparams,

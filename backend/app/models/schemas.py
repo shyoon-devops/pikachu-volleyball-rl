@@ -90,7 +90,7 @@ class WsTrainingStartPayload(BaseModel):
     # falls back to the current ``status.bot_level`` — no implicit reset
     # to L1. Range check still applies when the field is supplied.
     bot_level: int | None = Field(default=None, ge=1, le=5)
-    total_timesteps: int = Field(default=1_000_000, ge=1000)
+    total_timesteps: int = Field(default=2_000_000, ge=1000)
 
 
 class WsSetLevelPayload(BaseModel):
