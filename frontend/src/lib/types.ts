@@ -232,6 +232,14 @@ export interface GameRecord {
    * `frontend/src/lib/formatGame.ts::formatRallyCount`.
    */
   rallyCount?: number
+  /**
+   * 0-indexed parallel env that produced this game, for the A+C
+   * (batch tabs) feature's history-page filter. Optional because BE
+   * A2 hasn't landed yet — see [BE-WAITING] in the History page's
+   * env filter. Demo / single-env runs also legitimately have no
+   * env id; those render as '—' in the chip column.
+   */
+  envId?: number
 }
 
 export interface EvalResult {

@@ -214,3 +214,128 @@ describe('ReplayList — unified games + replays (B2)', () => {
     })
   })
 })
+
+describe('ReplayList — env filter + chip column (FC-history, Designer §6)', () => {
+  it('renders an env chip per row using the envId field', async () => {
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'm1', gameId: 'u1', envId: 3 }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: undefined }),
+      ],
+      total: 2,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Env 3')).toBeInTheDocument()
+    })
+    // The undefined envId row renders an em-dash chip with a clear aria label.
+    expect(screen.getByLabelText('No env id recorded')).toBeInTheDocument()
+  })
+
+  it('filters the row list when ?env=N is present in the URL', async () => {
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'm1', gameId: 'u1', envId: 0 }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: 3 }),
+        gameRow({ id: 'm3', gameId: 'u3', envId: 3 }),
+        gameRow({ id: 'm4', gameId: 'u4', envId: undefined }),
+      ],
+      total: 4,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/history?env=3']}>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    // Two env=3 rows land; the env=0 row and the undefined-env row are hidden.
+    await waitFor(() => {
+      expect(screen.getAllByLabelText('Env 3')).toHaveLength(2)
+    })
+    expect(screen.queryByLabelText('Env 0')).toBeNull()
+    expect(screen.queryByLabelText('No env id recorded')).toBeNull()
+    // Filter-state hint surfaces the active filter value.
+    expect(screen.getByText(/env_id=3/i)).toBeInTheDocument()
+  })
+
+  it('shows all rows when the filter dropdown is set to All', async () => {
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'm1', gameId: 'u1', envId: 0 }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: 5 }),
+      ],
+      total: 2,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/history']}>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Env 0')).toBeInTheDocument()
+    })
+    expect(screen.getByLabelText('Env 5')).toBeInTheDocument()
+  })
+
+  it('renders a dedicated empty-state when a filter matches no games on the page', async () => {
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'm1', gameId: 'u1', envId: 0 })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/history?env=7']}>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/No games match env_id=7/i)).toBeInTheDocument()
+    })
+  })
+
+  it('ignores a bogus ?env=foo value and shows all rows', async () => {
+    // parseEnvParam is strict — non-integer / negative values fall back
+    // to "all" so a broken bookmark doesn't blank the whole page.
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'm1', gameId: 'u1', envId: 2 })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/history?env=foo']}>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Env 2')).toBeInTheDocument()
+    })
+    // No filter hint rendered when effective filter is null.
+    expect(screen.queryByText(/env_id=/i)).toBeNull()
+  })
+})
