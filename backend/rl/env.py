@@ -411,13 +411,9 @@ class PikachuVolleyballEnv(gymnasium.Env):
                     reward += self._TOUCH_PENALTY_EXCESS
 
         # --- AUX 2: net crossing (strengthened, resets touch counter) ---
-        prev_on_p1_side = self._prev_ball_x <= NET_PILLAR_X
-        now_on_p2_side = ball.x > NET_PILLAR_X
-        if prev_on_p1_side and now_on_p2_side and ball.vx > 0:
-            reward += self._NET_CROSSING_REWARD
-            self._consecutive_touches = 0
-            self._frames_since_crossing = 0
-            counter_reset_this_frame = True
+        crossing_delta, crossing_reset = self._net_crossing_reward(state)
+        reward += crossing_delta
+        counter_reset_this_frame = counter_reset_this_frame or crossing_reset
 
         # --- AUX 3: stall penalty ---
         # Only increment when no reset this frame (counter represents frames
@@ -444,6 +440,27 @@ class PikachuVolleyballEnv(gymnasium.Env):
     # byte-identical to the pre-refactor monolith. Pure helpers (no state
     # mutation) are extracted first; mutation-carrying ones follow.
     # ------------------------------------------------------------------
+    def _net_crossing_reward(self, state: Any) -> tuple[float, bool]:
+        """Ball-over-the-net bonus. Mutates ``_consecutive_touches``
+        and ``_frames_since_crossing`` when the crossing is detected.
+
+        Returns ``(reward_delta, did_reset_counters)``. Caller OR's the
+        flag into ``counter_reset_this_frame`` so the stall penalty
+        knows to skip incrementing this frame. A crossing is counted
+        left→right with positive vx (``ball.x > NET_PILLAR_X`` now,
+        ``self._prev_ball_x <= NET_PILLAR_X`` previously, ``ball.vx > 0``).
+        The ``ball.vx > 0`` gate rules out ball-bounces-off-net-pillar
+        false positives where the ball briefly crosses then reverses.
+        """
+        ball = state.ball
+        prev_on_p1_side = self._prev_ball_x <= NET_PILLAR_X
+        now_on_p2_side = ball.x > NET_PILLAR_X
+        if prev_on_p1_side and now_on_p2_side and ball.vx > 0:
+            self._consecutive_touches = 0
+            self._frames_since_crossing = 0
+            return self._NET_CROSSING_REWARD, True
+        return 0.0, False
+
     def _ready_position_reward(self, state: Any) -> float:
         """Defensive positioning bonus: stand near center while the ball
         is on the opponent's side. Pure — no state mutation.
