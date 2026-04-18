@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState, useSyncExternalStore } from 'react'
-import type { ConnectionState, WSMessage, WSClientMessageType } from '../lib/types'
+import type { ConnectionState, WSMessage, WSMessageType, WSClientMessageType, WSServerMessageType } from '../lib/types'
 
 const MAX_RECONNECT_DELAY = 30_000
 const INITIAL_RECONNECT_DELAY = 1_000
@@ -7,6 +7,15 @@ const PING_INTERVAL = 30_000
 const PONG_TIMEOUT = 10_000
 
 type MessageHandler = (message: WSMessage) => void
+
+/**
+ * Topic-narrowing handler signature exposed by the React hook
+ * (A6, 2026-04-19). The compiler now sees `msg.type` as the literal
+ * topic the caller subscribed to, so downstream zod parsers in
+ * `useTrainingState` can branch on `msg.type` exhaustively without
+ * casting. Internally the store still keys handlers by topic string.
+ */
+type NarrowedHandler<T extends WSMessageType> = (message: WSMessage<T>) => void
 
 interface WebSocketSnapshot {
   connectionState: ConnectionState
@@ -226,9 +235,15 @@ export function useWebSocket(url: string) {
     store.send(type, payload)
   }, [store])
 
-  const subscribeMessage = useCallback((type: string, handler: MessageHandler) => {
-    return store.onMessage(type, handler)
-  }, [store])
+  // Subscribe is generic over the topic so the handler's `msg.type`
+  // narrows to the literal subscribed value. The store internals still
+  // dispatch via a string key — the narrowing is compiler-only.
+  const subscribeMessage = useCallback(
+    <T extends WSServerMessageType>(type: T, handler: NarrowedHandler<T>) => {
+      return store.onMessage(type, handler as MessageHandler)
+    },
+    [store],
+  )
 
   return {
     connectionState: wsSnapshot.connectionState,

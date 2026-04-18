@@ -432,9 +432,22 @@ export interface EnvFramePayload {
 
 export type WSMessageType = WSClientMessageType | WSServerMessageType
 
-export interface WSMessage<T = unknown> {
-  type: WSMessageType
-  payload: T
+/**
+ * WS message envelope, discriminated by `type` (A6, 2026-04-19).
+ *
+ * The generic `T` narrows the literal `type` field — every subscriber
+ * pins its own topic so the compiler can later (with zod, A6 step 2)
+ * exhaustively check payload schemas without a runtime cast.
+ *
+ * Payload remains `unknown` here on purpose: the wire shape is BE
+ * snake_case while domain types live in camelCase, and the snake→camel
+ * transform happens in the receiving handler. The zod schemas in
+ * `lib/ws-schemas.ts` carry that transform AND the runtime check; this
+ * envelope only owns topic discrimination.
+ */
+export type WSMessage<T extends WSMessageType = WSMessageType> = {
+  type: T
+  payload: unknown
 }
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected'
