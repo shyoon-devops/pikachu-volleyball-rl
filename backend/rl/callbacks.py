@@ -386,20 +386,9 @@ class LiveFrameCallback(BaseCallback):
         if self.num_timesteps % self.play_interval != 0:
             return True
 
-        # Snapshot the level + experiment id at demo-start so that (a) a
-        # mid-run set_bot_level picks up *here* for the in-process demo
-        # opponent without needing a vec-env restart, and (b) the saved
-        # GameRecord reflects what was actually played this demo — not
-        # a stale __init__ cache (the silent-L1 bug prior to this fix).
-        if self._manager is not None:
-            current_bot_level = int(getattr(self._manager, "_bot_level", self.bot_level))
-            current_experiment_id = str(getattr(self._manager, "_experiment_id", "") or "")
-            current_title = str(getattr(self._manager, "_title", "") or "")
-        else:
-            current_bot_level = self.bot_level
-            current_experiment_id = ""
-            current_title = ""
-
+        current_bot_level, current_experiment_id, current_title = (
+            self._snapshot_manager_fields()
+        )
         state, frames, rally_count = self._play_demo_game(current_bot_level)
 
         game_id = str(uuid.uuid4())
@@ -417,6 +406,26 @@ class LiveFrameCallback(BaseCallback):
         self._save_replay(game_id, frames)
 
         return True
+
+    def _snapshot_manager_fields(self) -> tuple[int, str, str]:
+        """Capture the live ``bot_level`` / ``experiment_id`` / ``title``
+        at demo-start so (a) a mid-run ``set_bot_level`` picks up HERE
+        for the in-process demo opponent without needing a vec-env
+        restart, and (b) the saved GameRecord reflects what was actually
+        played this demo — not a stale ``__init__`` cache (the silent-
+        L1 bug prior to this fix).
+
+        Manager-less construction (unit tests, legacy callers) falls
+        back to ``self.bot_level`` + empty strings so the callback
+        still produces a valid result payload.
+        """
+        if self._manager is not None:
+            return (
+                int(getattr(self._manager, "_bot_level", self.bot_level)),
+                str(getattr(self._manager, "_experiment_id", "") or ""),
+                str(getattr(self._manager, "_title", "") or ""),
+            )
+        return self.bot_level, "", ""
 
     # ------------------------------------------------------------------
     # Demo-game pipeline (A2) — _on_step orchestrates these helpers, each
