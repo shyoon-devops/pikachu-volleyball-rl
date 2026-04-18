@@ -180,7 +180,12 @@ describe('BatchTabBar', () => {
     expect(dot?.className).toContain('batch-tab-dot--warning')
   })
 
-  it('switches ≥9 envs to scroll-snap layout (spec §5)', () => {
+  it('renders all tabs in a single flex-wrap container for >8 envs (spec v2 §5)', () => {
+    // FC-R4 / Designer spec v2 (19848eb8): layout switched from
+    // grid + snap-scroll to flex-wrap. `data-overflow` attribute
+    // was retired because the container no longer has two variants.
+    // A 12-env run still renders every chip — CSS handles row
+    // distribution via flex-basis breakpoints.
     const { container } = render(
       <BatchTabBar
         envFrames={{}}
@@ -190,20 +195,26 @@ describe('BatchTabBar', () => {
       />,
     )
     const bar = container.querySelector('.batch-tab-bar')
-    expect(bar?.getAttribute('data-overflow')).toBe('scroll')
+    expect(bar).toBeTruthy()
+    expect(bar?.getAttribute('data-overflow')).toBeNull()
+    expect(bar?.getAttribute('data-env-count')).toBe('12')
+    expect(screen.getAllByRole('tab')).toHaveLength(12)
   })
 
-  it('uses grid layout for ≤8 envs', () => {
+  it('exposes n_envs via the --n-envs CSS custom property', () => {
+    // The CSS reads --n-envs for downstream analytics (e.g. a future
+    // "Env count: N" meta badge); pin the attribute as a regression
+    // guard against a future refactor dropping the inline style.
     const { container } = render(
       <BatchTabBar
         envFrames={{}}
-        nEnvs={8}
+        nEnvs={6}
         activeEnvId={0}
         onSelect={vi.fn()}
       />,
     )
-    const bar = container.querySelector('.batch-tab-bar')
-    expect(bar?.getAttribute('data-overflow')).toBe('grid')
+    const bar = container.querySelector('.batch-tab-bar') as HTMLElement
+    expect(bar.style.getPropertyValue('--n-envs')).toBe('6')
   })
 
   // FC-R1 regression guards — roving-tabindex + follow-focus pattern.

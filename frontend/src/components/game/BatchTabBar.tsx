@@ -195,7 +195,10 @@ export function BatchTabBar({
       role="tablist"
       aria-label="Parallel training environments"
       data-env-count={clampedN}
-      data-overflow={clampedN > 8 ? 'scroll' : 'grid'}
+      // FC-R4 (Designer spec v2, commit 19848eb8): layout switched
+      // from CSS grid + snap-scroll to `flex-wrap` so rows grow
+      // downward instead of scrolling horizontally. `data-overflow`
+      // dropped — the container no longer has two variants.
       style={{ '--n-envs': clampedN } as React.CSSProperties}
     >
       {envIds.map(id => {
