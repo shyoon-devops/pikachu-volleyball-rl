@@ -92,8 +92,19 @@ export async function getModels(): Promise<ModelInfo[]> {
   return snakeToCamel<ModelInfo[]>(models)
 }
 
-export function runEvaluation(modelPath: string, botLevel: number, nGames: number): Promise<{ id: string }> {
-  return request('/api/evaluation/run', {
+/**
+ * Kick off an evaluation. BE (commit 8ebbb9f3) switched this from a
+ * blocking call to a fire-and-forget job: response is 202 with a
+ * `job_id` you poll via `getEvaluationStatus`. 409 still means "another
+ * eval is running" and callers should surface it as a busy state, not
+ * a generic error.
+ */
+export async function runEvaluation(
+  modelPath: string,
+  botLevel: number,
+  nGames: number,
+): Promise<EvaluationJobAck> {
+  const raw = await request<Record<string, unknown>>('/api/evaluation/run', {
     method: 'POST',
     body: JSON.stringify({
       model_path: modelPath,
@@ -101,6 +112,35 @@ export function runEvaluation(modelPath: string, botLevel: number, nGames: numbe
       n_games: nGames,
     }),
   })
+  return snakeToCamel<EvaluationJobAck>(raw)
+}
+
+/**
+ * Poll an evaluation job by id. Response shape is stable across
+ * `state` values; consumers branch on `state`:
+ *   - pending / running: show progress
+ *   - done:              merge `result` into the results list
+ *   - failed:            surface `error`
+ */
+export async function getEvaluationStatus(jobId: string): Promise<EvaluationJobStatus> {
+  const raw = await request<Record<string, unknown>>(`/api/evaluation/status/${jobId}`)
+  return snakeToCamel<EvaluationJobStatus>(raw)
+}
+
+export interface EvaluationJobAck {
+  jobId: string
+  state: string
+}
+
+export interface EvaluationJobStatus {
+  jobId: string
+  state: 'pending' | 'running' | 'done' | 'failed'
+  progress: { current: number; total: number }
+  result: EvalResult | null
+  error: string | null
+  createdAt?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
 }
 
 export async function getEvalResults(): Promise<EvalResult[]> {
