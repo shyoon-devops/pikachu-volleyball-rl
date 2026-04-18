@@ -1,13 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import type { TrainingRun, PaginatedResponse } from '../../lib/types'
+import type { ModelInfo, TrainingRun, PaginatedResponse } from '../../lib/types'
 
 const getTrainingRuns = vi.fn<(page?: number, limit?: number) => Promise<PaginatedResponse<TrainingRun>>>()
+// FC-R7F: evaluation mode fetches `/api/models` to count checkpoints
+// per slug. History mode never invokes this — we still mock it so a
+// stray call doesn't hit the network.
+const getModels = vi.fn<(title?: string, limit?: number) => Promise<ModelInfo[]>>()
 
-vi.mock('../../lib/api', () => ({
-  getTrainingRuns: (page?: number, limit?: number) => getTrainingRuns(page, limit),
-}))
+vi.mock('../../lib/api', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/api')>('../../lib/api')
+  return {
+    ...actual,
+    getTrainingRuns: (page?: number, limit?: number) => getTrainingRuns(page, limit),
+    getModels: (title?: string, limit?: number) => getModels(title, limit),
+  }
+})
 
 // FC-R7B: TrainingRunList reads `gameResultSeq` from the shared
 // training-state hook to trigger a refetch whenever a new game:result
@@ -42,6 +51,8 @@ function page(runs: TrainingRun[]): PaginatedResponse<TrainingRun> {
 
 beforeEach(() => {
   getTrainingRuns.mockReset()
+  getModels.mockReset()
+  getModels.mockResolvedValue([])
   mockTrainingState.gameResultSeq = 0
 })
 
@@ -213,6 +224,51 @@ describe('TrainingRunList (FC-R6H level-1)', () => {
     await waitFor(() => {
       expect(getTrainingRuns).toHaveBeenCalledTimes(2)
     })
+  })
+
+  // FC-R7F eval variant: label change + checkpoint count + disabled
+  // rows when a run has zero models.
+  it('evaluation mode: renders the eval header + Checkpoints column', async () => {
+    getTrainingRuns.mockResolvedValueOnce(page([run({ title: 'my-run' })]))
+    getModels.mockResolvedValueOnce([
+      // 2 checkpoints for my-run, 0 for absent titles.
+      { path: 'x/my-run__e__100.zip', sizeBytes: 1024, slug: 'my-run', filename: 'x' } as ModelInfo,
+      { path: 'x/my-run__e__200.zip', sizeBytes: 1024, slug: 'my-run', filename: 'x' } as ModelInfo,
+    ])
+    render(
+      <MemoryRouter>
+        <TrainingRunList linkBase="/evaluation/" mode="evaluation" />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Select Training for Evaluation/i })).toBeInTheDocument()
+    })
+    // Checkpoints column visible.
+    expect(screen.getByRole('columnheader', { name: /Checkpoints/i })).toBeInTheDocument()
+    // Count badge renders from the model fetch. Desktop table + mobile
+    // card both render one (CSS hides one per breakpoint but jsdom
+    // ignores media queries), so use `getAllByLabelText`.
+    await waitFor(() => {
+      expect(screen.getAllByLabelText(/2 checkpoints/).length).toBeGreaterThan(0)
+    })
+  })
+
+  it('evaluation mode: zero-checkpoint runs disable the row link', async () => {
+    getTrainingRuns.mockResolvedValueOnce(page([run({ title: 'empty-run' })]))
+    getModels.mockResolvedValueOnce([]) // no checkpoints for any title
+    render(
+      <MemoryRouter>
+        <TrainingRunList linkBase="/evaluation/" mode="evaluation" />
+      </MemoryRouter>,
+    )
+    // Row title renders but without a Link. Count shows "0개".
+    await waitFor(() => {
+      expect(screen.getAllByText('0개').length).toBeGreaterThan(0)
+    })
+    // No link for empty-run in the table — the title cell is a
+    // disabled span with the no-models tooltip.
+    expect(screen.queryByRole('link', { name: 'empty-run' })).toBeNull()
+    expect(screen.getAllByTitle(/저장된 모델 없음/).length).toBeGreaterThan(0)
   })
 
   // FC-R7A regression guard: qa-observed crash where runs

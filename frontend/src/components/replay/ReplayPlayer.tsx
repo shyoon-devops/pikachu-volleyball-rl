@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useLocation, Link } from 'react-router-dom'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { ReplayControls } from './ReplayControls'
@@ -13,6 +13,14 @@ const FPS = 30
 
 export function ReplayPlayer() {
   const { id } = useParams<{ id: string }>()
+  const location = useLocation()
+  // FC-R7J: callers (ReplayList's Watch button) ship the originating
+  // path via `location.state.from` so Back returns to the exact drill-
+  // down — e.g. /history/my-run — instead of the top-level /history.
+  // Fallback to /history keeps the flow intact for deep-link traffic
+  // (bookmarks / shared URLs) where there's no referrer in state.
+  const backTo =
+    (location.state as { from?: string } | null)?.from ?? '/history'
   const [frames, setFrames] = useState<GameState[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -216,7 +224,7 @@ export function ReplayPlayer() {
     return (
       <div className="replay-player-error-wrapper">
         <div className="replay-player-error alert-error">{error}</div>
-        <Link to="/history" className="replay-player-error-back">Back to History</Link>
+        <Link to={backTo} className="replay-player-error-back">Back to History</Link>
       </div>
     )
   }
@@ -224,7 +232,7 @@ export function ReplayPlayer() {
   return (
     <div className="replay-player">
       <div className="replay-player-header">
-        <Link to="/history" className="replay-player-back">&larr; Back</Link>
+        <Link to={backTo} className="replay-player-back">&larr; Back</Link>
         <h2 className="replay-player-title">Replay: {id}</h2>
       </div>
 

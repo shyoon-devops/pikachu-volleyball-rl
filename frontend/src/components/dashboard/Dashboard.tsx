@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { memo, useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
@@ -11,7 +11,7 @@ import type { TitleValidationState } from './TitleInput'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
-import type { Hyperparams } from '../../lib/types'
+import type { GameRecord, Hyperparams } from '../../lib/types'
 import {
   formatBotLevel,
   formatRallyCount,
@@ -104,31 +104,33 @@ export function Dashboard() {
   }, [envFrames, activeEnvId, latestFrame])
 
   /**
-   * Effective env count = max of:
-   *   - baseline (DEFAULT_N_ENVS)
-   *   - user's configured form value (params.n_envs)
-   *   - observed envFrames max id + 1 (catches runs where user
-   *     bumped n_envs beyond the form default, or where BE
-   *     dispatches more envs than the status payload suggests)
+   * Effective env count — the tab-bar length.
    *
-   * Clamped to MAX_N_ENVS (spec ceiling, 16). Without this FC-R6B
-   * derivation a run with n_envs=16 rendered only the first 8 chips
-   * because the old code hardcoded the baseline.
+   * Authoritative source: the form's `params.n_envs`, which is the
+   * value Start would submit (and that BE received on the most recent
+   * `training:start` for an active run). Clamped to [1, MAX_N_ENVS].
+   *
+   * FC-R7G regression (2026-04-18): previous revisions additionally
+   * bumped the count to `Math.max(DEFAULT_N_ENVS, observed)` which
+   * pinned the tab bar at 8 whenever envFrames still carried stale
+   * keys 0..7 from a prior run — even after the user reduced n_envs
+   * to 4 and started a fresh run. Observed is now IGNORED for the
+   * count; tabs always match `params.n_envs` exactly.
+   *
+   * [BE-WAITING] `/api/training/status` does NOT expose `n_envs`
+   * today. When it does (e.g. `status.n_envs`), prefer that value
+   * for running sessions so a mid-session refresh still pins the
+   * right count without re-reading the form. The form value remains
+   * correct for idle + post-start windows, so this path stays
+   * load-bearing.
    */
   const effectiveNEnvs = useMemo(() => {
-    // FC-R6C defensive: `envFrames` is always `{}` out of the hook
-    // but a future refactor could nullify it accidentally.
-    // `Object.keys(undefined)` throws — the only render-error trigger
-    // a user could plausibly hit on refresh before WS data lands.
-    const source = envFrames ?? {}
-    const observed = Object.keys(source)
-      .map(Number)
-      .filter(n => Number.isFinite(n) && n >= 0)
-      .reduce((max, id) => Math.max(max, id + 1), 0)
     const rawRequested = Number(params?.n_envs)
-    const requested = Number.isFinite(rawRequested) ? rawRequested : DEFAULT_N_ENVS
-    return Math.max(1, Math.min(MAX_N_ENVS, Math.max(DEFAULT_N_ENVS, requested, observed)))
-  }, [envFrames, params])
+    const requested = Number.isFinite(rawRequested) && rawRequested > 0
+      ? rawRequested
+      : DEFAULT_N_ENVS
+    return Math.max(1, Math.min(MAX_N_ENVS, requested))
+  }, [params])
 
   const score1 = displayFrame?.score1 ?? 0
   const score2 = displayFrame?.score2 ?? 0
@@ -151,18 +153,6 @@ export function Dashboard() {
       if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current)
     }
   }, [])
-
-  // Show skeleton only on the very first connect attempt while we have no
-  // data at all. After anything arrives (frame / metrics / recent games)
-  // we keep the real UI up — even through reconnects — so the layout
-  // doesn't flash back to skeletons mid-session. A persistent
-  // disconnect should surface the reconnect banner, not a skeleton.
-  const hasAnyData =
-    latestFrame !== null || metrics.length > 0 || recentGames.length > 0
-  const isInitialLoading = connectionState === 'connecting' && !hasAnyData
-  if (isInitialLoading) {
-    return <DashboardSkeleton />
-  }
 
   /**
    * Build the `training:start` payload. BE
@@ -250,6 +240,21 @@ export function Dashboard() {
       lastBroadcastTitleRef.current = incoming
     }
   }, [status.title])
+
+  // R7A follow-up (React error #310, 2026-04-18): the skeleton gate
+  // MUST sit below every hook — earlier revisions placed this check
+  // mid-function and the later useMemo (formInvalid) + useEffect
+  // (title echo) only ran on the non-skeleton path, tripping
+  // "Rendered more hooks than during the previous render" when the
+  // skeleton → real transition occurred on first connect. With the
+  // gate moved here, every render — skeleton or real — invokes the
+  // same hook sequence in the same order.
+  const hasAnyData =
+    latestFrame !== null || metrics.length > 0 || recentGames.length > 0
+  const isInitialLoading = connectionState === 'connecting' && !hasAnyData
+  if (isInitialLoading) {
+    return <DashboardSkeleton />
+  }
 
   return (
     <div className="dashboard">
@@ -369,57 +374,7 @@ export function Dashboard() {
                 </thead>
                 <tbody>
                   {recentGames.slice(0, 20).map((g) => (
-                    <tr key={g.id}>
-                      <td>{formatKstDateTime(g.timestamp)}</td>
-                      <td
-                        className="recent-games-title-cell"
-                        title={g.title ?? undefined}
-                      >
-                        {g.title && g.title.trim() !== '' ? (
-                          // R6H spec §0: Recent Games rows deep-link
-                          // to the level-2 drill-down for their run.
-                          <Link
-                            to={`/history/${encodeURIComponent(g.title)}`}
-                            className="recent-games-title-link"
-                          >
-                            {g.title}
-                          </Link>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td>
-                        <span
-                          className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
-                          aria-label={
-                            g.envId === undefined
-                              ? 'No env id recorded'
-                              : `Env ${g.envId}`
-                          }
-                          data-env-id={g.envId ?? ''}
-                        >
-                          {formatEnvId(g.envId)}
-                        </span>
-                      </td>
-                      <td className="text-muted">{formatEpisode(g.episode)}</td>
-                      <td>{formatBotLevel(g.botLevel)}</td>
-                      <td className="score-cell">
-                        <span className="score-p1">{g.score1}</span>
-                        {' : '}
-                        <span className="score-p2">{g.score2}</span>
-                      </td>
-                      <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
-                        {g.winner === 1 ? 'RL Agent' : 'Bot'}
-                      </td>
-                      <td className="text-muted">{g.durationFrames}</td>
-                      <td className="text-muted">{formatRallyCount(g.rallyCount)}</td>
-                      <td className="text-muted">
-                        {formatAvgRallyLength(g.durationFrames, g.rallyCount)}
-                      </td>
-                      <td className="text-muted text-mono" title={g.experimentId ?? undefined}>
-                        {formatExperimentIdShort(g.experimentId)}
-                      </td>
-                    </tr>
+                    <RecentGameRow key={g.id} game={g} />
                   ))}
                 </tbody>
               </table>
@@ -430,3 +385,63 @@ export function Dashboard() {
     </div>
   )
 }
+
+/**
+ * FC-R7H: memoized Recent Games row.
+ *
+ * Dashboard's `recentGames` state is prepend-only (the hook inserts a
+ * new element at index 0 and keeps old references for the rest), so a
+ * shallow comparison against the `game` object reference is enough:
+ * only the freshly-landed row fails memo and re-renders. Previously
+ * the inline JSX re-ran for every row on every parent render — cheap
+ * per row but visibly jittery at the ~1 Hz game-end cadence under a
+ * heavy parallel-env training config.
+ */
+const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecord }) {
+  return (
+    <tr>
+      <td>{formatKstDateTime(g.timestamp)}</td>
+      <td className="recent-games-title-cell" title={g.title ?? undefined}>
+        {g.title && g.title.trim() !== '' ? (
+          <Link
+            to={`/history/${encodeURIComponent(g.title)}`}
+            className="recent-games-title-link"
+          >
+            {g.title}
+          </Link>
+        ) : (
+          '—'
+        )}
+      </td>
+      <td>
+        <span
+          className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
+          aria-label={
+            g.envId === undefined ? 'No env id recorded' : `Env ${g.envId}`
+          }
+          data-env-id={g.envId ?? ''}
+        >
+          {formatEnvId(g.envId)}
+        </span>
+      </td>
+      <td className="text-muted">{formatEpisode(g.episode)}</td>
+      <td>{formatBotLevel(g.botLevel)}</td>
+      <td className="score-cell">
+        <span className="score-p1">{g.score1}</span>
+        {' : '}
+        <span className="score-p2">{g.score2}</span>
+      </td>
+      <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
+        {g.winner === 1 ? 'RL Agent' : 'Bot'}
+      </td>
+      <td className="text-muted">{g.durationFrames}</td>
+      <td className="text-muted">{formatRallyCount(g.rallyCount)}</td>
+      <td className="text-muted">
+        {formatAvgRallyLength(g.durationFrames, g.rallyCount)}
+      </td>
+      <td className="text-muted text-mono" title={g.experimentId ?? undefined}>
+        {formatExperimentIdShort(g.experimentId)}
+      </td>
+    </tr>
+  )
+})

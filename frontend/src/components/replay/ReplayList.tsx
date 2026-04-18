@@ -1,8 +1,48 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { memo, useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { getGames, getAvailableReplays } from '../../lib/api'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { GameRecord, ReplayInfo } from '../../lib/types'
+
+/**
+ * FC-R7H: merge a fresh games snapshot with the previously rendered
+ * list, preserving OLD object references for rows whose scalar
+ * fields are unchanged. Keeps the memoized <GameRow> from re-
+ * rendering every row on a live refetch — the main source of the
+ * reported flicker.
+ */
+function gamesShallowEqual(a: GameRecord, b: GameRecord): boolean {
+  return (
+    a.id === b.id &&
+    a.gameId === b.gameId &&
+    a.timestamp === b.timestamp &&
+    a.score1 === b.score1 &&
+    a.score2 === b.score2 &&
+    a.winner === b.winner &&
+    a.durationFrames === b.durationFrames &&
+    a.rallyCount === b.rallyCount &&
+    a.envId === b.envId &&
+    a.episode === b.episode &&
+    a.title === b.title &&
+    a.botLevel === b.botLevel &&
+    a.experimentId === b.experimentId
+  )
+}
+
+function mergeGames(prev: GameRecord[], next: GameRecord[]): GameRecord[] {
+  // Use gameId as the merge key when present (the UUID4 set at
+  // game-end); fall back to Mongo ObjectId for legacy rows.
+  const keyOf = (g: GameRecord) => g.gameId ?? g.id
+  const prevByKey = new Map(prev.map(g => [keyOf(g), g] as const))
+  let anyChanged = prev.length !== next.length
+  const merged = next.map(n => {
+    const old = prevByKey.get(keyOf(n))
+    if (old && gamesShallowEqual(old, n)) return old
+    anyChanged = true
+    return n
+  })
+  return anyChanged ? merged : prev
+}
 import {
   formatBotLevel,
   formatRallyCount,
@@ -98,6 +138,7 @@ export function ReplayList({
   emptyStateOverride,
 }: ReplayListProps = {}) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   // FC-R7B live-history: bumps on each ws `game:result`; added to the
   // fetch effect's deps so the table pulls fresh `/api/games` data as
@@ -131,9 +172,16 @@ export function ReplayList({
     [searchParams, setSearchParams],
   )
 
+  // FC-R7H: `setLoading(true)` on every live refetch flashed the whole
+  // table with the "Loading..." placeholder for ~100ms — the exact
+  // flicker users reported. Only flip loading to true on the first
+  // fetch; subsequent live refetches (gameResultSeq bumps) swap data
+  // in place and let `mergeGames` preserve old object refs so the
+  // memoized row component skips unchanged rows.
+  const initialLoadedRef = useRef(false)
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    if (!initialLoadedRef.current) setLoading(true)
     // `Promise.all` short-circuits on the first rejection — using
     // `.catch(() => [])` on the replays call lets games still render
     // when the filesystem inventory endpoint hiccups.
@@ -146,10 +194,11 @@ export function ReplayList({
     ])
       .then(([gamesRes, replaysRes]) => {
         if (cancelled) return
-        setGames(gamesRes.data)
+        setGames(prev => mergeGames(prev, gamesRes.data))
         setTotal(gamesRes.total)
         setReplays(replaysRes)
         setError(null)
+        initialLoadedRef.current = true
       })
       .catch(err => {
         if (cancelled) return
@@ -314,76 +363,24 @@ export function ReplayList({
               </tr>
             ) : (
               filteredGames.map(g => {
-                // Join on `gameId` (the UUID4 used as the replay file
-                // stem). `g.id` is the Mongo ObjectId hex — unrelated
-                // to the replay filename. Falls back to `g.id` only
-                // for legacy rows where the UUID was stored as `_id`
-                // (pre-port docs); under normal BE this is a no-op.
                 const joinKey = g.gameId ?? g.id
-                const replay = replayByGameId.get(joinKey)
+                const replay = replayByGameId.get(joinKey) ?? null
                 return (
-                  <tr key={g.id}>
-                    {/*
-                      Time reads as primary text, not `.text-muted` — see
-                      R2-redo fix in Dashboard.tsx (2026-04-18). The
-                      timestamp is primary context on the History page;
-                      only true secondary fields (Frames / Rallies /
-                      Avg Rally) stay muted.
-                    */}
-                    <td>
-                      {formatKstDateTime(g.timestamp)}
-                    </td>
-                    {hideTitleColumn ? null : (
-                      <td
-                        className="replay-list-title-cell"
-                        title={g.title ?? undefined}
-                      >
-                        {g.title && g.title.trim() !== '' ? g.title : '—'}
-                      </td>
-                    )}
-                    <td>
-                      <span
-                        className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
-                        aria-label={g.envId === undefined ? 'No env id recorded' : `Env ${g.envId}`}
-                        data-env-id={g.envId ?? ''}
-                      >
-                        {formatEnvId(g.envId)}
-                      </span>
-                    </td>
-                    <td className="text-muted">{formatEpisode(g.episode)}</td>
-                    <td>{formatBotLevel(g.botLevel)}</td>
-                    <td className="score-cell">
-                      <span className="score-p1">{g.score1}</span>
-                      {' : '}
-                      <span className="score-p2">{g.score2}</span>
-                    </td>
-                    <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
-                      {g.winner === 1 ? 'RL Agent' : 'Bot'}
-                    </td>
-                    <td className="text-muted">{g.durationFrames}</td>
-                    <td className="text-muted">{formatRallyCount(g.rallyCount)}</td>
-                    <td className="text-muted">
-                      {formatAvgRallyLength(g.durationFrames, g.rallyCount)}
-                    </td>
-                    <td className="text-muted text-mono" title={g.experimentId ?? undefined}>
-                      {formatExperimentIdShort(g.experimentId)}
-                    </td>
-                    <td>
-                      {replay ? (
-                        <button
-                          type="button"
-                          className="replay-list-btn"
-                          onClick={() => navigate(`/replay/${joinKey}`)}
-                          aria-label={`Watch replay for game ${joinKey.slice(0, 8)}`}
-                          title={`${(replay.sizeBytes / 1024).toFixed(0)}KB`}
-                        >
-                          Watch
-                        </button>
-                      ) : (
-                        <span className="text-muted" aria-label="No replay file available">—</span>
-                      )}
-                    </td>
-                  </tr>
+                  <GameRow
+                    key={g.id}
+                    game={g}
+                    replay={replay}
+                    hideTitleColumn={hideTitleColumn}
+                    onWatch={() => {
+                      // FC-R7J: preserve the current path+query so the
+                      // replay player's Back button can return to the
+                      // right drill-down (e.g. /history/my-run) instead
+                      // of the top-level /history.
+                      navigate(`/replay/${joinKey}`, {
+                        state: { from: `${location.pathname}${location.search}` },
+                      })
+                    }}
+                  />
                 )
               })
             )}
@@ -415,3 +412,87 @@ export function ReplayList({
     </div>
   )
 }
+
+interface GameRowProps {
+  game: GameRecord
+  replay: ReplayInfo | null
+  hideTitleColumn: boolean
+  onWatch: () => void
+}
+
+/**
+ * FC-R7H: memoized row. The parent re-renders on every `gameResultSeq`
+ * bump, but `mergeGames` preserves the prior row's `GameRecord`
+ * reference for any row whose scalar fields are unchanged — so
+ * `memo`'s default shallow prop check short-circuits the re-render
+ * for existing rows. Only the freshly-landed row actually repaints.
+ *
+ * The `onWatch` callback is recreated on every parent render (arrow
+ * in JSX), which would defeat the memo if the game data is the sole
+ * stable prop. A custom comparator ignores `onWatch` since the
+ * handler is content-neutral (it just navigates to this row's id).
+ */
+const GameRow = memo(
+  function GameRow({ game: g, replay, hideTitleColumn, onWatch }: GameRowProps) {
+    const joinKey = g.gameId ?? g.id
+    return (
+      <tr>
+        <td>{formatKstDateTime(g.timestamp)}</td>
+        {hideTitleColumn ? null : (
+          <td className="replay-list-title-cell" title={g.title ?? undefined}>
+            {g.title && g.title.trim() !== '' ? g.title : '—'}
+          </td>
+        )}
+        <td>
+          <span
+            className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
+            aria-label={g.envId === undefined ? 'No env id recorded' : `Env ${g.envId}`}
+            data-env-id={g.envId ?? ''}
+          >
+            {formatEnvId(g.envId)}
+          </span>
+        </td>
+        <td className="text-muted">{formatEpisode(g.episode)}</td>
+        <td>{formatBotLevel(g.botLevel)}</td>
+        <td className="score-cell">
+          <span className="score-p1">{g.score1}</span>
+          {' : '}
+          <span className="score-p2">{g.score2}</span>
+        </td>
+        <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
+          {g.winner === 1 ? 'RL Agent' : 'Bot'}
+        </td>
+        <td className="text-muted">{g.durationFrames}</td>
+        <td className="text-muted">{formatRallyCount(g.rallyCount)}</td>
+        <td className="text-muted">
+          {formatAvgRallyLength(g.durationFrames, g.rallyCount)}
+        </td>
+        <td className="text-muted text-mono" title={g.experimentId ?? undefined}>
+          {formatExperimentIdShort(g.experimentId)}
+        </td>
+        <td>
+          {replay ? (
+            <button
+              type="button"
+              className="replay-list-btn"
+              onClick={onWatch}
+              aria-label={`Watch replay for game ${joinKey.slice(0, 8)}`}
+              title={`${(replay.sizeBytes / 1024).toFixed(0)}KB`}
+            >
+              Watch
+            </button>
+          ) : (
+            <span className="text-muted" aria-label="No replay file available">—</span>
+          )}
+        </td>
+      </tr>
+    )
+  },
+  (prev, next) =>
+    prev.hideTitleColumn === next.hideTitleColumn &&
+    prev.replay === next.replay &&
+    prev.game === next.game,
+  // Intentionally omits `onWatch` from the comparator — the callback
+  // reference changes on every parent render but the behaviour is
+  // bound to game.id, which the game prop guard already pins.
+)

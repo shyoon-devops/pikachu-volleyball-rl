@@ -101,6 +101,21 @@ export async function getReplay(gameId: string): Promise<{ frames: GameState[] }
 }
 
 /**
+ * Mirror of BE `backend/app/services/title_service.py::slugify` — lower-
+ * case, collapse non-alphanumeric runs to `-`, strip, 40-char cap, fall
+ * back to "run" when empty. Used FE-side to pair a display title against
+ * the filename slug BE stamps into checkpoints (BE-T8 cd16ef63). Keeping
+ * both sides in sync matters because the FE drill-down matches
+ * training-runs to models by slug: a drift would leave the evaluation
+ * page showing 0 checkpoints for a run that actually has plenty.
+ */
+export function slugifyTitle(title: string, maxLen = 40): string {
+  const s = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  const truncated = s.length > maxLen ? s.slice(0, maxLen).replace(/-+$/, '') : s
+  return truncated || 'run'
+}
+
+/**
  * List model checkpoints. `title` filter (BE-T8 cd16ef63) scopes the
  * response to one training run — BE slugifies the caller-supplied
  * value and matches against the filename slug, sorted by step desc.

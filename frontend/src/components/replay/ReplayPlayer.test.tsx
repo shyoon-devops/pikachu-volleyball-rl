@@ -264,3 +264,58 @@ describe('ReplayPlayer metadata strip (V4, 2026-04-18)', () => {
     expect(screen.getByText('3200 frames')).toBeInTheDocument()
   })
 })
+
+// FC-R7J: Back button honours the drill-down origin passed via
+// `location.state.from`. Legacy /history fallback stays in place
+// for cold links (shared URL, bookmark) where no state rides along.
+describe('ReplayPlayer back-button drill-down context (FC-R7J)', () => {
+  it('returns to the drill-down path in state.from', async () => {
+    mockGetReplay.mockResolvedValueOnce({ frames: makeFrames(10) })
+    mockGetGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 100 })
+    render(
+      <MemoryRouter
+        initialEntries={[{ pathname: '/replay/game-abc', state: { from: '/history/my-run' } }]}
+      >
+        <Routes>
+          <Route path="/replay/:id" element={<ReplayPlayer />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('slider')).toBeInTheDocument())
+    const back = screen.getByRole('link', { name: /Back$/ })
+    expect(back).toHaveAttribute('href', '/history/my-run')
+  })
+
+  it('falls back to /history when no state.from is present (cold link)', async () => {
+    mockGetReplay.mockResolvedValueOnce({ frames: makeFrames(10) })
+    mockGetGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 100 })
+    render(
+      <MemoryRouter initialEntries={['/replay/game-abc']}>
+        <Routes>
+          <Route path="/replay/:id" element={<ReplayPlayer />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('slider')).toBeInTheDocument())
+    const back = screen.getByRole('link', { name: /Back$/ })
+    expect(back).toHaveAttribute('href', '/history')
+  })
+
+  it('uses state.from on the error-screen Back button too', async () => {
+    mockGetReplay.mockRejectedValueOnce(new Error('replay gone'))
+    // getGames still fires in parallel — stub so the useEffect chain
+    // doesn't blow up on an undefined promise.
+    mockGetGames.mockResolvedValueOnce({ data: [], total: 0, page: 1, limit: 100 })
+    render(
+      <MemoryRouter
+        initialEntries={[{ pathname: '/replay/game-abc', state: { from: '/evaluation/my-run' } }]}
+      >
+        <Routes>
+          <Route path="/replay/:id" element={<ReplayPlayer />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    const back = await screen.findByRole('link', { name: /Back to History/ })
+    expect(back).toHaveAttribute('href', '/evaluation/my-run')
+  })
+})

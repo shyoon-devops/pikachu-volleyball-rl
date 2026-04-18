@@ -323,3 +323,64 @@
     display: none;
   }
 }
+
+/*
+ * ── FC-R7F: evaluation variant ───────────────────────────────
+ * Distinguish the /evaluation landing from /history: accent shifts
+ * to the blue-line (eval intent) and a small "EVAL" hint rides
+ * under the title. Row-level disable state for 0-checkpoint runs.
+ */
+.training-run-list--evaluation .training-run-list-title::before {
+  content: '🎯';
+  margin-right: 6px;
+  filter: saturate(0.8);
+}
+
+.training-run-list--evaluation .training-run-list-table th {
+  /* Swap the header underline color so the eval page reads
+     differently at a glance from the history page. */
+  border-bottom-color: var(--color-blue, #3b82f6);
+}
+
+.training-run-list-checkpoints {
+  display: inline-block;
+  min-width: 42px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.training-run-list-checkpoints--loading {
+  color: var(--color-text-muted);
+}
+
+.training-run-list-checkpoints--some {
+  color: var(--color-blue, #3b82f6);
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.1));
+}
+
+.training-run-list-checkpoints--zero {
+  color: var(--color-text-muted);
+  background: var(--color-bg-elevated);
+}
+
+.training-run-list-row--disabled {
+  opacity: 0.55;
+}
+
+.training-run-list-row--disabled:hover {
+  background: transparent !important;
+}
+
+.training-run-list-title-disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+  font-family: var(--font-mono);
+}
+
+.training-run-card--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
