@@ -124,6 +124,7 @@ function Probe() {
     <div>
       <span data-testid="state">{status.state}</span>
       <span data-testid="step">{status.currentStep}</span>
+      <span data-testid="episode">{status.currentEpisode}</span>
       <span data-testid="bot-level">{status.botLevel ?? ''}</span>
       <span data-testid="conn">{connectionState}</span>
       <span data-testid="metrics-count">{metrics.length}</span>
@@ -830,6 +831,143 @@ describe('useTrainingState — text/chart sync (B1, 2026-04-18)', () => {
 
     expect(screen.getByTestId('step').textContent).toBe('5000')
   })
+})
+
+describe('useTrainingState — episode live-poll (2026-04-18 user report)', () => {
+  // `TrainingManager.current_episode` is monotonic and exposed only via
+  // REST /api/training/status. WS `training:metrics.payload.episode` is
+  // `len(deque(maxlen=100))` — a moving-window count, not the live
+  // counter. Between transitions the FE must poll REST; otherwise the
+  // episode badge freezes at whatever value the last transition carried.
+
+  it('does NOT bump currentEpisode from training:metrics payload', async () => {
+    // Regression guard: the B1 code used to Math.max currentEpisode from
+    // metrics.episode, which silently masked that the WS payload is
+    // bounded at 100. Dropping the bump makes the REST-poll path the
+    // single source of live updates.
+    installFetchRouter(url => {
+      if (url.startsWith('/api/training/status')) {
+        return {
+          ok: true,
+          payload: { state: 'running', current_step: 0, current_episode: 0 },
+        }
+      }
+      if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
+      if (url.startsWith('/api/training/timeseries')) {
+        return { ok: true, payload: { data: [] } }
+      }
+      const side = matchSideEffectRoute(url, {})
+      if (side) return side
+      return { ok: false, status: 404, payload: {} }
+    })
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1))
+    await act(async () => { MockWebSocket.instances[0]?.simulateOpen() })
+
+    // Send a metrics payload with episode=7 and confirm
+    // status.currentEpisode stays at 0 (the REST default), NOT 7.
+    await act(async () => {
+      MockWebSocket.instances[0]?.simulateMessage('training:metrics', {
+        step: 2048,
+        episode: 7,
+        mean_reward: 0.3,
+        win_rate: 0.4,
+        policy_loss: 0.05,
+        value_loss: 0.1,
+      })
+    })
+
+    // Step DID bump (payload.step is monotonic, real).
+    await waitFor(() => expect(screen.getByTestId('step').textContent).toBe('2048'))
+    // Episode did NOT bump (payload.episode is window-count, unreliable).
+    expect(screen.getByTestId('episode').textContent).toBe('0')
+  })
+
+  // Real-timer test — the poll interval is 2s, so we wait a little over
+  // that for the second fetch to land. Timeout is 6s to leave headroom
+  // for CI scheduler jitter while still failing fast on a regression.
+  it('polls REST /api/training/status on an interval while running', async () => {
+    let currentEpisode = 100
+    const statusHits: number[] = []
+    installFetchRouter(url => {
+      if (url.startsWith('/api/training/status')) {
+        statusHits.push(currentEpisode)
+        const payload = {
+          state: 'running',
+          current_step: 5000,
+          current_episode: currentEpisode,
+        }
+        return { ok: true, payload }
+      }
+      if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
+      if (url.startsWith('/api/training/timeseries')) {
+        return { ok: true, payload: { data: [] } }
+      }
+      const side = matchSideEffectRoute(url, {})
+      if (side) return side
+      return { ok: false, status: 404, payload: {} }
+    })
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1))
+    await act(async () => { MockWebSocket.instances[0]?.simulateOpen() })
+    // First REST probe lands → episode=100.
+    await waitFor(() => expect(screen.getByTestId('episode').textContent).toBe('100'))
+
+    // BE advances the counter in between polls.
+    currentEpisode = 142
+
+    // Wait for the 2s poll interval + ~500ms slack for the fetch to
+    // resolve and React to render. The test's overall timeout is
+    // bumped to 6s below to leave CI headroom.
+    await waitFor(
+      () => expect(screen.getByTestId('episode').textContent).toBe('142'),
+      { timeout: 6000, interval: 100 },
+    )
+  }, 10_000)
+
+  it('stops polling when training:status flips to stopped', async () => {
+    let hitCount = 0
+    installFetchRouter(url => {
+      if (url.startsWith('/api/training/status')) {
+        hitCount += 1
+        return {
+          ok: true,
+          payload: { state: 'stopped', current_step: 0, current_episode: 0 },
+        }
+      }
+      if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
+      if (url.startsWith('/api/training/timeseries')) {
+        return { ok: true, payload: { data: [] } }
+      }
+      const side = matchSideEffectRoute(url, {})
+      if (side) return side
+      return { ok: false, status: 404, payload: {} }
+    })
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1))
+    await act(async () => { MockWebSocket.instances[0]?.simulateOpen() })
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('stopped'))
+
+    const baseline = hitCount
+    // Wait past several poll intervals (2s each). hitCount must NOT
+    // climb — the poll-effect early-returns on state === 'stopped'.
+    await new Promise(r => setTimeout(r, 4500))
+    expect(hitCount).toBe(baseline)
+  }, 10_000)
 })
 
 describe('useTrainingState — clear chart on experiment_id transition (V3, 2026-04-18)', () => {
