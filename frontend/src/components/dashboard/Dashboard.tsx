@@ -104,31 +104,33 @@ export function Dashboard() {
   }, [envFrames, activeEnvId, latestFrame])
 
   /**
-   * Effective env count = max of:
-   *   - baseline (DEFAULT_N_ENVS)
-   *   - user's configured form value (params.n_envs)
-   *   - observed envFrames max id + 1 (catches runs where user
-   *     bumped n_envs beyond the form default, or where BE
-   *     dispatches more envs than the status payload suggests)
+   * Effective env count — the tab-bar length.
    *
-   * Clamped to MAX_N_ENVS (spec ceiling, 16). Without this FC-R6B
-   * derivation a run with n_envs=16 rendered only the first 8 chips
-   * because the old code hardcoded the baseline.
+   * Authoritative source: the form's `params.n_envs`, which is the
+   * value Start would submit (and that BE received on the most recent
+   * `training:start` for an active run). Clamped to [1, MAX_N_ENVS].
+   *
+   * FC-R7G regression (2026-04-18): previous revisions additionally
+   * bumped the count to `Math.max(DEFAULT_N_ENVS, observed)` which
+   * pinned the tab bar at 8 whenever envFrames still carried stale
+   * keys 0..7 from a prior run — even after the user reduced n_envs
+   * to 4 and started a fresh run. Observed is now IGNORED for the
+   * count; tabs always match `params.n_envs` exactly.
+   *
+   * [BE-WAITING] `/api/training/status` does NOT expose `n_envs`
+   * today. When it does (e.g. `status.n_envs`), prefer that value
+   * for running sessions so a mid-session refresh still pins the
+   * right count without re-reading the form. The form value remains
+   * correct for idle + post-start windows, so this path stays
+   * load-bearing.
    */
   const effectiveNEnvs = useMemo(() => {
-    // FC-R6C defensive: `envFrames` is always `{}` out of the hook
-    // but a future refactor could nullify it accidentally.
-    // `Object.keys(undefined)` throws — the only render-error trigger
-    // a user could plausibly hit on refresh before WS data lands.
-    const source = envFrames ?? {}
-    const observed = Object.keys(source)
-      .map(Number)
-      .filter(n => Number.isFinite(n) && n >= 0)
-      .reduce((max, id) => Math.max(max, id + 1), 0)
     const rawRequested = Number(params?.n_envs)
-    const requested = Number.isFinite(rawRequested) ? rawRequested : DEFAULT_N_ENVS
-    return Math.max(1, Math.min(MAX_N_ENVS, Math.max(DEFAULT_N_ENVS, requested, observed)))
-  }, [envFrames, params])
+    const requested = Number.isFinite(rawRequested) && rawRequested > 0
+      ? rawRequested
+      : DEFAULT_N_ENVS
+    return Math.max(1, Math.min(MAX_N_ENVS, requested))
+  }, [params])
 
   const score1 = displayFrame?.score1 ?? 0
   const score2 = displayFrame?.score2 ?? 0

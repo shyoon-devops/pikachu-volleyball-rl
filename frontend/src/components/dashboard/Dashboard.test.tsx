@@ -271,4 +271,36 @@ describe('Dashboard loading state', () => {
     renderDashboard()
     expect(screen.queryByRole('status', { name: /loading dashboard/i })).not.toBeInTheDocument()
   })
+
+  // FC-R7G: tabs track the submitted n_envs alone — `observed` keys
+  // from a prior run no longer inflate the count. Reproduces the
+  // user-reported flow:
+  //   1. run1 n_envs=16 → envFrames caches 16 keys
+  //   2. run1 stops (envFrames NOT cleared since exp_id didn't
+  //      transition through a new value)
+  //   3. form sits at the default n_envs=8
+  // Pre-fix: the tab bar rendered 16 chips. Post-fix: 8.
+  it('does not inflate tab count from stale envFrames beyond form n_envs', () => {
+    const staleFrames: EnvFramesMap = {}
+    for (let i = 0; i < 16; i++) {
+      staleFrames[i] = {
+        envId: i,
+        frame: null,
+        score: [0, 0],
+        stateName: 'play',
+        stepCount: 0,
+      } as unknown as EnvFramesMap[number]
+    }
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      envFrames: staleFrames,
+    })
+    renderDashboard()
+    // Form default params.n_envs=8 (hyperparamDefaults). With the
+    // pre-fix `Math.max(observed, requested)` derivation this would
+    // render 16 tabs; the FC-R7G fix pins it to 8.
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs.length).toBe(8)
+  })
 })
