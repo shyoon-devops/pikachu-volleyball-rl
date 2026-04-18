@@ -430,23 +430,8 @@ class PikachuVolleyballEnv(gymnasium.Env):
         # --- AUX 4: approach ball (gradient for early training) ---
         reward += self._approach_reward(state)
 
-        # --- AUX 5: offensive pressure (NEW) ---
-        # When the ball is on the opponent's side, high in the air, and
-        # moving away from the agent, the agent just executed a forward shot.
-        # This nudges policy toward attacking shots over safe self-tosses.
-        # Gated by `is_round_over` so scoring frames don't double-count.
-        if (
-            ball.x > NET_PILLAR_X
-            and ball.y < NET_PILLAR_TOP_Y  # above the net height
-            and ball.vx > 0  # moving into opponent's court
-            and not state.is_round_over
-        ):
-            # Pressure strongest near the net on opponent's side (attacking zone).
-            # Distance-weighted so the reward decays as the ball moves away from net.
-            opp_half = float(GROUND_WIDTH - NET_PILLAR_X)
-            ball_depth = float(ball.x - NET_PILLAR_X)
-            depth_factor = max(0.0, 1.0 - ball_depth / opp_half)
-            reward += self._OFFENSIVE_PRESSURE_REWARD * depth_factor
+        # --- AUX 5: offensive pressure ---
+        reward += self._offensive_pressure_reward(state)
 
         # --- AUX 6: ready position (defensive positioning) ---
         if ball.x > NET_PILLAR_X and not state.is_round_over:
@@ -463,6 +448,29 @@ class PikachuVolleyballEnv(gymnasium.Env):
     # byte-identical to the pre-refactor monolith. Pure helpers (no state
     # mutation) are extracted first; mutation-carrying ones follow.
     # ------------------------------------------------------------------
+    def _offensive_pressure_reward(self, state: Any) -> float:
+        """Distance-weighted bonus when the ball is over the opponent's
+        half, above the net, and still moving forward. Pure — no state
+        mutation.
+
+        Gated by ``not is_round_over`` so scoring frames don't double-
+        count. Depth factor decays linearly from 1.0 at the net pillar
+        to 0.0 at the far wall, so the reward is strongest in the
+        attacking zone (near the opponent's net).
+        """
+        ball = state.ball
+        if (
+            ball.x > NET_PILLAR_X
+            and ball.y < NET_PILLAR_TOP_Y  # above the net height
+            and ball.vx > 0  # moving into opponent's court
+            and not state.is_round_over
+        ):
+            opp_half = float(GROUND_WIDTH - NET_PILLAR_X)
+            ball_depth = float(ball.x - NET_PILLAR_X)
+            depth_factor = max(0.0, 1.0 - ball_depth / opp_half)
+            return self._OFFENSIVE_PRESSURE_REWARD * depth_factor
+        return 0.0
+
     def _approach_reward(self, state: Any) -> float:
         """Gradient shaping when the agent moves toward the ball on its own
         court half. Pure — no state mutation.
