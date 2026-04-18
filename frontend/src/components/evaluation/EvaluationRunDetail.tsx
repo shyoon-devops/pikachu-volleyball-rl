@@ -372,7 +372,7 @@ export function EvaluationRunDetail() {
     <div className="eval-run-detail">
       <nav className="eval-run-detail-breadcrumb" aria-label="Breadcrumb">
         <Link to="/evaluation" className="eval-run-detail-breadcrumb-link">
-          All Trainings
+          Evaluation
         </Link>
         <span className="eval-run-detail-breadcrumb-separator" aria-hidden="true">
           {' › '}

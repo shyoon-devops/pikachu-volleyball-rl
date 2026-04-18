@@ -89,7 +89,7 @@ function App() {
                 */}
                 <Route path="/evaluation" element={
                   <ErrorBoundary>
-                    <TrainingRunList linkBase="/evaluation/" />
+                    <TrainingRunList linkBase="/evaluation/" mode="evaluation" />
                   </ErrorBoundary>
                 } />
                 <Route path="/evaluation/:title" element={

@@ -69,7 +69,9 @@ describe('EvaluationRunDetail (FC-R7C level-2)', () => {
     getModels.mockResolvedValueOnce([])
     renderAt('/evaluation/run-with%20space')
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('run-with space')
-    expect(screen.getByRole('link', { name: /All Trainings/ })).toHaveAttribute(
+    // FC-R7F: breadcrumb renamed "All Trainings" → "Evaluation" to
+    // make the page context unambiguous.
+    expect(screen.getByRole('link', { name: 'Evaluation' })).toHaveAttribute(
       'href', '/evaluation',
     )
     await waitFor(() => {
