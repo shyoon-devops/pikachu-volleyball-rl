@@ -38,6 +38,24 @@ const SCORE_FLASH_MS = 400
 /** Extra slack beyond SCORE_FLASH_MS for the React re-render timer. */
 const FLASH_RERENDER_SLACK_MS = 50
 
+/**
+ * Read the `--batch-cols` custom property off the closest batch-tab
+ * container so keyboard row jumps (↑ / ↓) stay aligned with the CSS
+ * wrap grid — the CSS already sets the value at each breakpoint
+ * (desktop 4 / tablet 3 / mobile 2, see BatchTabBar.css).
+ *
+ * Returns 0 when the property isn't parseable; callers should
+ * default to a sensible fallback (4).
+ */
+function readColsFromCSS(el: HTMLElement | null): number {
+  if (!el) return 0
+  const bar = el.closest('.batch-tab-bar') as HTMLElement | null
+  if (!bar) return 0
+  const raw = getComputedStyle(bar).getPropertyValue('--batch-cols').trim()
+  const n = Number.parseInt(raw, 10)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
 export interface BatchTabBarProps {
   /** Live per-env snapshots, keyed on `env_id`. */
   envFrames: EnvFramesMap
@@ -124,9 +142,30 @@ export function BatchTabBar({
   }, [])
 
   /**
-   * Keyboard: ←/→ cycles, digits 1..8 jump. Digits beyond 8 are
-   * ignored — overflow (nEnvs 9..16) is covered by scroll-snap +
-   * click per spec §5, with no sane 2-digit keyboard binding.
+   * Keyboard: ←/→ cycles within the row-flow order; ↑/↓ jumps up or
+   * down a row in the wrap grid (FC-R6A user report, 2026-04-18).
+   * Digits 1..8 jump to ENV 0..7 absolutely.
+   *
+   * Row math uses the container's computed `--batch-cols` CSS
+   * custom property — the same value the CSS reads for
+   * `flex-basis`, so keyboard navigation matches the visual grid
+   * exactly across breakpoints (4 / 3 / 2 desktop/tablet/mobile).
+   * Fallback to 4 if the property is unset (e.g. during SSR / tests
+   * without full stylesheet evaluation).
+   *
+   * Wrap behaviour:
+   *   - ArrowLeft / ArrowRight: modulo cycle, no row jump.
+   *   - ArrowUp: subtract one row's worth of envs. If the target
+   *     would fall outside [0, N-1], wrap to the equivalent column
+   *     on the last row (so pressing ↑ at the top lands on the
+   *     bottom row, same column).
+   *   - ArrowDown: symmetric — add one row, wrap to the first row
+   *     on overflow.
+   *
+   * Tablist doesn't contain vertical nav per strict WAI-ARIA, but
+   * since our tabs ARE arranged in a grid the user expects 2D nav;
+   * surfacing it doesn't break screen-reader tab cycling (Tab still
+   * exits the bar per roving tabindex).
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -142,6 +181,19 @@ export function BatchTabBar({
       if (e.code === 'ArrowRight') {
         e.preventDefault()
         onSelect((activeEnvId + 1) % clampedN)
+        return
+      }
+      if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+        e.preventDefault()
+        const cols = readColsFromCSS(tabRefs.current[activeEnvId]) || 4
+        const delta = e.code === 'ArrowUp' ? -cols : cols
+        const raw = activeEnvId + delta
+        // Wrap to the equivalent column on the opposite row edge.
+        // `((raw % N) + N) % N` handles negatives; combined with the
+        // column-preserving step, ↑ at top row lands on bottom row's
+        // same col, ↓ at bottom row lands on top row's same col.
+        const next = ((raw % clampedN) + clampedN) % clampedN
+        onSelect(next)
         return
       }
       const digitMatch = e.code.match(/^Digit([1-8])$/)
