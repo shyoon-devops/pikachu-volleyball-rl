@@ -93,7 +93,7 @@ class TrainingManager:
         self,
         hyperparams: dict[str, Any] | None = None,
         bot_level: int = 1,
-        total_timesteps: int = 1_000_000,
+        total_timesteps: int = 2_000_000,
         n_envs: int = 8,
     ) -> str:
         """Start a new training experiment. Returns experiment_id."""
@@ -178,7 +178,7 @@ class TrainingManager:
 
     async def resume(
         self,
-        total_timesteps: int = 1_000_000,
+        total_timesteps: int = 2_000_000,
         n_envs: int = 8,
     ) -> dict[str, Any]:
         """Resume training.
@@ -296,7 +296,7 @@ class TrainingManager:
 
     async def resume_interrupted(
         self,
-        total_timesteps: int = 1_000_000,
+        total_timesteps: int = 2_000_000,
         n_envs: int = 8,
     ) -> str | None:
         """Resume from an interrupted (SIGTERM) session if one exists.
