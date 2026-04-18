@@ -61,7 +61,7 @@ def test_parse_accepts_training_start_defaults():
     # set_level. ``None`` here tells the dispatcher to carry over the
     # current status.bot_level instead of defaulting to 1.
     assert result.payload.bot_level is None
-    assert result.payload.total_timesteps == 1_000_000
+    assert result.payload.total_timesteps == 2_000_000
 
 
 def test_parse_training_start_preserves_explicit_bot_level():
@@ -74,15 +74,16 @@ def test_parse_training_start_preserves_explicit_bot_level():
 
 
 def test_parse_accepts_training_start_with_values():
+    # 100_000 is the new minimum (2026-04-18); 5000 would 400.
     result = parse_ws_message(
         {
             "type": "training:start",
-            "payload": {"bot_level": 3, "total_timesteps": 5000},
+            "payload": {"bot_level": 3, "total_timesteps": 500_000},
         }
     )
     assert isinstance(result, ParsedMessage)
     assert result.payload.bot_level == 3
-    assert result.payload.total_timesteps == 5000
+    assert result.payload.total_timesteps == 500_000
 
 
 def test_parse_accepts_set_level():

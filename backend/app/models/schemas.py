@@ -19,6 +19,24 @@ class GameRecord(BaseModel):
     winner: int = Field(ge=1, le=2)
     duration_frames: int = Field(ge=0)
     rally_count: int = Field(ge=0)
+    # Which RL environment produced this game. "demo" marks the single
+    # standalone demo game LiveFrameCallback plays every play_interval
+    # steps; "0".."7" (string, stable across FE queries) marks one of the
+    # n_envs parallel gradient envs. Optional so legacy pre-A2 records
+    # (all demo-only) still validate — missing value is treated as "demo"
+    # by downstream consumers.
+    env_id: str | None = None
+    # Denormalised training title snapshot. Carries the human label from
+    # the time the match was saved so later renames don't retroactively
+    # orphan history (spec §5). None for pre-title legacy records — FE
+    # renders "-".
+    title: str | None = Field(default=None, max_length=60)
+    # Training episode counter at the moment this game completed
+    # (BE-T6). Snapshotted from ``TrainingManager.current_episode`` so
+    # the Recent Games view + per-run drill-down can render the
+    # episode-in-run axis without a separate fetch. Optional so legacy
+    # pre-T6 rows (FE already ships a "-" fallback) keep loading.
+    episode: int | None = Field(default=None, ge=0)
 
     model_config = {"populate_by_name": True}
 
@@ -49,6 +67,21 @@ class EvaluationRecord(BaseModel):
     avg_score: float
     avg_rally_length: float
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    # Denormalised snapshot of the source training's title at eval time
+    # (spec §5). Stored here rather than joined so a later title rename
+    # doesn't retroactively rewrite historical evaluation rows. None
+    # for evals of legacy pre-title models.
+    #
+    # ``training_title`` is the legacy field name (BE-T1). ``title``
+    # (BE-T11) mirrors the name FE actually filters on — both fields
+    # are populated when either is supplied, so the API response shape
+    # is stable for readers that key off either name.
+    training_title: str | None = Field(default=None, max_length=60)
+    title: str | None = Field(default=None, max_length=60)
+    # UUID of the source training run (BE-T11). Lets FE cross-reference
+    # /api/training/runs without parsing model_path. None for evals of
+    # ad-hoc uploaded models that weren't produced by a tracked run.
+    experiment_id: str | None = Field(default=None)
 
     model_config = {"populate_by_name": True, "protected_namespaces": ()}
 
@@ -83,6 +116,13 @@ class PaginatedResponse(BaseModel):
 
 
 class WsTrainingStartPayload(BaseModel):
+    # Human-readable label the user assigns to this training run
+    # (DESIGN-TRAINING-TITLE.md §0). Optional — empty / whitespace /
+    # missing → the server auto-generates ``run-{adj}-{noun}-{4hex}``
+    # via ``title_service.allocate_title``. Max 60 chars matches the
+    # FE input's maxlength so over-length payloads fail parse-side and
+    # never hit the handler.
+    title: str | None = Field(default=None, max_length=60)
     hyperparams: dict | None = None
     # Bot level is optional so the frontend can own the difficulty dial
     # exclusively via training:set_level / PATCH /api/training/level. When
@@ -90,7 +130,26 @@ class WsTrainingStartPayload(BaseModel):
     # falls back to the current ``status.bot_level`` — no implicit reset
     # to L1. Range check still applies when the field is supplied.
     bot_level: int | None = Field(default=None, ge=1, le=5)
-    total_timesteps: int = Field(default=1_000_000, ge=1000)
+    # total_timesteps range tightened 2026-04-18: ge=100_000 so a typo
+    # like `1000` doesn't silently burn a GPU slot on a run that would
+    # learn nothing; le=10_000_000 to cap unintended runaway runs. FE
+    # default stays at 2M (see chore(training) commit).
+    total_timesteps: int = Field(default=2_000_000, ge=100_000, le=10_000_000)
+    # Parallel env count — PPO rollout width. More envs = more gradient
+    # samples per update but also more GPU memory + more WS env-frame
+    # broadcast bandwidth. 32 caps pragmatically given the 4070 Ti headroom.
+    n_envs: int | None = Field(default=None, ge=1, le=32)
+    # PPO epochs per rollout. Low values under-fit; high values over-fit
+    # on stale rollout data and wreck convergence. 30 is well past
+    # diminishing returns.
+    n_epochs: int | None = Field(default=None, ge=1, le=30)
+    # Entropy bonus coefficient. 0.0 disables exploration bonus entirely
+    # (policy can collapse). 0.05 upper cap picked so exploration can't
+    # swamp the task-reward signal.
+    ent_coef: float | None = Field(default=None, ge=0.0, le=0.05)
+    # GAE lambda — advantage-estimator bias/variance knob. 0.9 is the
+    # aggressively-biased end; 1.0 is plain discounted returns.
+    gae_lambda: float | None = Field(default=None, ge=0.9, le=1.0)
 
 
 class WsSetLevelPayload(BaseModel):

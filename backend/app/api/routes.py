@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import shutil
+from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -20,14 +21,21 @@ from backend.app.metrics import (
     sample_runtime_metrics,
 )
 from backend.app.models.schemas import PaginatedResponse
+from backend.app.services.eval_jobs import EvalJobRegistry
 from backend.app.services.metrics_service import allowed_buckets
 from backend.app.util.ttl_cache import cache_ttl
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Limit concurrent evaluations (each can run minutes)
+# Limit concurrent evaluations (each can run minutes). Evaluations now
+# run as background tasks; the semaphore still gates them to 1-at-a-time
+# so a flood of POSTs cannot starve the GPU or spawn parallel PPO loads.
 _eval_semaphore = asyncio.Semaphore(1)
+
+# In-memory job registry — async-safe, LRU-capped. See eval_jobs.py for
+# the rationale on why restart-loss of in-flight state is acceptable.
+_eval_jobs = EvalJobRegistry()
 
 # Health check thresholds
 _DISK_USAGE_THRESHOLD = 0.90  # 90%
@@ -348,6 +356,31 @@ async def training_level_get(request: Request):
     return {"level": training_service.status()["bot_level"]}
 
 
+@router.get("/training/titles")
+@endpoint_guard("training_titles")
+async def training_titles(
+    request: Request,
+    q: str | None = Query(default=None, max_length=60),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """List training titles for FE autocomplete / duplicate check.
+
+    Spec references DESIGN-TRAINING-TITLE.md §1 (debounced uniqueness
+    lookup) and §3 (autocomplete combobox). ``q`` is a case-insensitive
+    substring filter — missing ``q`` returns the most recent ``limit``
+    titles. The service returns plain dicts so the FE can render the
+    "prior run's date" hint on a duplicate without a second fetch.
+    """
+    runs_service = getattr(request.app.state, "training_runs_service", None)
+    if runs_service is None:
+        # Training runs collection hasn't been initialized (likely a
+        # no-Mongo test harness). Surface an empty list rather than 503
+        # so the FE autocomplete degrades gracefully.
+        return {"titles": []}
+    titles = await runs_service.list_titles(q=q, limit=limit)
+    return {"titles": titles}
+
+
 @router.patch("/training/level")
 @endpoint_guard("training_level_patch")
 async def training_level_patch(request: Request, body: TrainingLevelPatch):
@@ -535,17 +568,173 @@ async def training_metrics_aggregate(
 
 @router.get("/games")
 @endpoint_guard("list_games")
-@cache_ttl(seconds=5, max_entries=64, include=("page", "limit"))
+@cache_ttl(seconds=5, max_entries=64, include=("page", "limit", "title"))
 async def list_games(
     request: Request,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    title: str | None = Query(default=None, max_length=60),
 ):
+    """List completed games, optionally filtered by title (BE-T5).
+
+    ``title`` — exact-match filter for the drill-down from the
+    per-run aggregation view. ``title=untitled`` buckets pre-title
+    legacy rows so the FE has a stable click-through.
+    """
     game_service = getattr(request.app.state, "game_service", None)
     if game_service is None:
         logger.warning("list_games called but game_service is not initialized")
         raise HTTPException(status_code=503, detail="Game service not available")
-    return await game_service.get_games(page=page, limit=limit)
+    return await game_service.get_games(page=page, limit=limit, title=title)
+
+
+# Canonical hyperparam shape surfaced alongside each run row
+# (BE-T10). Every field is always present — legacy runs that predate
+# BE-T10 (no stored hyperparams doc) get the library defaults so the
+# FE never has to branch on missing keys. Defaults mirror
+# ``backend.rl.trainer.DEFAULT_HYPERPARAMS`` + the service-level
+# defaults for the two non-PPO dials (n_envs, total_timesteps).
+_RUN_HYPERPARAM_FIELDS: dict[str, Any] = {
+    "n_envs": 8,
+    "total_timesteps": 2_000_000,
+    "learning_rate": 3e-4,
+    "n_steps": 2048,
+    "batch_size": 64,
+    "n_epochs": 10,
+    "gamma": 0.99,
+    "clip_range": 0.2,
+    "ent_coef": 0.01,
+    "gae_lambda": 0.95,
+}
+
+
+def _normalize_hyperparams(stored: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a canonical hyperparam dict for /api/training/runs.
+
+    Missing keys are filled from ``_RUN_HYPERPARAM_FIELDS``, so the FE
+    renders a consistent shape for every run regardless of whether
+    BE-T10 was live at start time.
+    """
+    src = stored or {}
+    out: dict[str, Any] = {}
+    for key, default in _RUN_HYPERPARAM_FIELDS.items():
+        val = src.get(key)
+        out[key] = val if val is not None else default
+    return out
+
+
+async def _decorate_runs_with_hyperparams(
+    request: Request, rows: list[dict[str, Any]]
+) -> None:
+    """Join hyperparams onto each aggregation row in place.
+
+    Bulk ``$in`` lookup so the query cost is O(1) regardless of page
+    size. Rows without a training_runs record (pre-T10 games, demo-only
+    experiments) get the canonical defaults via normalize so FE never
+    sees a missing key.
+    """
+    runs_service = getattr(request.app.state, "training_runs_service", None)
+    exp_ids = [row.get("experiment_id") for row in rows if row.get("experiment_id")]
+    lookup: dict[str, dict[str, Any]] = {}
+    if runs_service is not None and exp_ids:
+        try:
+            lookup = await runs_service.get_by_experiment_ids(exp_ids)
+        except Exception:  # noqa: BLE001 — degrade to defaults-only
+            logger.exception("training_runs hyperparam lookup failed")
+    for row in rows:
+        exp_id = row.get("experiment_id") or ""
+        run_doc = lookup.get(exp_id) or {}
+        row["hyperparams"] = _normalize_hyperparams(run_doc.get("hyperparams"))
+
+
+def _overlay_running_status(
+    request: Request, rows: list[dict[str, Any]]
+) -> None:
+    """Flip ``status`` to "running" on the row matching the live title."""
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is None:
+        return
+    status = training_service.status()
+    if status.get("state") != "running":
+        return
+    live_title = (status.get("title") or "").strip()
+    if not live_title:
+        return
+    for row in rows:
+        if (row.get("title") or "") == live_title:
+            row["status"] = "running"
+
+
+@router.get("/training/runs")
+@endpoint_guard("training_runs_aggregate")
+@cache_ttl(seconds=5, max_entries=16, include=("page", "limit"))
+async def list_training_runs(
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Per-title training-run aggregates (BE-T4 + BE-T10).
+
+    Powers the history page's 1st-level drill-down view. Delegates
+    grouping to MongoDB so a multi-GB ``games`` collection doesn't
+    stream into Python. Each row is decorated with a canonical
+    ``hyperparams`` sub-object joined from the ``training_runs``
+    collection. Status is overlaid with "running" when the row
+    matches the live training manager's current title.
+    """
+    game_service = getattr(request.app.state, "game_service", None)
+    if game_service is None:
+        raise HTTPException(status_code=503, detail="Game service not available")
+
+    aggregated = await game_service.aggregate_by_title(page=page, limit=limit)
+    await _decorate_runs_with_hyperparams(request, aggregated.data)
+    _overlay_running_status(request, aggregated.data)
+    return aggregated
+
+
+@router.get("/training/runs/{title}")
+@endpoint_guard("training_run_by_title")
+async def get_training_run(request: Request, title: str):
+    """Single-run drill-down for the FE detail view (BE-T10).
+
+    Returns the same shape as ``/api/training/runs`` entries plus
+    the hyperparams join. 404 when no games exist under the title.
+    Supports the literal ``"untitled"`` bucket for pre-title rows.
+    """
+    if not title or len(title) > 60:
+        raise HTTPException(status_code=400, detail="Invalid title")
+    game_service = getattr(request.app.state, "game_service", None)
+    if game_service is None:
+        raise HTTPException(status_code=503, detail="Game service not available")
+
+    # Reuse the aggregation to keep win_rate / avg_rally_length math
+    # in one place. Page 1/limit large-enough-to-see-anything — but
+    # capped so an API caller can't DoS the endpoint by asking for
+    # a giant page.
+    aggregated = await game_service.aggregate_by_title(page=1, limit=100)
+    row = next(
+        (r for r in aggregated.data if (r.get("title") or "") == title),
+        None,
+    )
+    if row is None:
+        # The aggregation pagination cap may have missed this title —
+        # walk subsequent pages until we find it or exhaust the list.
+        # In practice the cap should never be hit (total titles <<< 100
+        # in single-user dev setups) but we handle it for correctness.
+        page_ix = 2
+        while row is None and (page_ix - 1) * 100 < aggregated.total:
+            more = await game_service.aggregate_by_title(page=page_ix, limit=100)
+            row = next(
+                (r for r in more.data if (r.get("title") or "") == title),
+                None,
+            )
+            page_ix += 1
+    if row is None:
+        raise HTTPException(status_code=404, detail="Training run not found")
+
+    await _decorate_runs_with_hyperparams(request, [row])
+    _overlay_running_status(request, [row])
+    return row
 
 
 @router.get("/games/{game_id}")
@@ -617,29 +806,243 @@ async def get_replay(request: Request, game_id: str):
     return {"game_id": game_id, "frames": frames, "game": game}
 
 
+def _parse_checkpoint_filename(stem: str) -> tuple[str | None, int | None]:
+    """Return ``(slug, step)`` parsed from a ``{slug}__{exp8}__{step}`` stem.
+
+    Legacy files (``{exp_id}/final``, ``{exp_id}/200000``) have no
+    double-underscore marker and return ``(None, None)``. The ``step``
+    segment can be either an int string or the literal ``"final"`` —
+    we coerce ``"final"`` to a sentinel large-but-finite integer so it
+    always sorts above numbered checkpoints for the UI "latest" view.
+    """
+    parts = stem.split("__")
+    if len(parts) < 3:
+        return None, None
+    slug = parts[0] or None
+    step_str = parts[-1]
+    if step_str == "final":
+        # Finite sentinel — large enough to win a ``key=step desc``
+        # sort against any real step value we'd actually train to.
+        return slug, 10**12
+    try:
+        return slug, int(step_str)
+    except ValueError:
+        return slug, None
+
+
 @router.get("/models")
 @endpoint_guard("list_models")
-@cache_ttl(seconds=10, max_entries=1)
-async def list_models():
+@cache_ttl(seconds=10, max_entries=8, include=("title", "limit"))
+async def list_models(
+    title: str | None = Query(default=None, max_length=60),
+    limit: int | None = Query(default=None, ge=1, le=500),
+):
+    """List model checkpoints, optionally filtered by training title (BE-T8).
+
+    Without ``title``: returns every ``*.zip`` under ``MODEL_DIR`` with
+    the legacy ``{path, size_bytes}`` shape plus the new enriched
+    fields (``filename``, ``slug``, ``step``, ``created_at``, ``title``).
+    Legacy callers that only read ``path`` / ``size_bytes`` keep working.
+
+    With ``title``: returns ONLY checkpoints whose filename slug
+    matches ``slugify(title)``. Sorted by ``step`` desc (latest first)
+    per the drill-down spec. Unparseable filenames are excluded from
+    the filtered response.
+    """
+    from backend.app.services.title_service import slugify
+
     model_dir = Path(os.getenv("MODEL_DIR", "./models")).resolve()
     if not model_dir.exists():
         logger.info("list_models: model_dir missing (%s)", model_dir)
         return {"models": []}
     try:
-        files = sorted(
-            model_dir.rglob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
+        files = list(model_dir.rglob("*.zip"))
     except OSError:
         logger.exception("list_models: failed to scan model_dir=%s", model_dir)
         raise HTTPException(status_code=500, detail="Failed to read model directory")
-    # Only include files that resolve within the model directory
+    # Defensive: a ``.zip`` symlinked outside the model dir would be a
+    # path-traversal smell. Exclude it.
     safe_files = [f for f in files if str(f.resolve()).startswith(str(model_dir))]
-    return {
-        "models": [
-            {"path": str(f.relative_to(model_dir)), "size_bytes": f.stat().st_size}
-            for f in safe_files
-        ]
-    }
+
+    filter_slug: str | None = None
+    if title is not None:
+        filter_slug = slugify(title)
+
+    rows: list[dict[str, Any]] = []
+    for f in safe_files:
+        stat = f.stat()
+        slug, step = _parse_checkpoint_filename(f.stem)
+        if filter_slug is not None and slug != filter_slug:
+            continue
+        rows.append({
+            # Backward-compat fields for callers that haven't migrated.
+            "path": str(f.relative_to(model_dir)),
+            "size_bytes": stat.st_size,
+            # Enriched fields (BE-T8).
+            "filename": f.name,
+            "slug": slug,
+            # Surfaced as ``title`` for the FE drill-down — this is the
+            # slug extracted from the filename, not the original user
+            # title. Good enough for the evaluation dialog's label.
+            "title": slug,
+            "step": step,
+            "created_at": datetime.fromtimestamp(
+                stat.st_mtime, tz=timezone.utc
+            ).isoformat(),
+        })
+
+    if filter_slug is not None:
+        # Drill-down view: newest-step-first. Rows whose step didn't
+        # parse go to the tail so the UI can still render them.
+        rows.sort(key=lambda r: (r["step"] is None, -(r["step"] or 0)))
+    else:
+        # Default view keeps the old mtime-desc ordering so the
+        # evaluation dialog's "latest model" dropdown stays stable.
+        rows.sort(
+            key=lambda r: r.get("created_at") or "",
+            reverse=True,
+        )
+    if limit is not None:
+        rows = rows[:limit]
+    return {"models": rows}
+
+
+class DeleteModelsRequest(BaseModel):
+    """Bulk-delete request body for ``DELETE /api/models`` (BE-T9)."""
+
+    # Capped at 100 so a stray loop on the FE can't issue an arbitrarily
+    # large delete. Empty list is accepted (no-op) so the FE can replay
+    # the last request idempotently after a network blip.
+    paths: list[str] = Field(default_factory=list, max_length=100)
+
+
+@router.delete("/models")
+@endpoint_guard("delete_models")
+async def delete_models(request: Request, body: DeleteModelsRequest):
+    """Bulk-delete checkpoint files under ``MODEL_DIR`` (BE-T9).
+
+    Per-path validation:
+      * Must resolve inside ``MODEL_DIR`` (path-traversal rejection).
+      * Must not be the active training run's experiment directory
+        (returns 409 for the whole request — "fail loud, fail early"
+        so the UI shows the user exactly which run is protected).
+      * File must exist — missing paths appear in ``failed`` as
+        ``reason="not_found"``.
+      * Symlinks resolved, never followed outside ``MODEL_DIR``.
+
+    Response shape:
+      { "deleted": ["a.zip", "b.zip"],
+        "failed":  [{"path": "c.zip", "reason": "..."}] }
+    """
+    model_dir = Path(os.getenv("MODEL_DIR", "./models")).resolve()
+
+    # Active-training protection. If ANY requested path points into
+    # the running experiment's directory, reject the WHOLE batch with
+    # 409 — FE can then re-surface the list minus the protected rows.
+    # Deliberately coarse: protecting individual files inside the
+    # active dir is still racy (the training thread may write a new
+    # checkpoint between our check and the unlink), so the safe
+    # boundary is the directory.
+    training_service = getattr(request.app.state, "training_service", None)
+    active_exp_dir: Path | None = None
+    if training_service is not None:
+        status = training_service.status()
+        if status.get("state") == "running":
+            active_exp_id = status.get("experiment_id") or ""
+            if active_exp_id:
+                active_exp_dir = (model_dir / active_exp_id).resolve()
+
+    # Two-pass: resolve + validate every path first so a protected
+    # entry can abort the batch before any ``unlink`` runs. Partial
+    # deletion before a 409 would be worse than useless — the user
+    # couldn't tell from the response which files are still on disk.
+    resolved: list[tuple[str, Path]] = []
+    failed: list[dict[str, str]] = []
+    protected: list[str] = []
+
+    for raw_path in body.paths:
+        rel = (raw_path or "").strip()
+        if not rel:
+            failed.append({"path": raw_path, "reason": "empty_path"})
+            continue
+        # Strip any leading ``models/`` the FE may have supplied so
+        # the UX matches the ``path`` field /api/models returns.
+        if rel.startswith(("models/", "./models/")):
+            rel = rel.split("models/", 1)[1]
+
+        try:
+            target = (model_dir / rel).resolve()
+        except (OSError, ValueError):
+            failed.append({"path": raw_path, "reason": "invalid_path"})
+            continue
+
+        # Containment check — rejects ``..``, absolute paths escaping
+        # the model dir, and symlinks pointing elsewhere.
+        try:
+            target.relative_to(model_dir)
+        except ValueError:
+            logger.warning(
+                "delete_models: traversal rejected path=%r resolved=%s",
+                raw_path, target,
+            )
+            failed.append({"path": raw_path, "reason": "outside_model_dir"})
+            continue
+
+        if active_exp_dir is not None:
+            try:
+                target.relative_to(active_exp_dir)
+                protected.append(raw_path)
+                continue
+            except ValueError:
+                # Not inside the active dir — allowed to delete.
+                pass
+
+        resolved.append((raw_path, target))
+
+    if protected:
+        logger.info(
+            "delete_models: %d path(s) belonged to active run; rejecting batch",
+            len(protected),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Refusing to delete checkpoints of an active run",
+                "protected": protected,
+            },
+        )
+
+    deleted: list[str] = []
+    for raw_path, target in resolved:
+        if not target.exists():
+            failed.append({"path": raw_path, "reason": "not_found"})
+            continue
+        if not target.is_file():
+            failed.append({"path": raw_path, "reason": "not_a_file"})
+            continue
+
+        try:
+            size = target.stat().st_size
+            target.unlink()
+        except OSError as e:
+            logger.exception("delete_models: unlink failed for %s", target)
+            failed.append({"path": raw_path, "reason": f"unlink_failed: {e}"})
+            continue
+        deleted.append(raw_path)
+        # Audit trail — INFO level so the operator can reconstruct
+        # who deleted what without turning on debug logs.
+        logger.info(
+            "delete_models: removed %s (%d bytes)",
+            target,
+            size,
+        )
+
+    logger.info(
+        "delete_models: deleted=%d failed=%d",
+        len(deleted),
+        len(failed),
+    )
+    return {"deleted": deleted, "failed": failed}
 
 
 class EvalRunRequest(BaseModel):
@@ -650,9 +1053,144 @@ class EvalRunRequest(BaseModel):
     n_games: int = Field(default=50, ge=1, le=500)
 
 
-@router.post("/evaluation/run")
+def _experiment_id_from_model_path(model_path: str) -> str | None:
+    """Extract the experiment_id from a model_path (BE-T11).
+
+    ``model_path`` is served as ``{experiment_id}/{slug}__{exp8}__{step}.zip``
+    per the T2 checkpoint layout. The first path segment IS the
+    experiment_id. Returns ``None`` when the path doesn't match this
+    shape (ad-hoc uploads, legacy flat layouts) so the caller can
+    degrade gracefully to a title-less record.
+    """
+    if not model_path:
+        return None
+    # Normalise back-slashes that might slip in from a Windows client.
+    rel = model_path.replace("\\", "/")
+    # Strip optional leading ./ and any ``models/`` prefix — the FE may
+    # send either form depending on which endpoint it first hit.
+    rel = rel.removeprefix("./")
+    if rel.startswith("models/"):
+        rel = rel.split("models/", 1)[1]
+    head, _, _ = rel.partition("/")
+    if not head or "." in head:
+        # Flat layout like ``final.zip`` — no experiment_id to extract.
+        return None
+    return head
+
+
+async def _resolve_training_identity(
+    request: Any, model_path: str
+) -> tuple[str | None, str | None]:
+    """Return ``(title, experiment_id)`` for a model path (BE-T11).
+
+    Used by the evaluation job to denormalise training identity onto
+    the saved eval record. Resolution order:
+
+      1. Extract ``experiment_id`` from the path's first segment.
+      2. If the live TrainingManager is running that experiment, read
+         its ``title`` directly (fastest + handles the in-flight case).
+      3. Otherwise look the title up in the ``training_runs``
+         collection via ``TrainingRunsService.get_by_experiment_ids``.
+      4. Any step missing → ``(None, None)`` so the record is simply
+         title-less.
+    """
+    exp_id = _experiment_id_from_model_path(model_path)
+    if exp_id is None:
+        return None, None
+
+    # Live-training fast-path.
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is not None:
+        try:
+            status = training_service.status()
+            if (
+                status.get("experiment_id") == exp_id
+                and (status.get("title") or "")
+            ):
+                return status["title"], exp_id
+        except Exception:  # noqa: BLE001 — defensive; fall through to db
+            logger.debug("training_service.status() threw during eval job setup")
+
+    # Persisted lookup for stopped runs.
+    runs_service = getattr(request.app.state, "training_runs_service", None)
+    if runs_service is None:
+        return None, exp_id
+    try:
+        lookup = await runs_service.get_by_experiment_ids([exp_id])
+    except Exception:  # noqa: BLE001
+        logger.exception("training_runs lookup failed for exp=%s", exp_id)
+        return None, exp_id
+    doc = lookup.get(exp_id)
+    if doc is None:
+        return None, exp_id
+    return (doc.get("title") or None), exp_id
+
+
+async def _run_evaluation_job(
+    job_id: str,
+    eval_service: Any,
+    body: EvalRunRequest,
+    loop: asyncio.AbstractEventLoop,
+    training_title: str | None = None,
+    experiment_id: str | None = None,
+) -> None:
+    """Background task body for a single evaluation.
+
+    Runs under ``_eval_semaphore`` so only one evaluation executes at a
+    time even if multiple POSTs queue up. Exceptions are caught and
+    surfaced through the job registry — they MUST NOT propagate, or the
+    task would die silently and the poller would see a stuck "running".
+    """
+    # Progress callback fires on the worker thread; marshal the state
+    # update back onto the event loop so the registry lock stays on a
+    # single thread. Fire-and-forget — a dropped progress update is a
+    # cosmetic issue, not a correctness one.
+    def _on_progress(current: int, total: int) -> None:
+        asyncio.run_coroutine_threadsafe(
+            _eval_jobs.update_progress(job_id, current), loop
+        )
+
+    async with _eval_semaphore:
+        try:
+            # Total isn't known inside the evaluator at callback-time, so
+            # seed it here from the request before running. This also
+            # gives the UI a "0 / N" to render while waiting on game 1.
+            await _eval_jobs.mark_running(job_id, body.n_games)
+            result = await eval_service.run(
+                model_path=body.model_path,
+                bot_level=body.bot_level,
+                n_games=body.n_games,
+                progress_callback=_on_progress,
+                training_title=training_title,
+                experiment_id=experiment_id,
+            )
+        except FileNotFoundError as e:
+            logger.info("eval job %s: %s", job_id, e)
+            await _eval_jobs.mark_failed(job_id, f"not_found: {e}")
+            return
+        except Exception as e:  # noqa: BLE001
+            logger.exception("eval job %s crashed", job_id)
+            await _eval_jobs.mark_failed(job_id, f"{type(e).__name__}: {e}")
+            return
+
+    await _eval_jobs.mark_done(job_id, result)
+    logger.info(
+        "eval job %s ok model=%s bot_level=%d n_games=%d",
+        job_id, body.model_path, body.bot_level, body.n_games,
+    )
+
+
+@router.post("/evaluation/run", status_code=202)
 @endpoint_guard("run_evaluation")
 async def run_evaluation(request: Request, body: EvalRunRequest):
+    """Fire-and-forget evaluation: returns immediately with a job_id.
+
+    The evaluation itself (minutes to tens of minutes) runs as a
+    background asyncio task. Poll GET /api/evaluation/status/{job_id}
+    for progress and the final result. 409 is still returned when
+    another job is already running — FE can render "busy" without
+    having to mint a dead job id.
+    """
     eval_service = getattr(request.app.state, "eval_service", None)
     if eval_service is None:
         logger.warning("run_evaluation called but eval_service is not initialized")
@@ -660,28 +1198,149 @@ async def run_evaluation(request: Request, body: EvalRunRequest):
     if _eval_semaphore.locked():
         logger.info("run_evaluation rejected — another evaluation is in progress")
         raise HTTPException(status_code=409, detail="Evaluation already in progress")
-    async with _eval_semaphore:
+
+    # Synchronous path pre-flight — traversal / missing-file errors come
+    # back as a 404 on the POST itself. Otherwise the job would always
+    # accept (202), only for the poller to discover the failure on the
+    # next tick. Keeps backward-compat with callers that treat the POST
+    # as "reject-fast on obvious input errors".
+    if hasattr(eval_service, "validate_model_path"):
         try:
-            result = await eval_service.run(
-                model_path=body.model_path,
-                bot_level=body.bot_level,
-                n_games=body.n_games,
-            )
+            eval_service.validate_model_path(body.model_path)
         except FileNotFoundError as e:
-            logger.info("run_evaluation: %s", e)
+            logger.info("run_evaluation rejected: %s", e)
             raise HTTPException(status_code=404, detail=str(e))
-    logger.info(
-        "run_evaluation ok model=%s bot_level=%d n_games=%d",
-        body.model_path, body.bot_level, body.n_games,
+
+    # Resolve training identity SYNCHRONOUSLY before accepting the job
+    # (BE-T11): the POST returns 202 immediately, so the background
+    # task can't ask the event-loop to read request.app.state once the
+    # request context is gone.
+    training_title, experiment_id = await _resolve_training_identity(
+        request, body.model_path
     )
-    return result
+
+    job_id = await _eval_jobs.create()
+    loop = asyncio.get_running_loop()
+    # Detach the task — we never await it; the response must return now
+    # so nginx's upstream timeout does not eat the HTTP connection.
+    asyncio.create_task(
+        _run_evaluation_job(
+            job_id, eval_service, body, loop,
+            training_title=training_title,
+            experiment_id=experiment_id,
+        ),
+        name=f"eval-job-{job_id}",
+    )
+    logger.info(
+        "eval job %s accepted model=%s bot_level=%d n_games=%d title=%s",
+        job_id, body.model_path, body.bot_level, body.n_games, training_title,
+    )
+    return {"job_id": job_id, "state": "pending"}
+
+
+@router.get("/evaluation/status/{job_id}")
+@endpoint_guard("get_evaluation_status")
+async def get_evaluation_status(job_id: str):
+    """Return the current state of an async evaluation job.
+
+    Response shape is stable across states; ``result`` is populated only
+    when ``state == "done"`` and ``error`` only when ``state == "failed"``.
+    Unknown job_id returns 404 so FE polling loops can detect evicted /
+    restart-lost jobs cleanly.
+    """
+    job = await _eval_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": job["job_id"],
+        "state": job["state"],
+        "progress": {
+            "current": job["progress_current"],
+            "total": job["progress_total"],
+        },
+        "result": job["result"],
+        "error": job["error"],
+        "created_at": job["created_at"],
+        "started_at": job["started_at"],
+        "finished_at": job["finished_at"],
+    }
+
+
+async def _backfill_eval_titles(
+    request: Request, docs: list[dict[str, Any]]
+) -> None:
+    """Populate ``title`` on legacy evaluation docs in place (BE-T12).
+
+    Legacy docs (saved before BE-T11) have no ``title`` / no
+    ``experiment_id``. We extract ``experiment_id`` from ``model_path``
+    where we can, bulk-lookup the ``training_runs`` collection in one
+    round-trip, and inject ``title`` (+ ``experiment_id`` for good
+    measure) on the response dict so the FE's title-filter matches.
+
+    Runs AFTER ``eval_service.get_results()`` so a db outage on the
+    runs-service path degrades to "no title on legacy rows" rather
+    than breaking the whole endpoint.
+    """
+    # Figure out which docs actually need backfill.
+    needs: list[tuple[dict[str, Any], str]] = []  # (doc, exp_id)
+    for d in docs:
+        if d.get("title") or d.get("training_title"):
+            # Already has a title snapshot — nothing to backfill.
+            continue
+        exp_id = d.get("experiment_id") or _experiment_id_from_model_path(
+            d.get("model_path", "")
+        )
+        if exp_id:
+            needs.append((d, exp_id))
+            # Surface exp_id on the doc too so the FE can cross-link
+            # without re-parsing model_path on its side.
+            d.setdefault("experiment_id", exp_id)
+
+    if not needs:
+        return
+    runs_service = getattr(request.app.state, "training_runs_service", None)
+    if runs_service is None:
+        return
+
+    exp_ids = list({exp_id for _, exp_id in needs})
+    try:
+        lookup = await runs_service.get_by_experiment_ids(exp_ids)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "evaluation title backfill: training_runs lookup failed for %d exp(s)",
+            len(exp_ids),
+        )
+        return
+
+    for doc, exp_id in needs:
+        run_doc = lookup.get(exp_id)
+        if run_doc is None:
+            continue
+        title = run_doc.get("title")
+        if title:
+            doc["title"] = title
+            # Keep ``training_title`` aligned for readers keying off it.
+            doc.setdefault("training_title", title)
 
 
 @router.get("/evaluation/results")
 @endpoint_guard("get_evaluation_results")
 async def get_evaluation_results(request: Request):
+    """List recent evaluations; legacy rows get ``title`` backfilled (BE-T12).
+
+    Backfill walks rows missing ``title`` / ``training_title``, pulls
+    the source training's title from the ``training_runs`` collection
+    via the experiment_id (either stored on the row or parsed from
+    ``model_path``), and mutates the response dict in place so the
+    FE's title filter matches. Degrades to "no title" on lookup
+    failures — never blocks the endpoint.
+    """
     eval_service = getattr(request.app.state, "eval_service", None)
     if eval_service is None:
         logger.info("get_evaluation_results called before eval_service init")
         return {"data": []}
-    return await eval_service.get_results()
+    response = await eval_service.get_results()
+    docs = response.get("data") or []
+    if isinstance(docs, list):
+        await _backfill_eval_titles(request, docs)
+    return response

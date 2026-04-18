@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { ConnectionState, GameRecord, GameState, TrainingMetrics, TrainingStatus } from '../../lib/types'
+import type { EnvFramesMap } from '../../hooks/useTrainingState'
 
 // Partial shape returned by useTrainingState — easy to swap per-test.
 interface MockState {
@@ -11,6 +12,8 @@ interface MockState {
   metrics: TrainingMetrics[]
   latestFrame: GameState | null
   recentGames: GameRecord[]
+  envFrames: EnvFramesMap
+  gameResultSeq: number
   send: () => void
 }
 
@@ -21,6 +24,8 @@ const mockState: MockState = {
   metrics: [],
   latestFrame: null,
   recentGames: [],
+  envFrames: {},
+  gameResultSeq: 0,
   send: vi.fn(),
 }
 
@@ -56,6 +61,8 @@ function resetMockState(overrides: Partial<MockState> = {}) {
     metrics: [],
     latestFrame: null,
     recentGames: [],
+    envFrames: {},
+    gameResultSeq: 0,
     send: vi.fn(),
     ...overrides,
   })
@@ -162,6 +169,93 @@ describe('Dashboard loading state', () => {
     expect(call[1]).not.toHaveProperty('bot_level')
   })
 
+  // ── FC-R5: extended hyperparams unbundle into top-level + blob ──
+  it('training:start unbundles top-level fields per HYPERPARAM_WIRE_POSITION', () => {
+    // BE cc4daaf3 accepts total_timesteps / n_envs / n_epochs /
+    // ent_coef / gae_lambda at the top level of the payload; the
+    // remaining 5 fields ride inside `hyperparams`. Verify both
+    // sides of the split.
+    const send = vi.fn()
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0, botLevel: 4 },
+      send,
+    })
+    renderDashboard()
+
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const [, payload] = send.mock.calls[0] as [string, Record<string, unknown>]
+    // Top-level fields — must be on the outer payload, not in the blob.
+    expect(payload).toHaveProperty('total_timesteps')
+    expect(payload).toHaveProperty('n_envs')
+    expect(payload).toHaveProperty('n_epochs')
+    expect(payload).toHaveProperty('ent_coef')
+    expect(payload).toHaveProperty('gae_lambda')
+    // PPO ctor args — must live inside hyperparams.
+    const blob = payload.hyperparams as Record<string, unknown>
+    expect(blob).toHaveProperty('learning_rate')
+    expect(blob).toHaveProperty('n_steps')
+    expect(blob).toHaveProperty('batch_size')
+    expect(blob).toHaveProperty('gamma')
+    expect(blob).toHaveProperty('clip_range')
+    // And the inverse — no top-level PPO-ctor leakage.
+    expect(payload).not.toHaveProperty('learning_rate')
+    expect(payload).not.toHaveProperty('gamma')
+  })
+
+  // ── FC-R6G: title in training:start payload ──
+  it('training:start payload includes a (possibly empty) title field', () => {
+    // BE T1 (a7351e57) accepts `title: str | None`; empty triggers
+    // BE auto-gen. FE sends verbatim without gating on empty.
+    const send = vi.fn()
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      send,
+    })
+    renderDashboard()
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+    const [, payload] = send.mock.calls[0] as [string, Record<string, unknown>]
+    // Title key present on the outer payload (not nested in hyperparams).
+    expect(payload).toHaveProperty('title')
+    expect(typeof payload.title).toBe('string')
+    // Default form state has no user input → empty string allowed.
+    expect(payload.title).toBe('')
+  })
+
+  // R7A follow-up — React error #310 ("Rendered more hooks than
+  // during the previous render"). Skeleton gate used to sit between
+  // the hooks; transitioning from skeleton (connecting + no data) to
+  // the real UI (connected + data) ran a different number of hooks
+  // across consecutive renders and React tore down the tree. The
+  // gate now lives below every hook, so this transition must be
+  // stable.
+  it('transitions from skeleton to real UI without hook-order violation', () => {
+    resetMockState({ connectionState: 'connecting' })
+    const { rerender } = renderDashboard()
+    expect(screen.getByRole('status', { name: /loading dashboard/i })).toBeInTheDocument()
+
+    // Simulate WS connect + data landing → gate flips to false.
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      metrics: [
+        { step: 1, episode: 1, meanReward: 0, winRate: 0, policyLoss: 0, valueLoss: 0 } as TrainingMetrics,
+      ],
+    })
+    expect(() =>
+      rerender(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>,
+      ),
+    ).not.toThrow()
+    expect(screen.queryByRole('status', { name: /loading dashboard/i })).not.toBeInTheDocument()
+    expect(screen.getByTestId('game-canvas')).toBeInTheDocument()
+  })
+
   it('does not show the skeleton when reconnecting mid-session with data present', () => {
     resetMockState({
       connectionState: 'connecting',
@@ -176,5 +270,74 @@ describe('Dashboard loading state', () => {
     })
     renderDashboard()
     expect(screen.queryByRole('status', { name: /loading dashboard/i })).not.toBeInTheDocument()
+  })
+
+  // FC-R7G + FC-R8a: tabs follow observed envFrames ONLY while
+  // training is active; otherwise the bar is replaced by a
+  // placeholder. The old `observed` inflation bug (stale keys from
+  // a prior run fueling max() against a smaller new run) is
+  // eliminated by ignoring the form value entirely for tab count.
+  it('hides tabs (shows "no active run" placeholder) when stopped', () => {
+    const staleFrames: EnvFramesMap = {}
+    for (let i = 0; i < 16; i++) {
+      staleFrames[i] = {
+        envId: i,
+        frame: null,
+        score: [0, 0],
+        stateName: 'play',
+        stepCount: 0,
+      } as unknown as EnvFramesMap[number]
+    }
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      envFrames: staleFrames,
+    })
+    renderDashboard()
+    // No tabs rendered — placeholder surfaces instead.
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(screen.getByText(/No active training/)).toBeInTheDocument()
+  })
+
+  it('shows exactly as many tabs as observed envFrames while running', () => {
+    const runningFrames: EnvFramesMap = {}
+    for (let i = 0; i < 4; i++) {
+      runningFrames[i] = {
+        envId: i,
+        frame: null,
+        score: [0, 0],
+        stateName: 'play',
+        stepCount: 0,
+      } as unknown as EnvFramesMap[number]
+    }
+    resetMockState({
+      connectionState: 'connected',
+      status: {
+        state: 'running',
+        currentStep: 100,
+        currentEpisode: 1,
+        experimentId: 'exp-small',
+      },
+      envFrames: runningFrames,
+    })
+    renderDashboard()
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs.length).toBe(4)
+  })
+
+  it('shows a "waiting" placeholder while running + no env frames yet (refresh window)', () => {
+    resetMockState({
+      connectionState: 'connected',
+      status: {
+        state: 'running',
+        currentStep: 0,
+        currentEpisode: 0,
+        experimentId: 'exp-fresh',
+      },
+      envFrames: {},
+    })
+    renderDashboard()
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(screen.getByText(/Waiting for environment data/)).toBeInTheDocument()
   })
 })

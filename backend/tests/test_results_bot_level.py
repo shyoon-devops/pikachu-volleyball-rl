@@ -157,6 +157,27 @@ def test_result_falls_back_to_init_level_without_manager(
     assert result["experiment_id"] == ""
 
 
+def test_result_carries_rally_count(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """The enqueued result dict must include a non-negative ``rally_count``.
+
+    Pre-fix the field was missing and the WS handler defaulted to 0, so
+    every saved game showed 0 rallies in the dashboard. Post-fix the
+    callback counts net crossings during the demo loop and emits the
+    total — same definition the offline evaluator uses
+    (rl/evaluator.py:82-85). MAX_SCORE is patched to 1 so the test runs
+    in a single ground-out, which means rally_count may legitimately be
+    0 if the very first serve grounds without crossing the net — but
+    the field MUST be present and an int.
+    """
+    manager = _FakeManager(bot_level=2, experiment_id="exp-rally")
+    result = _run_one_demo(monkeypatch, manager, tmp_path=tmp_path)
+    assert "rally_count" in result, "result missing rally_count field"
+    assert isinstance(result["rally_count"], int)
+    assert result["rally_count"] >= 0
+
+
 def test_result_handles_none_experiment_id(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:

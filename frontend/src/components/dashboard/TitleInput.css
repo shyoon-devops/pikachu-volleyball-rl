@@ -1,0 +1,90 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  TitleInput.css
+ *  (docs/DESIGN-TRAINING-TITLE.md §1, 1bc882ab)
+ * ═══════════════════════════════════════════════════════════
+ *  className map:
+ *    .title-input-field, .title-input-label, .title-input,
+ *    .title-input--invalid, .title-input-hint,
+ *    .title-input-counter, .title-input-counter--over,
+ *    .title-input-checking, .title-input-error,
+ *    .title-input-error-sub
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.title-input-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--space-4);
+}
+
+.title-input-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.title-input {
+  height: 36px;
+  padding: 0 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-input, var(--color-bg-elevated));
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  transition: border-color var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.title-input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.title-input--invalid {
+  border-color: var(--color-danger, #ef4444);
+}
+
+.title-input-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.title-input-counter {
+  position: absolute;
+  right: 0;
+  top: calc(36px + 24px + 8px);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.title-input-counter--over {
+  color: var(--color-danger, #ef4444);
+}
+
+.title-input-checking {
+  position: absolute;
+  right: 12px;
+  top: calc(36px + 24px + 4px);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.title-input-error {
+  font-size: 11px;
+  color: var(--color-danger, #ef4444);
+  margin-top: 2px;
+}
+
+.title-input-error-sub {
+  color: var(--color-text-muted);
+  margin-left: 4px;
+}

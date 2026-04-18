@@ -40,6 +40,22 @@ class BotParams:
 # against the RL agent. Monotonicity on every noise knob is preserved so
 # test_prediction_error_non_increasing / test_hesitation_rate_non_increasing
 # keep holding.
+#
+# Post-port regression fix (2026-04-13): the physics port
+# ``port(physics): faithful engine from gorisanson physics.js`` shifted the
+# optimal jump timing — the state=2 power-hit dwell window is 10 frames, so
+# jumping LATER (closer to the ball) lands the collision squarely inside
+# that window; jumping earlier burns the state=2 slot before the ball
+# arrives. L5's ``jump_timing_error`` goes 0 → -1 (threshold 17f instead
+# of 20f); every other L5 knob is left at its pre-port value. Measured:
+# pre-port bot vs ported physics = L5 5/15 vs L3 (inverted), post-fix =
+# L5 avg 14.9/15 across 8 tested seed bases. Monotonicity on every
+# noise knob is preserved (L5 still has nonzero jump_jitter / angle_
+# variance / hesitation_rate / trajectory_noise — see the
+# test_l5_still_has_nonzero_variance guard). L4 was NOT touched — an
+# independent L3>L4 ordering regression exists in the post-port ladder
+# that is out of scope for this fix (PM scoped to L5 vs L3). See
+# NOTICE-BOT-LADDER-FOLLOWUP.md.
 BOT_PARAMS: dict[int, BotParams] = {
     1: BotParams(reaction_delay=6, prediction_error=0.4,  miss_probability=0.10,
                  move_range=0.65, jump_timing_error=4,
@@ -58,7 +74,7 @@ BOT_PARAMS: dict[int, BotParams] = {
                  jump_jitter=1, angle_variance=0.14, hesitation_rate=0.02,
                  trajectory_noise_scale=0.06),
     5: BotParams(reaction_delay=0, prediction_error=0.01, miss_probability=0.0,
-                 move_range=1.0,  jump_timing_error=0,
+                 move_range=1.0,  jump_timing_error=-1,
                  jump_jitter=1, angle_variance=0.08, hesitation_rate=0.01,
                  trajectory_noise_scale=0.03),
 }

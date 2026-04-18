@@ -452,3 +452,65 @@
     gap: var(--space-3);
   }
 }
+
+/*
+ * ── Title cell (FC-R6G, spec §2) ────────────────────────
+ * 140px desktop, shrinks on mobile. Truncates with
+ * ellipsis so long auto-generated names don't blow up
+ * the column layout; full text available via tooltip.
+ */
+.recent-games-title-cell {
+  min-width: 140px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .recent-games-title-cell {
+    min-width: 100px;
+    max-width: 140px;
+  }
+}
+
+/* R6H: Recent Games title-cell link — ghost-style link so the row
+   hover behaviour matches the rest of the table; turns accent on
+   hover to tell the user it's a drill-down target. */
+.recent-games-title-link {
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+
+.recent-games-title-link:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.recent-games-title-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* FC-R8a: Placeholder shown in place of BatchTabBar when no live
+   env frames exist — either training is idle (no active run) or
+   the first frame hasn't landed yet. Keeps the layout stable so
+   the canvas doesn't reflow when the tab bar toggles. */
+.dashboard-batch-tab-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  min-height: 40px;
+  background: var(--color-bg-elevated);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.dashboard-batch-tab-placeholder--idle {
+  font-style: italic;
+}

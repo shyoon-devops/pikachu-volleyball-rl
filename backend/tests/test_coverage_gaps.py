@@ -36,48 +36,11 @@ NOOP = PlayerInput(x_dir=0, y_dir=0, power_hit=False)
 
 
 # ─── game/engine.py gaps ───
-
-
-class TestEngineDiving:
-    """Cover the diving/lying_down code paths (lines 113-116, 148-149)."""
-
-    def test_player_lying_down_decrements(self) -> None:
-        game = PikachuVolleyball()
-        game.reset()
-        # Force player into lying_down state
-        game._state.player1.lying_down_duration = 5
-        game._state.player1.is_diving = False
-        game._state.player1.is_jumping = False
-
-        state = game.step(NOOP, NOOP)
-        assert state.player1.lying_down_duration < 5
-
-    def test_lying_down_eventually_clears(self) -> None:
-        game = PikachuVolleyball()
-        game.reset()
-        game._state.player1.lying_down_duration = 2
-
-        for _ in range(5):
-            state = game.step(NOOP, NOOP)
-            if state.is_round_over:
-                break
-        assert state.player1.lying_down_duration == 0
-
-    def test_diving_landing_sets_lying_down(self) -> None:
-        game = PikachuVolleyball()
-        game.reset()
-        # Force player1 into diving state at ground level
-        game._state.player1.is_diving = True
-        game._state.player1.is_jumping = False
-        game._state.player1.y = PLAYER_GROUND_Y - 5
-        game._state.player1.vy = 10  # will reach ground
-
-        state = game.step(NOOP, NOOP)
-        # After landing from dive, lying_down_duration should be set
-        # to LYING_DOWN_DURATION (3 frames per original physics.js).
-        from backend.game.constants import LYING_DOWN_DURATION
-
-        assert state.player1.lying_down_duration == LYING_DOWN_DURATION or state.is_round_over
+# TestEngineDiving removed (A3): diving/lying-down coverage now owned by
+# test_physics.py::TestJumpAndDive::test_dive_landing_starts_lying_down
+# and test_lying_down_blocks_movement, which exercise the same state=3
+# → state=4 transition with stronger unconditional assertions (no
+# ``or state.is_round_over`` escape hatch).
 
 
 class TestEngineNetCollisionZeroVx:
@@ -166,9 +129,13 @@ class TestSerializeState:
             ball=BallState(x=0, y=0),
         )
         result = _serialize_state(state)
-        # `is_round_over` + `post_score_freeze_frames` were added so the FE
-        # replay viewer can render a scoring freeze overlay on the grounded
-        # frames emitted by the new post-score hold.
+        # Display-state-machine fields (state_name / slow_motion_frames_left
+        # / fade_black_alpha / ready_message_visible) added by
+        # ``port(engine-state): add slowMotion + afterEndOfRound +
+        # beforeStartOfNextRound`` so the FE replay viewer can render the
+        # full pikavolley.js round/afterEndOfRound/beforeStartOfNextRound
+        # transitions. ``post_score_freeze_frames`` is back-filled by
+        # replay_service for legacy replays only.
         assert set(result.keys()) == {
             "player1",
             "player2",
@@ -177,8 +144,75 @@ class TestSerializeState:
             "score2",
             "frame",
             "is_round_over",
-            "post_score_freeze_frames",
+            "is_game_ended",
+            "game_end_frame_counter",
+            "sounds",
+            "state_name",
+            "slow_motion_frames_left",
+            "fade_black_alpha",
+            "ready_message_visible",
+            "tick_rate",
         }
+
+    def test_serialize_state_sounds_has_five_keys(self) -> None:
+        # Schema contract: `sounds` holds the 5 physics-layer flags.
+        # `pi` / `pikachu` are menu sounds and intentionally NOT emitted.
+        state = GameState(
+            player1=PlayerState(x=0, y=0),
+            player2=PlayerState(x=0, y=0),
+            ball=BallState(x=0, y=0),
+        )
+        result = _serialize_state(state)
+        assert set(result["sounds"].keys()) == {
+            "pika",
+            "chu",
+            "pipikachu",
+            "power_hit",
+            "ball_touches_ground",
+        }
+        assert all(v is False for v in result["sounds"].values())
+
+    def test_serialize_state_sounds_or_across_players(self) -> None:
+        # Player-side flags are OR'd so a single True from either player
+        # bubbles up. Ball-side flags come directly from the ball.
+        state = GameState(
+            player1=PlayerState(x=0, y=0, sound_chu=True),
+            player2=PlayerState(x=0, y=0, sound_pika=True, sound_pipikachu=True),
+            ball=BallState(
+                x=0, y=0, sound_power_hit=True, sound_ball_touches_ground=True
+            ),
+        )
+        result = _serialize_state(state)
+        assert result["sounds"] == {
+            "pika": True,
+            "chu": True,
+            "pipikachu": True,
+            "power_hit": True,
+            "ball_touches_ground": True,
+        }
+
+    def test_serialize_state_emits_diving_direction(self) -> None:
+        # Port check: physics.js Player.divingDirection (0xB4, init 0) must
+        # round-trip through the WS/replay frame. FE uses this to flip the
+        # dive sprite left/right instead of guessing from vx sign.
+        state = GameState(
+            player1=PlayerState(x=100, y=200, is_diving=True, diving_direction=-1),
+            player2=PlayerState(x=300, y=200, is_diving=True, diving_direction=1),
+            ball=BallState(x=200, y=150),
+        )
+        result = _serialize_state(state)
+        assert result["player1"]["diving_direction"] == -1
+        assert result["player2"]["diving_direction"] == 1
+
+    def test_serialize_state_diving_direction_defaults_zero(self) -> None:
+        state = GameState(
+            player1=PlayerState(x=0, y=0),
+            player2=PlayerState(x=0, y=0),
+            ball=BallState(x=0, y=0),
+        )
+        result = _serialize_state(state)
+        assert result["player1"]["diving_direction"] == 0
+        assert result["player2"]["diving_direction"] == 0
 
 
 class TestCheckpointCallback:
@@ -225,34 +259,14 @@ class TestCheckpointCallback:
 
 
 class TestMetricsCallback:
-    """Cover MetricsCallback metric publishing."""
+    """Cover MetricsCallback metric publishing.
 
-    def test_metrics_callback_logs_at_interval(self) -> None:
-        loop = asyncio.new_event_loop()
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-
-        cb = MetricsCallback(queue=queue, loop=loop, log_interval=10)
-        cb.model = MagicMock()
-        cb.model.logger = None
-        cb.num_timesteps = 10
-        cb.locals = {"infos": []}
-
-        result = cb._on_step()
-        assert result is True
-        loop.close()
-
-    def test_metrics_callback_skips_non_interval(self) -> None:
-        loop = asyncio.new_event_loop()
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-
-        cb = MetricsCallback(queue=queue, loop=loop, log_interval=10)
-        cb.model = MagicMock()
-        cb.num_timesteps = 7
-        cb.locals = {"infos": []}
-
-        result = cb._on_step()
-        assert result is True
-        loop.close()
+    The "returns True at interval" and "returns True off interval"
+    cases were removed (A3): they asserted only ``_on_step is True``,
+    which is satisfied by the SB3 base-class contract regardless of
+    the callback's own logic. End-to-end coverage lives in
+    test_trainer.py::TestMetricsCallback::test_metrics_pushed_to_queue.
+    """
 
     def test_metrics_tracks_wins(self) -> None:
         loop = asyncio.new_event_loop()
@@ -344,60 +358,11 @@ class TestTrainingManagerInit:
 # ─── rl/evaluator.py ───
 
 
-class TestModelEvaluator:
-    """Cover ModelEvaluator with a quickly trained model."""
-
-    def test_evaluate_returns_eval_result(self) -> None:
-        try:
-            from stable_baselines3 import PPO
-        except ImportError:
-            pytest.skip("stable-baselines3 not installed")
-
-        from backend.rl.evaluator import EvalResult, ModelEvaluator
-
-        # Train a minimal model
-        env = PikachuVolleyballEnv(bot_level=1, max_steps=500)
-        model = PPO("MlpPolicy", env, n_steps=64, batch_size=32, n_epochs=2, verbose=0)
-        model.learn(total_timesteps=128)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = str(Path(tmpdir) / "eval_model")
-            model.save(path)
-
-            evaluator = ModelEvaluator()
-            result = evaluator.evaluate(path, bot_level=1, n_games=3)
-
-        assert isinstance(result, EvalResult)
-        assert result.n_games == 3
-        assert 0.0 <= result.win_rate <= 1.0
-        assert result.avg_score >= 0
-        assert result.avg_rally_length >= 0
-        assert result.bot_level == 1
-        env.close()
-
-    def test_compare_checkpoints(self) -> None:
-        try:
-            from stable_baselines3 import PPO
-        except ImportError:
-            pytest.skip("stable-baselines3 not installed")
-
-        from backend.rl.evaluator import ModelEvaluator
-
-        env = PikachuVolleyballEnv(bot_level=1, max_steps=500)
-        model = PPO("MlpPolicy", env, n_steps=64, batch_size=32, n_epochs=2, verbose=0)
-        model.learn(total_timesteps=128)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            p1 = str(Path(tmpdir) / "ckpt1")
-            p2 = str(Path(tmpdir) / "ckpt2")
-            model.save(p1)
-            model.save(p2)
-
-            evaluator = ModelEvaluator()
-            results = evaluator.compare_checkpoints([p1, p2], bot_level=1, n_games=2)
-
-        assert len(results) == 2
-        env.close()
+# TestModelEvaluator removed (A3): evaluator.evaluate + compare_checkpoints
+# are now owned by test_evaluator.py::TestEvalResult (7 assertions on the
+# returned EvalResult shape) and TestCompareCheckpoints (count + per-path
+# identity). The gap-fill tests here re-trained a fresh PPO each time —
+# slow and strictly weaker than the dedicated file.
 
 
 # ─── rl/env.py extra coverage ───

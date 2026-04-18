@@ -49,10 +49,15 @@ describe('App — accessibility landmarks (FE-5 #24)', () => {
     expect(heading).toHaveTextContent(/pikachu volleyball rl/i)
   })
 
-  it('renders nav links to Dashboard / History / Evaluation', () => {
+  it('renders the unified nav (Dashboard + Training Runs) — FC-R8A', () => {
+    // FC-R8A (2026-04-18): the separate History / Evaluation nav
+    // entries were merged into a single Training Runs entry. Legacy
+    // routes 301-redirect to /runs, so any shared URL still works.
     render(<App />)
     expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'History' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Evaluation' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Training Runs' })).toBeInTheDocument()
+    // Ensure the old entries are gone to catch accidental regressions.
+    expect(screen.queryByRole('link', { name: 'History' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Evaluation' })).toBeNull()
   })
 })

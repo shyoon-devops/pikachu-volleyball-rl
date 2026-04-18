@@ -25,12 +25,70 @@ class FakeGameService:
         self._games.append(doc)
         return doc["_id"]
 
-    async def get_games(self, page: int = 1, limit: int = 20):
+    async def get_games(self, page: int = 1, limit: int = 20, *, title=None):
         from backend.app.models.schemas import PaginatedResponse
 
+        if title == "untitled":
+            filtered = [g for g in self._games if not g.get("title")]
+        elif title is not None:
+            filtered = [g for g in self._games if g.get("title") == title]
+        else:
+            filtered = list(self._games)
         start = (page - 1) * limit
-        sliced = self._games[start : start + limit]
-        return PaginatedResponse(data=sliced, total=len(self._games), page=page, limit=limit)
+        sliced = filtered[start : start + limit]
+        return PaginatedResponse(
+            data=sliced, total=len(filtered), page=page, limit=limit
+        )
+
+    async def aggregate_by_title(self, page: int = 1, limit: int = 20):
+        """In-memory mirror of ``GameService.aggregate_by_title``.
+
+        Good enough for route-level tests — groups by title, computes
+        win_rate + avg_rally_length, sorts by earliest timestamp desc.
+        """
+        from backend.app.models.schemas import PaginatedResponse
+
+        groups: dict[str, list[dict]] = {}
+        for g in self._games:
+            key = g.get("title") or "untitled"
+            groups.setdefault(key, []).append(g)
+
+        entries = []
+        for key, members in groups.items():
+            total_games = len(members)
+            wins = sum(1 for m in members if m.get("winner") == 1)
+            win_rate = wins / total_games if total_games else 0.0
+            started = min(m.get("timestamp") for m in members)
+            ended = max(m.get("timestamp") for m in members)
+            avg_rally = (
+                sum(int(m.get("rally_count", 0)) for m in members) / total_games
+                if total_games
+                else 0.0
+            )
+            entries.append({
+                "title": key,
+                "experiment_id": members[-1].get("experiment_id"),
+                "started_at": (
+                    started.isoformat()
+                    if started is not None and hasattr(started, "isoformat")
+                    else started
+                ),
+                "ended_at": (
+                    ended.isoformat()
+                    if ended is not None and hasattr(ended, "isoformat")
+                    else ended
+                ),
+                "total_games": total_games,
+                "win_rate": win_rate,
+                "avg_rally_length": avg_rally,
+                "status": "done",
+            })
+        entries.sort(key=lambda e: e["started_at"] or "", reverse=True)
+        start = (page - 1) * limit
+        sliced = entries[start : start + limit]
+        return PaginatedResponse(
+            data=sliced, total=len(entries), page=page, limit=limit
+        )
 
     async def get_game(self, game_id: str):
         for g in self._games:
@@ -46,7 +104,35 @@ class FakeGameService:
 
 
 class FakeEvalService:
-    async def run(self, model_path: str, bot_level: int = 1, n_games: int = 50):
+    # Sentinel: paths starting with this prefix pass the synchronous
+    # preflight (validate_model_path returns OK) but fail inside the
+    # background ``run`` call. Used by test_eval_async to exercise the
+    # 202 → poll → failed lifecycle end-to-end without a real model on
+    # disk. Regular test paths still 404 at preflight as before.
+    _PASS_PREFLIGHT_PREFIX = "bgfail/"
+
+    def validate_model_path(self, model_path: str):
+        # Mirrors EvalServiceWrapper.validate_model_path so the async
+        # run endpoint's pre-flight check rejects bad paths synchronously
+        # against the test fake too. Without this the preflight would
+        # short-circuit via the ``hasattr`` guard and security/traversal
+        # tests would observe a 202 instead of the expected 404.
+        if ".." in model_path or model_path.startswith("/"):
+            raise FileNotFoundError(f"Invalid model path: {model_path}")
+        if model_path.startswith(self._PASS_PREFLIGHT_PREFIX):
+            return None  # preflight OK, background task will raise
+        raise FileNotFoundError(f"Model not found: {model_path}")
+
+    async def run(
+        self,
+        model_path: str,
+        bot_level: int = 1,
+        n_games: int = 50,
+        *,
+        progress_callback=None,
+        training_title=None,
+        experiment_id=None,
+    ):
         if ".." in model_path or model_path.startswith("/"):
             raise FileNotFoundError(f"Invalid model path: {model_path}")
         raise FileNotFoundError(f"Model not found: {model_path}")
@@ -204,14 +290,30 @@ async def _test_lifespan(app):
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
+    # No default live-backend URL. Incident 2026-04-17: a silent default of
+    # http://localhost:8001 caused a full-suite unit-test run to hammer the
+    # dev backend with training:start/set_level/stop via httpx+WebSocket.
+    # E2E tests must be opt-in with explicit --base-url AND -m e2e.
     parser.addoption(
         "--base-url",
-        default="http://localhost:8001",
-        help="Base URL for regression tests (default: dev)",
+        default="http://localhost:9999",
+        help=(
+            "Base URL for E2E/regression tests. Default is an unreachable "
+            "port so accidental runs fail fast instead of mutating a live "
+            "env. Supply --base-url + -m e2e when running against QA/prod."
+        ),
     )
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    # The `e2e` and `load` markers are also declared in pyproject.toml so
+    # `-m 'not e2e'` is picked up via addopts. Re-registering here keeps
+    # older invocations (outside the pyproject path) lint-clean.
+    config.addinivalue_line(
+        "markers",
+        "e2e: end-to-end tests that hit a live backend over "
+        "httpx/WebSocket. Deselected by default.",
+    )
     config.addinivalue_line(
         "markers",
         "load: marks tests that exert heavy concurrency/load "

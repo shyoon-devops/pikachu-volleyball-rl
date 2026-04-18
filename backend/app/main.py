@@ -28,8 +28,10 @@ from backend.app.services.game_service import GameService
 from backend.app.services.indexes import ensure_indexes
 from backend.app.services.metrics_service import MetricsService
 from backend.app.services.replay_service import ReplayService
+from backend.app.services.title_service import TrainingRunsService
 from backend.app.services.training_service import TrainingServiceWrapper
 from backend.app.ws.handlers import (
+    env_frames_push_loop,
     frames_push_loop,
     metrics_push_loop,
     results_push_loop,
@@ -67,6 +69,11 @@ async def lifespan(app: FastAPI):
     app.state.metrics_service = MetricsService(db)
     app.state.replay_service = ReplayService(replay_dir=replay_dir, max_count=max_replays)
     app.state.training_service = TrainingServiceWrapper(model_dir=model_dir, replay_dir=replay_dir)
+    # Title-scoped run registry (BE-T1). Attached to the training service
+    # so the WS handler can reach it without another app_state lookup.
+    training_runs_service = TrainingRunsService(db)
+    app.state.training_runs_service = training_runs_service
+    app.state.training_service.runs_service = training_runs_service
     app.state.eval_service = EvalServiceWrapper(db)
     app.state.ws_manager = ConnectionManager()
 
@@ -79,6 +86,9 @@ async def lifespan(app: FastAPI):
             )
         ),
         asyncio.create_task(frames_push_loop(app.state.ws_manager, app.state.training_service)),
+        asyncio.create_task(
+            env_frames_push_loop(app.state.ws_manager, app.state.training_service)
+        ),
         asyncio.create_task(
             results_push_loop(
                 app.state.ws_manager, app.state.training_service, app.state.game_service
@@ -116,8 +126,25 @@ app.add_middleware(
 
 app.add_middleware(
     RateLimitMiddleware,
-    requests_per_minute=int(os.getenv("RATE_LIMIT_RPM", "60")),
-    burst=int(os.getenv("RATE_LIMIT_BURST", "20")),
+    # Defaults raised again 2026-04-18 (round 2) after PM repro showed
+    # users still hitting 429 on the history page. Two issues:
+    #
+    #   1. Per-row metadata fan-out — opening Recent Games fires the
+    #      list endpoint plus N detail endpoints per row (games + game/{id}
+    #      + replays + replays/{id} + evaluations). Two refreshes in 10s
+    #      blew through the previous 100-token burst.
+    #   2. Behind nginx every real user collapses into ONE shared bucket
+    #      because uvicorn sees the proxy IP. Set RATE_LIMIT_TRUST_PROXY=true
+    #      in the dev/qa/prod envs (where nginx is in front and strips
+    #      external XFF) so each real client gets its own bucket.
+    #
+    # New defaults give ~10 req/s sustained per IP with a 200-burst
+    # window. RATE_LIMIT_TRUST_PROXY defaults OFF — direct-internet
+    # deploys must NOT trust XFF (trivially spoofable).
+    requests_per_minute=int(os.getenv("RATE_LIMIT_RPM", "600")),
+    burst=int(os.getenv("RATE_LIMIT_BURST", "200")),
+    trust_proxy=os.getenv("RATE_LIMIT_TRUST_PROXY", "false").lower()
+    in ("1", "true", "yes"),
 )
 
 # Correlation ID middleware is added last so it runs first in the Starlette

@@ -152,7 +152,7 @@ async def test_training_start_status_reaches_all_clients():
     svc = _make_training_service(state="stopped")
     msg = ParsedMessage(
         type="training:start",
-        payload=WsTrainingStartPayload(bot_level=2, total_timesteps=5000),
+        payload=WsTrainingStartPayload(bot_level=2, total_timesteps=500_000),
     )
 
     await handlers_mod._dispatch(initiator, msg, svc, replay_service=AsyncMock(), manager=mgr)
@@ -221,7 +221,7 @@ async def test_training_start_without_bot_level_carries_over_current():
     # total_timesteps after Option A lands).
     msg = ParsedMessage(
         type="training:start",
-        payload=WsTrainingStartPayload(total_timesteps=5000),
+        payload=WsTrainingStartPayload(total_timesteps=500_000),
     )
 
     await handlers_mod._dispatch(initiator, msg, svc, replay_service=AsyncMock(), manager=mgr)
@@ -272,7 +272,7 @@ async def test_training_status_is_serialized_once_for_all_clients():
     svc = _make_training_service(state="stopped")
     msg = ParsedMessage(
         type="training:start",
-        payload=WsTrainingStartPayload(bot_level=1, total_timesteps=5000),
+        payload=WsTrainingStartPayload(bot_level=1, total_timesteps=500_000),
     )
 
     await handlers_mod._dispatch(clients[0], msg, svc, replay_service=AsyncMock(), manager=mgr)
@@ -304,7 +304,7 @@ async def test_already_running_error_is_not_broadcast():
     svc = _make_training_service(state="running")
     msg = ParsedMessage(
         type="training:start",
-        payload=WsTrainingStartPayload(bot_level=1, total_timesteps=5000),
+        payload=WsTrainingStartPayload(bot_level=1, total_timesteps=500_000),
     )
 
     await handlers_mod._dispatch(initiator, msg, svc, replay_service=AsyncMock(), manager=mgr)

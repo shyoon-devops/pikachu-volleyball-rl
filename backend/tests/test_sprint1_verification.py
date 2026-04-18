@@ -24,6 +24,10 @@ import pytest_asyncio
 import websockets
 import websockets.exceptions
 
+# Live-backend sprint-verification suite — deselected by default via
+# `-m 'not e2e'`. See 2026-04-17 incident note in pyproject.toml.
+pytestmark = pytest.mark.e2e
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
