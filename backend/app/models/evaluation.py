@@ -29,6 +29,12 @@ class EvaluationCreate(BaseModel):
     dominance_score: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
     checkpoint_label: str | None = None
     training_step: int | None = None
+    # Training identity snapshot (BE-T11). Both denormalised at eval
+    # time so later renames don't rewrite history; FE filters on
+    # ``title`` and cross-references ``experiment_id`` into
+    # /api/training/runs. None for legacy / ad-hoc uploads.
+    title: str | None = Field(default=None, max_length=60)
+    experiment_id: str | None = Field(default=None)
 
     @field_validator("timestamp")
     @classmethod
@@ -56,6 +62,8 @@ class EvaluationCreate(BaseModel):
         *,
         checkpoint_label: str | None = None,
         training_step: int | None = None,
+        title: str | None = None,
+        experiment_id: str | None = None,
     ) -> "EvaluationCreate":
         return cls(
             model_path=result.model_path,
@@ -70,6 +78,8 @@ class EvaluationCreate(BaseModel):
             dominance_score=result.dominance_score,
             checkpoint_label=checkpoint_label,
             training_step=training_step,
+            title=title,
+            experiment_id=experiment_id,
         )
 
 
