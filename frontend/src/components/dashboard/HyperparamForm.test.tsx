@@ -3,18 +3,29 @@ import { render, screen, fireEvent, within } from '@testing-library/react'
 import { HyperparamForm } from './HyperparamForm'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 
-function renderForm(overrides: { disabled?: boolean } = {}) {
+// getTrainingTitles is mocked so TitleInput's debounced dup-check
+// doesn't fire real network during tests (jsdom's fetch is a stub).
+vi.mock('../../lib/api', () => ({
+  getTrainingTitles: vi.fn().mockResolvedValue([]),
+}))
+
+function renderForm(overrides: { disabled?: boolean; title?: string } = {}) {
   const onParamsChange = vi.fn()
+  const onTitleChange = vi.fn()
+  const onTitleValidationChange = vi.fn()
 
   render(
     <HyperparamForm
       params={DEFAULT_HYPERPARAMS}
       onParamsChange={onParamsChange}
       disabled={overrides.disabled ?? false}
+      title={overrides.title ?? ''}
+      onTitleChange={onTitleChange}
+      onTitleValidationChange={onTitleValidationChange}
     />,
   )
 
-  return { onParamsChange }
+  return { onParamsChange, onTitleChange, onTitleValidationChange }
 }
 
 function expandAdvanced() {
@@ -134,6 +145,9 @@ describe('HyperparamForm', () => {
         params={{ ...DEFAULT_HYPERPARAMS, n_envs: 100 }}
         onParamsChange={onParamsChange}
         disabled={false}
+        title=""
+        onTitleChange={vi.fn()}
+        onTitleValidationChange={vi.fn()}
       />,
     )
     const input = byLabelPrefix('n_envs')
@@ -149,6 +163,9 @@ describe('HyperparamForm', () => {
         params={{ ...DEFAULT_HYPERPARAMS, batch_size: 999, n_epochs: 25 }}
         onParamsChange={onParamsChange}
         disabled={false}
+        title=""
+        onTitleChange={vi.fn()}
+        onTitleValidationChange={vi.fn()}
       />,
     )
     // Basic reset button lives alongside its "BASIC" heading.

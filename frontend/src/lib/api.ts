@@ -155,6 +155,34 @@ export async function getAvailableReplays(): Promise<ReplayInfo[]> {
   return snakeToCamel<ReplayInfo[]>(replays)
 }
 
+/**
+ * One entry from `GET /api/training/titles` (BE T1, commit a7351e57).
+ * Used for the HyperparamForm title-input duplicate check and the
+ * History page's title autocomplete filter (R6H, future).
+ */
+export interface TrainingTitleInfo {
+  title: string
+  experimentId: string
+  startedAt: string | null
+}
+
+/**
+ * Fetch training titles for autocomplete / duplicate-check. `q` is a
+ * case-insensitive substring filter; `limit` caps the response size
+ * (BE max 500). Returns `[]` when the training_runs collection is
+ * uninitialized (BE degrades gracefully to empty rather than 503).
+ */
+export async function getTrainingTitles(
+  q?: string,
+  limit = 100,
+): Promise<TrainingTitleInfo[]> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (q !== undefined && q !== '') params.set('q', q)
+  const raw = await request<Record<string, unknown>>(`/api/training/titles?${params.toString()}`)
+  const titles = Array.isArray(raw.titles) ? raw.titles : []
+  return snakeToCamel<TrainingTitleInfo[]>(titles)
+}
+
 export async function getTrainingStatus(): Promise<TrainingStatus> {
   const raw = await request<unknown>('/api/training/status')
   return snakeToCamel<TrainingStatus>(raw)

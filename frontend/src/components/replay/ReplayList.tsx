@@ -238,11 +238,13 @@ export function ReplayList() {
             <tr>
               {([
                 ['Date'],
+                // FC-R6G: same Title column as the Dashboard's
+                // Recent Games. Ellipsis + tooltip on overflow.
+                ['Title'],
                 ['Env'],
-                // FC-R6D (2026-04-18): em-dash values are BE-WAITING
-                // — GameRecord has no `episode` field yet. Tooltip
-                // explains the column to avoid "this is broken"
-                // confusion.
+                // FC-R6D: em-dash values are BE-WAITING — GameRecord
+                // has no `episode` field yet. Tooltip explains to
+                // avoid "this is broken" confusion.
                 ['Episode', 'Pending BE support — field not yet saved per game'],
                 ['Bot Level'],
                 ['Score'],
@@ -260,11 +262,11 @@ export function ReplayList() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={11} className="replay-list-empty">Loading...</td>
+                <td colSpan={12} className="replay-list-empty">Loading...</td>
               </tr>
             ) : filteredGames.length === 0 ? (
               <tr>
-                <td colSpan={11} className="replay-list-empty empty-state">
+                <td colSpan={12} className="replay-list-empty empty-state">
                   {envFilter === null
                     ? 'No games recorded yet.'
                     : `No games match env_id=${envFilter} on this page.`}
@@ -290,6 +292,12 @@ export function ReplayList() {
                     */}
                     <td>
                       {formatKstDateTime(g.timestamp)}
+                    </td>
+                    <td
+                      className="replay-list-title-cell"
+                      title={g.title ?? undefined}
+                    >
+                      {g.title && g.title.trim() !== '' ? g.title : '—'}
                     </td>
                     <td>
                       <span

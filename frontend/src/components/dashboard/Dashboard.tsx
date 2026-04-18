@@ -6,6 +6,7 @@ import { ErrorBoundary } from '../ErrorBoundary'
 import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
+import type { TitleValidationState } from './TitleInput'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
@@ -60,6 +61,24 @@ export function Dashboard() {
   // dispatcher carries it over into training:start when the payload
   // omits ``bot_level`` (schemas.py:92, handlers.py:131-135).
   const [params, setParams] = useState<Hyperparams>(DEFAULT_HYPERPARAMS)
+
+  /**
+   * Title for the next training run (FC-R6G, Designer spec c77baa0b
+   * as revised by 1bc882ab). Empty is valid — BE auto-generates.
+   * Submit is gated on the form's debounced duplicate check — a
+   * user-typed duplicate or over-length title blocks; empty and
+   * "checking" states are both submit-enabled.
+   */
+  const [title, setTitle] = useState('')
+  const [titleValidation, setTitleValidation] = useState<TitleValidationState>({ kind: 'ok' })
+
+  /**
+   * Track the prior status.title so we can toast when BE echoes a
+   * new value (either our input or an auto-generated name). Echo
+   * lands on the `training:status` broadcast right after
+   * `training:start` is accepted.
+   */
+  const lastBroadcastTitleRef = useRef<string | null | undefined>(undefined)
 
   /**
    * Currently-selected env for the batch tab bar + canvas mirror.
@@ -168,8 +187,17 @@ export function Dashboard() {
     [params],
   )
 
+  /**
+   * Title blocks submit ONLY on hard-invalid states (too-long or
+   * duplicate of a user-typed value). Empty title and in-flight
+   * "checking" states are submit-enabled — see Designer spec §1
+   * (1bc882ab revision: BE auto-generates on empty).
+   */
+  const titleBlocksSubmit =
+    titleValidation.kind === 'tooLong' || titleValidation.kind === 'duplicate'
+
   const handleStart = () => {
-    if (formInvalid) return
+    if (formInvalid || titleBlocksSubmit) return
     const hyperparamsBlob: Record<string, number> = {}
     const topLevel: Record<string, number> = {}
     for (const f of HYPERPARAM_SCHEMA) {
@@ -180,11 +208,47 @@ export function Dashboard() {
         hyperparamsBlob[f.key] = value
       }
     }
+    // FC-R6G: send title verbatim. Empty string → BE auto-generates
+    // (spec §0 rev 1bc882ab). Trim first so a user who hit space bar
+    // gets the auto-gen path. We keep the un-trimmed display value in
+    // the form state so the cursor position doesn't jump mid-type.
+    const wireTitle = title.trim()
     send('training:start', {
       ...topLevel,
       hyperparams: hyperparamsBlob,
+      title: wireTitle,
     })
   }
+
+  /**
+   * Toast when BE echoes the final title on the `training:status`
+   * broadcast after Start. The echo carries either the user's input
+   * (validated + accepted) or an auto-generated `run-{adj}-{noun}-
+   * {4hex}` — either way the user learns what their run is named.
+   *
+   * Matching via the `lastBroadcastTitleRef`: record undefined on
+   * first observation to skip the initial REST-hydration path (no
+   * toast on page load), then fire on any id transition to a new
+   * non-empty title.
+   */
+  useEffect(() => {
+    const incoming = status.title ?? null
+    const prev = lastBroadcastTitleRef.current
+    if (prev === undefined) {
+      lastBroadcastTitleRef.current = incoming
+      return
+    }
+    if (incoming && incoming !== prev) {
+      lastBroadcastTitleRef.current = incoming
+      // eslint-disable-next-line no-console
+      console.info(`[training] 학습 시작: ${incoming}`)
+      // Full toast UX lives in a separate component; surfacing via
+      // console for now keeps R6G scoped to data flow. The
+      // DESIGN-HYPERPARAM-TOAST follow-up owns visible notification.
+    } else if (incoming !== prev) {
+      lastBroadcastTitleRef.current = incoming
+    }
+  }, [status.title])
 
   return (
     <div className="dashboard">
@@ -237,6 +301,9 @@ export function Dashboard() {
             params={params}
             onParamsChange={setParams}
             disabled={connectionState !== 'connected'}
+            title={title}
+            onTitleChange={setTitle}
+            onTitleValidationChange={setTitleValidation}
           />
         )}
       </section>
@@ -277,6 +344,10 @@ export function Dashboard() {
                     */}
                     {([
                       ['Time'],
+                      // FC-R6G (2026-04-18): GameRecord.title (BE T1,
+                      // commit a7351e57) carries the human training
+                      // label. Legacy rows render "—".
+                      ['Title'],
                       ['Env'],
                       // FC-R6D (2026-04-18): em-dash values are
                       // BE-WAITING — the field isn't on
@@ -299,6 +370,12 @@ export function Dashboard() {
                   {recentGames.slice(0, 20).map((g) => (
                     <tr key={g.id}>
                       <td>{formatKstDateTime(g.timestamp)}</td>
+                      <td
+                        className="recent-games-title-cell"
+                        title={g.title ?? undefined}
+                      >
+                        {g.title && g.title.trim() !== '' ? g.title : '—'}
+                      </td>
                       <td>
                         <span
                           className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}

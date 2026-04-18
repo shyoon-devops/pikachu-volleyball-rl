@@ -161,3 +161,24 @@
     gap: var(--space-3);
   }
 }
+
+/*
+ * ── Title cell (FC-R6G, spec §2) ────────────────────────
+ * 140px desktop, shrinks on mobile. Truncates with
+ * ellipsis so long auto-generated names don't blow up
+ * the column layout; full text available via tooltip.
+ */
+.recent-games-title-cell {
+  min-width: 140px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .recent-games-title-cell {
+    min-width: 100px;
+    max-width: 140px;
+  }
+}
