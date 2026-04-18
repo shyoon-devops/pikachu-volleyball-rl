@@ -71,6 +71,64 @@
   font-size: var(--text-sm);
 }
 
+/* ── Delete toolbar (FC-R7D) ────────────────────────────── */
+.eval-run-detail-delete-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
+}
+
+.eval-run-detail-delete-enter:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.eval-run-detail-delete-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.eval-run-detail-delete-link {
+  background: transparent;
+  border: none;
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  padding: 0;
+}
+
+.eval-run-detail-delete-link:hover {
+  text-decoration: underline;
+}
+
+.eval-run-detail-delete-spacer {
+  flex: 1;
+}
+
+.eval-run-detail-delete-commit {
+  background: var(--color-danger, #ef4444);
+  color: var(--color-text-inverse, #fff);
+  border: none;
+}
+
+.eval-run-detail-delete-commit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.eval-run-detail-toast {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-success-dim, rgba(34, 197, 94, 0.12));
+  border: 1px solid var(--color-success-border, rgba(34, 197, 94, 0.4));
+  border-radius: var(--radius-sm);
+  color: var(--color-success, #22c55e);
+  font-size: var(--text-sm);
+}
+
 /* ── Checkpoint table ───────────────────────────────────── */
 .eval-run-detail-table-wrapper {
   overflow: hidden;
@@ -121,6 +179,24 @@
 .eval-run-detail-col-radio {
   width: 32px;
   text-align: center;
+}
+
+.eval-run-detail-col-radio--dim {
+  opacity: 0.4;
+}
+
+.eval-run-detail-col-check {
+  width: 32px;
+  text-align: center;
+}
+
+.eval-run-detail-row--delete-checked {
+  background: var(--color-danger-dim, rgba(239, 68, 68, 0.08)) !important;
+  box-shadow: inset 2px 0 0 var(--color-danger, #ef4444);
+}
+
+.eval-run-detail-row--delete-checked:hover {
+  background: var(--color-danger-dim, rgba(239, 68, 68, 0.12)) !important;
 }
 
 .eval-run-detail-cell-step {
