@@ -400,10 +400,71 @@ class LiveFrameCallback(BaseCallback):
             current_experiment_id = ""
             current_title = ""
 
-        # Replay viewer needs the full pikavolley.js display state machine —
-        # slow-motion on score, 5f fade-out, 30f ready-message ramp, 211f
-        # gameEnd window — so the FE can render them. The RL training env
-        # opts out (default False) to avoid feeding no-op frames to the agent.
+        state, frames, rally_count = self._play_demo_game(current_bot_level)
+
+        game_id = str(uuid.uuid4())
+        # No "type" key — handlers.results_push_loop wraps the payload.
+        # bot_level and experiment_id MUST be present: the ws handler no
+        # longer coerces missing values to a silent L1 default (that was
+        # the root cause of every saved game appearing as L1 in
+        # /api/games regardless of the user's actual training level).
+        result = {
+            "game_id": game_id,
+            "experiment_id": current_experiment_id,
+            "bot_level": current_bot_level,
+            "score1": state.score1,
+            "score2": state.score2,
+            "winner": 1 if state.score1 >= MAX_SCORE else 2,
+            "duration_frames": state.frame,
+            # Net-crossing total over the whole match. The dashboard
+            # "Rallies" counter and the GameRecord doc both pull this
+            # field; the handler used to default to 0, which is why every
+            # game in /api/games showed 0 rallies.
+            "rally_count": rally_count,
+            # Tag this as the standalone demo so BE-A2 can distinguish
+            # demo results from parallel-env gradient games in /api/games.
+            "env_id": "demo",
+            # Title snapshot (BE-T1): denormalised so later renames
+            # don't orphan historical rows. Empty string for runs
+            # started before title support landed.
+            "title": current_title,
+            # Episode counter at demo-save time (BE-T6). Read off the
+            # manager (the same counter /api/training/status surfaces
+            # and MetricsCallback appends to). 0 when the manager isn't
+            # wired or is freshly started.
+            "episode": int(
+                getattr(self._manager, "current_episode", 0) or 0
+            ) if self._manager is not None else 0,
+        }
+        _safe_enqueue(self.loop, self.results_queue, result)
+
+        # Save replay
+        self._save_replay(game_id, frames)
+
+        return True
+
+    # ------------------------------------------------------------------
+    # Demo-game pipeline (A2) — _on_step orchestrates these helpers, each
+    # owning one stage: simulation, frame broadcast, result emission,
+    # replay persistence. Broadcast timing + addition order against the
+    # pre-refactor monolith are load-bearing; the helpers preserve them.
+    # ------------------------------------------------------------------
+    def _play_demo_game(
+        self, current_bot_level: int
+    ) -> tuple[Any, list[dict[str, Any]], int]:
+        """Play one full demo game and return ``(final_state, frames, rally_count)``.
+
+        Every in-loop frame is broadcast via ``_safe_enqueue`` and cached
+        on ``manager.last_frame`` BEFORE the next env step runs — the
+        pre-refactor ordering. The trailing final-state frame is appended
+        + cached after the loop exits so ``GET /api/training/current_frame``
+        reports the terminal score instead of a stale in-play frame.
+
+        ``display_state_machine=True`` is intentional: the replay viewer
+        needs the full pikavolley.js slow-motion / fade-out / gameEnd
+        window so the FE can render them. The RL training env opts out
+        (default False) to avoid feeding the agent no-op frames.
+        """
         game = PikachuVolleyball(display_state_machine=True)
         bot = RuleBasedBot(level=current_bot_level)
         state = game.reset()
@@ -467,47 +528,7 @@ class LiveFrameCallback(BaseCallback):
         frames.append(final_frame)
         if self._manager is not None:
             self._manager.last_frame = final_frame
-
-        game_id = str(uuid.uuid4())
-        # No "type" key — handlers.results_push_loop wraps the payload.
-        # bot_level and experiment_id MUST be present: the ws handler no
-        # longer coerces missing values to a silent L1 default (that was
-        # the root cause of every saved game appearing as L1 in
-        # /api/games regardless of the user's actual training level).
-        result = {
-            "game_id": game_id,
-            "experiment_id": current_experiment_id,
-            "bot_level": current_bot_level,
-            "score1": state.score1,
-            "score2": state.score2,
-            "winner": 1 if state.score1 >= MAX_SCORE else 2,
-            "duration_frames": state.frame,
-            # Net-crossing total over the whole match. The dashboard
-            # "Rallies" counter and the GameRecord doc both pull this
-            # field; the handler used to default to 0, which is why every
-            # game in /api/games showed 0 rallies.
-            "rally_count": rally_count,
-            # Tag this as the standalone demo so BE-A2 can distinguish
-            # demo results from parallel-env gradient games in /api/games.
-            "env_id": "demo",
-            # Title snapshot (BE-T1): denormalised so later renames
-            # don't orphan historical rows. Empty string for runs
-            # started before title support landed.
-            "title": current_title,
-            # Episode counter at demo-save time (BE-T6). Read off the
-            # manager (the same counter /api/training/status surfaces
-            # and MetricsCallback appends to). 0 when the manager isn't
-            # wired or is freshly started.
-            "episode": int(
-                getattr(self._manager, "current_episode", 0) or 0
-            ) if self._manager is not None else 0,
-        }
-        _safe_enqueue(self.loop, self.results_queue, result)
-
-        # Save replay
-        self._save_replay(game_id, frames)
-
-        return True
+        return state, frames, rally_count
 
     def _get_obs(
         self, state: Any, prev_ball_x: float, prev_ball_y: float,
