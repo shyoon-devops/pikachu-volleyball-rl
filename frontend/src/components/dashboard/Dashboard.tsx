@@ -104,8 +104,23 @@ export function Dashboard() {
               <table className="recent-games-table" aria-labelledby="recent-games-heading">
                 <thead>
                   <tr>
+                    {/*
+                      `#` rank column dropped (R2-empirical, 2026-04-18):
+                      user reported the Time column's leading digit looked
+                      gray even after `.text-muted` was removed from the
+                      cell. Playwright inspection against dev bundle
+                      UoTn_2Rz confirmed the Time cell actually renders at
+                      primary color (rgb 26, 29, 41) — the "gray first
+                      digit" was the `#` column's muted digit sitting 24px
+                      to the left of "2026" in the same monospace font,
+                      reading as a single token across the cell boundary.
+                      Evidence screenshot in
+                      docs/fe-evidence/r2-rank-illusion-dev-UoTn_2Rz.png.
+                      The `#` column was also redundant with the row's
+                      top-to-bottom ordering — dropping it kills the
+                      adjacency at its source without loss of information.
+                    */}
                     {[
-                      '#',
                       'Time',
                       'Bot Level',
                       'Score',
@@ -120,19 +135,8 @@ export function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {recentGames.slice(0, 20).map((g, i) => (
+                  {recentGames.slice(0, 20).map((g) => (
                     <tr key={g.id}>
-                      <td className="text-muted">{i + 1}</td>
-                      {/*
-                        Time reads as primary text, not `.text-muted` — the
-                        cell sits next to non-muted columns (Bot Level,
-                        Score, Winner) and being the only gray-colored
-                        numeric cell in the middle of the row made the
-                        leading "2026" look washed-out next to its
-                        neighbours (R2-redo user report, 2026-04-18).
-                        Rank / Frames / Rallies / Avg Rally stay muted
-                        because they ARE secondary metadata.
-                      */}
                       <td>{formatKstDateTime(g.timestamp)}</td>
                       <td>{formatBotLevel(g.botLevel)}</td>
                       <td>
