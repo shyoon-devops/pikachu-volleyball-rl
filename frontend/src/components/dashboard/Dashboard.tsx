@@ -275,19 +275,23 @@ export function Dashboard() {
                       top-to-bottom ordering — dropping it kills the
                       adjacency at its source without loss of information.
                     */}
-                    {[
-                      'Time',
-                      'Env',
-                      'Episode',
-                      'Bot Level',
-                      'Score',
-                      'Winner',
-                      'Frames',
-                      'Rallies',
-                      'Avg Rally',
-                      'Experiment',
-                    ].map(h => (
-                      <th key={h} scope="col">{h}</th>
+                    {([
+                      ['Time'],
+                      ['Env'],
+                      // FC-R6D (2026-04-18): em-dash values are
+                      // BE-WAITING — the field isn't on
+                      // GameRecord yet. Surface a tooltip so users
+                      // understand the column isn't broken.
+                      ['Episode', 'Pending BE support — field not yet saved per game'],
+                      ['Bot Level'],
+                      ['Score'],
+                      ['Winner'],
+                      ['Frames'],
+                      ['Rallies'],
+                      ['Avg Rally'],
+                      ['Experiment'],
+                    ] as Array<[string, string?]>).map(([h, tip]) => (
+                      <th key={h} scope="col" title={tip}>{h}</th>
                     ))}
                   </tr>
                 </thead>

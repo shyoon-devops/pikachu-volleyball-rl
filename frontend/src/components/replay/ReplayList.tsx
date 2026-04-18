@@ -197,20 +197,24 @@ export function ReplayList() {
         <table className="replay-list-table">
           <thead>
             <tr>
-              {[
-                'Date',
-                'Env',
-                'Episode',
-                'Bot Level',
-                'Score',
-                'Winner',
-                'Frames',
-                'Rallies',
-                'Avg Rally',
-                'Experiment',
-                'Replay',
-              ].map(h => (
-                <th key={h} scope="col">{h}</th>
+              {([
+                ['Date'],
+                ['Env'],
+                // FC-R6D (2026-04-18): em-dash values are BE-WAITING
+                // — GameRecord has no `episode` field yet. Tooltip
+                // explains the column to avoid "this is broken"
+                // confusion.
+                ['Episode', 'Pending BE support — field not yet saved per game'],
+                ['Bot Level'],
+                ['Score'],
+                ['Winner'],
+                ['Frames'],
+                ['Rallies'],
+                ['Avg Rally'],
+                ['Experiment'],
+                ['Replay'],
+              ] as Array<[string, string?]>).map(([h, tip]) => (
+                <th key={h} scope="col" title={tip}>{h}</th>
               ))}
             </tr>
           </thead>
