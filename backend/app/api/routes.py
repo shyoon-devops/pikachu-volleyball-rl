@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import shutil
+from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -693,29 +694,105 @@ async def get_replay(request: Request, game_id: str):
     return {"game_id": game_id, "frames": frames, "game": game}
 
 
+def _parse_checkpoint_filename(stem: str) -> tuple[str | None, int | None]:
+    """Return ``(slug, step)`` parsed from a ``{slug}__{exp8}__{step}`` stem.
+
+    Legacy files (``{exp_id}/final``, ``{exp_id}/200000``) have no
+    double-underscore marker and return ``(None, None)``. The ``step``
+    segment can be either an int string or the literal ``"final"`` —
+    we coerce ``"final"`` to a sentinel large-but-finite integer so it
+    always sorts above numbered checkpoints for the UI "latest" view.
+    """
+    parts = stem.split("__")
+    if len(parts) < 3:
+        return None, None
+    slug = parts[0] or None
+    step_str = parts[-1]
+    if step_str == "final":
+        # Finite sentinel — large enough to win a ``key=step desc``
+        # sort against any real step value we'd actually train to.
+        return slug, 10**12
+    try:
+        return slug, int(step_str)
+    except ValueError:
+        return slug, None
+
+
 @router.get("/models")
 @endpoint_guard("list_models")
-@cache_ttl(seconds=10, max_entries=1)
-async def list_models():
+@cache_ttl(seconds=10, max_entries=8, include=("title", "limit"))
+async def list_models(
+    title: str | None = Query(default=None, max_length=60),
+    limit: int | None = Query(default=None, ge=1, le=500),
+):
+    """List model checkpoints, optionally filtered by training title (BE-T8).
+
+    Without ``title``: returns every ``*.zip`` under ``MODEL_DIR`` with
+    the legacy ``{path, size_bytes}`` shape plus the new enriched
+    fields (``filename``, ``slug``, ``step``, ``created_at``, ``title``).
+    Legacy callers that only read ``path`` / ``size_bytes`` keep working.
+
+    With ``title``: returns ONLY checkpoints whose filename slug
+    matches ``slugify(title)``. Sorted by ``step`` desc (latest first)
+    per the drill-down spec. Unparseable filenames are excluded from
+    the filtered response.
+    """
+    from backend.app.services.title_service import slugify
+
     model_dir = Path(os.getenv("MODEL_DIR", "./models")).resolve()
     if not model_dir.exists():
         logger.info("list_models: model_dir missing (%s)", model_dir)
         return {"models": []}
     try:
-        files = sorted(
-            model_dir.rglob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
+        files = list(model_dir.rglob("*.zip"))
     except OSError:
         logger.exception("list_models: failed to scan model_dir=%s", model_dir)
         raise HTTPException(status_code=500, detail="Failed to read model directory")
-    # Only include files that resolve within the model directory
+    # Defensive: a ``.zip`` symlinked outside the model dir would be a
+    # path-traversal smell. Exclude it.
     safe_files = [f for f in files if str(f.resolve()).startswith(str(model_dir))]
-    return {
-        "models": [
-            {"path": str(f.relative_to(model_dir)), "size_bytes": f.stat().st_size}
-            for f in safe_files
-        ]
-    }
+
+    filter_slug: str | None = None
+    if title is not None:
+        filter_slug = slugify(title)
+
+    rows: list[dict[str, Any]] = []
+    for f in safe_files:
+        stat = f.stat()
+        slug, step = _parse_checkpoint_filename(f.stem)
+        if filter_slug is not None and slug != filter_slug:
+            continue
+        rows.append({
+            # Backward-compat fields for callers that haven't migrated.
+            "path": str(f.relative_to(model_dir)),
+            "size_bytes": stat.st_size,
+            # Enriched fields (BE-T8).
+            "filename": f.name,
+            "slug": slug,
+            # Surfaced as ``title`` for the FE drill-down — this is the
+            # slug extracted from the filename, not the original user
+            # title. Good enough for the evaluation dialog's label.
+            "title": slug,
+            "step": step,
+            "created_at": datetime.fromtimestamp(
+                stat.st_mtime, tz=timezone.utc
+            ).isoformat(),
+        })
+
+    if filter_slug is not None:
+        # Drill-down view: newest-step-first. Rows whose step didn't
+        # parse go to the tail so the UI can still render them.
+        rows.sort(key=lambda r: (r["step"] is None, -(r["step"] or 0)))
+    else:
+        # Default view keeps the old mtime-desc ordering so the
+        # evaluation dialog's "latest model" dropdown stays stable.
+        rows.sort(
+            key=lambda r: r.get("created_at") or "",
+            reverse=True,
+        )
+    if limit is not None:
+        rows = rows[:limit]
+    return {"models": rows}
 
 
 class EvalRunRequest(BaseModel):
