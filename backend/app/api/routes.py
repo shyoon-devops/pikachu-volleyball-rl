@@ -588,6 +588,83 @@ async def list_games(
     return await game_service.get_games(page=page, limit=limit, title=title)
 
 
+# Canonical hyperparam shape surfaced alongside each run row
+# (BE-T10). Every field is always present — legacy runs that predate
+# BE-T10 (no stored hyperparams doc) get the library defaults so the
+# FE never has to branch on missing keys. Defaults mirror
+# ``backend.rl.trainer.DEFAULT_HYPERPARAMS`` + the service-level
+# defaults for the two non-PPO dials (n_envs, total_timesteps).
+_RUN_HYPERPARAM_FIELDS: dict[str, Any] = {
+    "n_envs": 8,
+    "total_timesteps": 2_000_000,
+    "learning_rate": 3e-4,
+    "n_steps": 2048,
+    "batch_size": 64,
+    "n_epochs": 10,
+    "gamma": 0.99,
+    "clip_range": 0.2,
+    "ent_coef": 0.01,
+    "gae_lambda": 0.95,
+}
+
+
+def _normalize_hyperparams(stored: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a canonical hyperparam dict for /api/training/runs.
+
+    Missing keys are filled from ``_RUN_HYPERPARAM_FIELDS``, so the FE
+    renders a consistent shape for every run regardless of whether
+    BE-T10 was live at start time.
+    """
+    src = stored or {}
+    out: dict[str, Any] = {}
+    for key, default in _RUN_HYPERPARAM_FIELDS.items():
+        val = src.get(key)
+        out[key] = val if val is not None else default
+    return out
+
+
+async def _decorate_runs_with_hyperparams(
+    request: Request, rows: list[dict[str, Any]]
+) -> None:
+    """Join hyperparams onto each aggregation row in place.
+
+    Bulk ``$in`` lookup so the query cost is O(1) regardless of page
+    size. Rows without a training_runs record (pre-T10 games, demo-only
+    experiments) get the canonical defaults via normalize so FE never
+    sees a missing key.
+    """
+    runs_service = getattr(request.app.state, "training_runs_service", None)
+    exp_ids = [row.get("experiment_id") for row in rows if row.get("experiment_id")]
+    lookup: dict[str, dict[str, Any]] = {}
+    if runs_service is not None and exp_ids:
+        try:
+            lookup = await runs_service.get_by_experiment_ids(exp_ids)
+        except Exception:  # noqa: BLE001 — degrade to defaults-only
+            logger.exception("training_runs hyperparam lookup failed")
+    for row in rows:
+        exp_id = row.get("experiment_id") or ""
+        run_doc = lookup.get(exp_id) or {}
+        row["hyperparams"] = _normalize_hyperparams(run_doc.get("hyperparams"))
+
+
+def _overlay_running_status(
+    request: Request, rows: list[dict[str, Any]]
+) -> None:
+    """Flip ``status`` to "running" on the row matching the live title."""
+    training_service = getattr(request.app.state, "training_service", None)
+    if training_service is None:
+        return
+    status = training_service.status()
+    if status.get("state") != "running":
+        return
+    live_title = (status.get("title") or "").strip()
+    if not live_title:
+        return
+    for row in rows:
+        if (row.get("title") or "") == live_title:
+            row["status"] = "running"
+
+
 @router.get("/training/runs")
 @endpoint_guard("training_runs_aggregate")
 @cache_ttl(seconds=5, max_entries=16, include=("page", "limit"))
@@ -596,33 +673,68 @@ async def list_training_runs(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
-    """Per-title training-run aggregates (BE-T4).
+    """Per-title training-run aggregates (BE-T4 + BE-T10).
 
     Powers the history page's 1st-level drill-down view. Delegates
     grouping to MongoDB so a multi-GB ``games`` collection doesn't
-    stream into Python. Status is overlayed with "running" when the
-    row matches the live training manager's current title.
+    stream into Python. Each row is decorated with a canonical
+    ``hyperparams`` sub-object joined from the ``training_runs``
+    collection. Status is overlaid with "running" when the row
+    matches the live training manager's current title.
     """
     game_service = getattr(request.app.state, "game_service", None)
     if game_service is None:
         raise HTTPException(status_code=503, detail="Game service not available")
 
     aggregated = await game_service.aggregate_by_title(page=page, limit=limit)
-
-    # Overlay "running" on the currently-live title (if any). Reading
-    # the manager's status is a cheap in-memory lookup; doing it once
-    # here avoids pushing training-state knowledge into the service.
-    training_service = getattr(request.app.state, "training_service", None)
-    live_title = ""
-    if training_service is not None:
-        status = training_service.status()
-        if status.get("state") == "running":
-            live_title = (status.get("title") or "").strip()
-    if live_title:
-        for row in aggregated.data:
-            if (row.get("title") or "") == live_title:
-                row["status"] = "running"
+    await _decorate_runs_with_hyperparams(request, aggregated.data)
+    _overlay_running_status(request, aggregated.data)
     return aggregated
+
+
+@router.get("/training/runs/{title}")
+@endpoint_guard("training_run_by_title")
+async def get_training_run(request: Request, title: str):
+    """Single-run drill-down for the FE detail view (BE-T10).
+
+    Returns the same shape as ``/api/training/runs`` entries plus
+    the hyperparams join. 404 when no games exist under the title.
+    Supports the literal ``"untitled"`` bucket for pre-title rows.
+    """
+    if not title or len(title) > 60:
+        raise HTTPException(status_code=400, detail="Invalid title")
+    game_service = getattr(request.app.state, "game_service", None)
+    if game_service is None:
+        raise HTTPException(status_code=503, detail="Game service not available")
+
+    # Reuse the aggregation to keep win_rate / avg_rally_length math
+    # in one place. Page 1/limit large-enough-to-see-anything — but
+    # capped so an API caller can't DoS the endpoint by asking for
+    # a giant page.
+    aggregated = await game_service.aggregate_by_title(page=1, limit=100)
+    row = next(
+        (r for r in aggregated.data if (r.get("title") or "") == title),
+        None,
+    )
+    if row is None:
+        # The aggregation pagination cap may have missed this title —
+        # walk subsequent pages until we find it or exhaust the list.
+        # In practice the cap should never be hit (total titles <<< 100
+        # in single-user dev setups) but we handle it for correctness.
+        page_ix = 2
+        while row is None and (page_ix - 1) * 100 < aggregated.total:
+            more = await game_service.aggregate_by_title(page=page_ix, limit=100)
+            row = next(
+                (r for r in more.data if (r.get("title") or "") == title),
+                None,
+            )
+            page_ix += 1
+    if row is None:
+        raise HTTPException(status_code=404, detail="Training run not found")
+
+    await _decorate_runs_with_hyperparams(request, [row])
+    _overlay_running_status(request, [row])
+    return row
 
 
 @router.get("/games/{game_id}")
