@@ -378,88 +378,215 @@ class PikachuVolleyballEnv(gymnasium.Env):
           - Stall/timeout penalties strengthened so rally loops are costly
         """
         reward = 0.0
-        ball = state.ball
-        p1 = state.player1
         counter_reset_this_frame = False
 
         # --- PRIMARY: scoring events ---
-        scored = state.score1 - self._prev_score1
-        conceded = state.score2 - self._prev_score2
-        if scored > 0:
-            reward += self._SCORE_REWARD
-            self._consecutive_touches = 0
-            self._frames_since_crossing = 0
-            counter_reset_this_frame = True
-        if conceded > 0:
-            reward += self._CONCEDE_REWARD
-            self._consecutive_touches = 0
-            self._frames_since_crossing = 0
-            counter_reset_this_frame = True
-        if state.score1 >= MAX_SCORE:
-            reward += self._GAME_WIN_REWARD
-        elif state.score2 >= MAX_SCORE:
-            reward += self._GAME_LOSS_REWARD
+        score_delta, score_reset = self._score_reward(state)
+        reward += score_delta
+        counter_reset_this_frame = counter_reset_this_frame or score_reset
+        reward += self._game_outcome_reward(state)
 
         # --- AUX 1: ball touch with diminishing returns ---
-        # Engine sets ball.vy = min(vy, -15) on player collision.
+        reward += self._touch_reward(state)
+
+        # --- AUX 2: net crossing (strengthened, resets touch counter) ---
+        crossing_delta, crossing_reset = self._net_crossing_reward(state)
+        reward += crossing_delta
+        counter_reset_this_frame = counter_reset_this_frame or crossing_reset
+
+        # --- AUX 3: stall penalty ---
+        reward += self._stall_penalty(state, counter_reset_this_frame)
+
+        # --- AUX 4: approach ball (gradient for early training) ---
+        reward += self._approach_reward(state)
+
+        # --- AUX 5: offensive pressure ---
+        reward += self._offensive_pressure_reward(state)
+
+        # --- AUX 6: ready position (defensive positioning) ---
+        reward += self._ready_position_reward(state)
+
+        return float(reward)
+
+    # ------------------------------------------------------------------
+    # Reward helpers (A1 refactor) — each returns its delta only. Main
+    # ``_compute_reward`` sums in a fixed order so float accumulation is
+    # byte-identical to the pre-refactor monolith. Pure helpers (no state
+    # mutation) are extracted first; mutation-carrying ones follow.
+    # ------------------------------------------------------------------
+    def _stall_penalty(self, state: Any, counter_reset_this_frame: bool) -> float:
+        """Per-frame penalty when the rally has stalled past the threshold.
+        Mutates ``_frames_since_crossing`` (increment only; resets happen
+        inside the score / net-crossing helpers).
+
+        Gate: ``not is_round_over`` AND ``not counter_reset_this_frame``.
+        The counter tracks "frames since the last meaningful event"; on
+        any frame where a score, concede, or net-crossing fired the
+        counter was already zeroed by that helper, so we must NOT
+        increment it here — otherwise the threshold comparison would
+        slip by one frame.
+
+        Returns ``_STALL_PENALTY_PER_FRAME`` only once the counter
+        CROSSES ``_STALL_THRESHOLD`` (strictly greater). Pre-threshold
+        frames return 0.0 even though the counter still ticks.
+        """
+        if state.is_round_over or counter_reset_this_frame:
+            return 0.0
+        self._frames_since_crossing += 1
+        if self._frames_since_crossing > self._STALL_THRESHOLD:
+            return self._STALL_PENALTY_PER_FRAME
+        return 0.0
+
+    def _touch_reward(self, state: Any) -> float:
+        """Diminishing-returns bonus for agent touching the ball.
+        Mutates ``_consecutive_touches`` only (not frames_since_crossing).
+
+        Touch detection uses the engine's post-collision velocity clamp:
+        the engine sets ``ball.vy <= -15`` on a player collision, and
+        we see the previous frame's ``_prev_ball_vy >= 0`` (ball was
+        falling or level) paired with ``ball.vy <= -14`` (reflected
+        upward past the clamp floor) to detect exactly one edge per
+        collision. A 3× collision_dist x-proximity gate keeps the signal
+        pinned to player 1 (the agent) vs. player 2 (bot).
+
+        First touch of a rally: +_TOUCH_REWARD_FIRST. Second: +_TOUCH_
+        REWARD_SECOND. Third+ (``else``): +_TOUCH_PENALTY_EXCESS — a
+        NEGATIVE constant, intentionally punishing self-toss loops.
+        """
+        ball = state.ball
+        p1 = state.player1
         collision_dist = PLAYER_HALF_LENGTH + BALL_RADIUS
         if self._prev_ball_vy >= 0 and ball.vy <= -14:
             if abs(ball.x - p1.x) < collision_dist * 3:
                 self._consecutive_touches += 1
                 if self._consecutive_touches == 1:
-                    reward += self._TOUCH_REWARD_FIRST
-                elif self._consecutive_touches == 2:
-                    reward += self._TOUCH_REWARD_SECOND
-                else:
-                    reward += self._TOUCH_PENALTY_EXCESS
+                    return self._TOUCH_REWARD_FIRST
+                if self._consecutive_touches == 2:
+                    return self._TOUCH_REWARD_SECOND
+                return self._TOUCH_PENALTY_EXCESS
+        return 0.0
 
-        # --- AUX 2: net crossing (strengthened, resets touch counter) ---
+    def _score_reward(self, state: Any) -> tuple[float, bool]:
+        """Per-point scoring reward. Mutates ``_consecutive_touches`` and
+        ``_frames_since_crossing`` on either a score or a concede.
+
+        Returns ``(reward_delta, did_reset_counters)``. Both branches
+        fire independently (double-counting a simultaneous score + concede
+        has never been observed but the pre-refactor code allowed it, so
+        the two ``if`` blocks stay independent rather than ``elif``).
+        Float-accumulation order matches the inline version:
+        ``_SCORE_REWARD`` first, then ``_CONCEDE_REWARD``.
+        """
+        scored = state.score1 - self._prev_score1
+        conceded = state.score2 - self._prev_score2
+        delta = 0.0
+        reset = False
+        if scored > 0:
+            delta += self._SCORE_REWARD
+            self._consecutive_touches = 0
+            self._frames_since_crossing = 0
+            reset = True
+        if conceded > 0:
+            delta += self._CONCEDE_REWARD
+            self._consecutive_touches = 0
+            self._frames_since_crossing = 0
+            reset = True
+        return delta, reset
+
+    def _net_crossing_reward(self, state: Any) -> tuple[float, bool]:
+        """Ball-over-the-net bonus. Mutates ``_consecutive_touches``
+        and ``_frames_since_crossing`` when the crossing is detected.
+
+        Returns ``(reward_delta, did_reset_counters)``. Caller OR's the
+        flag into ``counter_reset_this_frame`` so the stall penalty
+        knows to skip incrementing this frame. A crossing is counted
+        left→right with positive vx (``ball.x > NET_PILLAR_X`` now,
+        ``self._prev_ball_x <= NET_PILLAR_X`` previously, ``ball.vx > 0``).
+        The ``ball.vx > 0`` gate rules out ball-bounces-off-net-pillar
+        false positives where the ball briefly crosses then reverses.
+        """
+        ball = state.ball
         prev_on_p1_side = self._prev_ball_x <= NET_PILLAR_X
         now_on_p2_side = ball.x > NET_PILLAR_X
         if prev_on_p1_side and now_on_p2_side and ball.vx > 0:
-            reward += self._NET_CROSSING_REWARD
             self._consecutive_touches = 0
             self._frames_since_crossing = 0
-            counter_reset_this_frame = True
+            return self._NET_CROSSING_REWARD, True
+        return 0.0, False
 
-        # --- AUX 3: stall penalty ---
-        # Only increment when no reset this frame (counter represents frames
-        # since last crossing; this frame is stale only if nothing happened).
-        if not state.is_round_over and not counter_reset_this_frame:
-            self._frames_since_crossing += 1
-            if self._frames_since_crossing > self._STALL_THRESHOLD:
-                reward += self._STALL_PENALTY_PER_FRAME
+    def _ready_position_reward(self, state: Any) -> float:
+        """Defensive positioning bonus: stand near center while the ball
+        is on the opponent's side. Pure — no state mutation.
 
-        # --- AUX 4: approach ball (gradient for early training) ---
-        if ball.x <= NET_PILLAR_X and not state.is_round_over:
-            prev_dist = abs(self._prev_ball_x - self._prev_p1_x)
-            curr_dist = abs(float(ball.x) - float(p1.x))
-            if curr_dist < prev_dist:
-                reward += self._APPROACH_REWARD
+        Ready-x is half the court (``NET_PILLAR_X * 0.5``); the reward
+        decays linearly from full at ready-x to zero at either wall.
+        ``max(0.0, ...)`` guards against the (impossible under clamp)
+        case of ``dist_from_ready > max_dist``.
+        """
+        ball = state.ball
+        p1 = state.player1
+        if ball.x > NET_PILLAR_X and not state.is_round_over:
+            ready_x = NET_PILLAR_X * 0.5
+            dist_from_ready = abs(float(p1.x) - ready_x)
+            max_dist = NET_PILLAR_X * 0.5
+            return self._READY_REWARD * max(0.0, 1.0 - dist_from_ready / max_dist)
+        return 0.0
 
-        # --- AUX 5: offensive pressure (NEW) ---
-        # When the ball is on the opponent's side, high in the air, and
-        # moving away from the agent, the agent just executed a forward shot.
-        # This nudges policy toward attacking shots over safe self-tosses.
-        # Gated by `is_round_over` so scoring frames don't double-count.
+    def _offensive_pressure_reward(self, state: Any) -> float:
+        """Distance-weighted bonus when the ball is over the opponent's
+        half, above the net, and still moving forward. Pure — no state
+        mutation.
+
+        Gated by ``not is_round_over`` so scoring frames don't double-
+        count. Depth factor decays linearly from 1.0 at the net pillar
+        to 0.0 at the far wall, so the reward is strongest in the
+        attacking zone (near the opponent's net).
+        """
+        ball = state.ball
         if (
             ball.x > NET_PILLAR_X
             and ball.y < NET_PILLAR_TOP_Y  # above the net height
             and ball.vx > 0  # moving into opponent's court
             and not state.is_round_over
         ):
-            # Pressure strongest near the net on opponent's side (attacking zone).
-            # Distance-weighted so the reward decays as the ball moves away from net.
             opp_half = float(GROUND_WIDTH - NET_PILLAR_X)
             ball_depth = float(ball.x - NET_PILLAR_X)
             depth_factor = max(0.0, 1.0 - ball_depth / opp_half)
-            reward += self._OFFENSIVE_PRESSURE_REWARD * depth_factor
+            return self._OFFENSIVE_PRESSURE_REWARD * depth_factor
+        return 0.0
 
-        # --- AUX 6: ready position (defensive positioning) ---
-        if ball.x > NET_PILLAR_X and not state.is_round_over:
-            ready_x = NET_PILLAR_X * 0.5
-            dist_from_ready = abs(float(p1.x) - ready_x)
-            max_dist = NET_PILLAR_X * 0.5
-            reward += self._READY_REWARD * max(0.0, 1.0 - dist_from_ready / max_dist)
+    def _approach_reward(self, state: Any) -> float:
+        """Gradient shaping when the agent moves toward the ball on its own
+        court half. Pure — no state mutation.
 
-        return float(reward)
+        Gated by ``not is_round_over`` so scoring-freeze frames don't
+        double-count, and by ``ball.x <= NET_PILLAR_X`` so the signal
+        applies only while the ball is defendable. The previous-frame
+        distances are taken from ``self._prev_ball_x`` / ``self._prev_p1_x``
+        (set at the end of ``step``) so approach is measured as
+        "got closer vs. last frame".
+        """
+        ball = state.ball
+        p1 = state.player1
+        if ball.x <= NET_PILLAR_X and not state.is_round_over:
+            prev_dist = abs(self._prev_ball_x - self._prev_p1_x)
+            curr_dist = abs(float(ball.x) - float(p1.x))
+            if curr_dist < prev_dist:
+                return self._APPROACH_REWARD
+        return 0.0
+
+    def _game_outcome_reward(self, state: Any) -> float:
+        """Terminal win / loss bonus. Pure — no state mutation.
+
+        Returns ``+_GAME_WIN_REWARD`` when p1 reached MAX_SCORE,
+        ``+_GAME_LOSS_REWARD`` when p2 did (note: the loss constant is
+        a NEGATIVE number, so adding it subtracts). Exactly one branch
+        fires per call — ``score1 >= MAX_SCORE`` takes priority if both
+        somehow reached MAX at once, matching the pre-refactor
+        if/elif chain.
+        """
+        if state.score1 >= MAX_SCORE:
+            return self._GAME_WIN_REWARD
+        if state.score2 >= MAX_SCORE:
+            return self._GAME_LOSS_REWARD
+        return 0.0
