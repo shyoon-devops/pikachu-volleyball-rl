@@ -468,4 +468,30 @@ async def results_push_loop(
             })
         else:
             GAME_SAVE_SUCCESS.inc()
+            # BE-T7: emit a structured `training:game_end` frame so the
+            # FE history view can prepend this row in real time without
+            # re-polling /api/games. Stable subset of the record (the
+            # FE documents these fields). Timestamp is stamped here
+            # (not from the manager) so it's JSON-ready.
+            await manager.broadcast({
+                "type": "training:game_end",
+                "payload": {
+                    "record": {
+                        "game_id": record.game_id,
+                        "title": record.title,
+                        "env_id": record.env_id,
+                        "score1": record.score1,
+                        "score2": record.score2,
+                        "winner": record.winner,
+                        "episode": record.episode,
+                        "duration_frames": record.duration_frames,
+                        "experiment_id": record.experiment_id,
+                        "timestamp": (
+                            record.timestamp.isoformat()
+                            if record.timestamp is not None
+                            else None
+                        ),
+                    },
+                },
+            })
         await manager.broadcast({"type": "game:result", "payload": data})

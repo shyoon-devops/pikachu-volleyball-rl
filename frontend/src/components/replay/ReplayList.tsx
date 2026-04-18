@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getGames, getAvailableReplays } from '../../lib/api'
+import { useTrainingState } from '../../hooks/useTrainingState'
 import type { GameRecord, ReplayInfo } from '../../lib/types'
 import {
   formatBotLevel,
@@ -98,6 +99,10 @@ export function ReplayList({
 }: ReplayListProps = {}) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  // FC-R7B live-history: bumps on each ws `game:result`; added to the
+  // fetch effect's deps so the table pulls fresh `/api/games` data as
+  // new games land, mirroring TrainingRunList.
+  const { gameResultSeq } = useTrainingState()
   const [games, setGames] = useState<GameRecord[]>([])
   const [replays, setReplays] = useState<ReplayInfo[]>([])
   const [page, setPage] = useState(1)
@@ -154,7 +159,7 @@ export function ReplayList({
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [page, titleFilter])
+  }, [page, titleFilter, gameResultSeq])
 
   /**
    * Build a `Map<gameId, ReplayInfo>` once per replays change so the
@@ -347,7 +352,7 @@ export function ReplayList({
                     </td>
                     <td className="text-muted">{formatEpisode(g.episode)}</td>
                     <td>{formatBotLevel(g.botLevel)}</td>
-                    <td>
+                    <td className="score-cell">
                       <span className="score-p1">{g.score1}</span>
                       {' : '}
                       <span className="score-p2">{g.score2}</span>

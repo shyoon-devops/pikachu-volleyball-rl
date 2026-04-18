@@ -745,6 +745,21 @@ select option {
   color: var(--color-danger);
 }
 
+/*
+ * Score cell utility (FC-R7E 2026-04-18). Prevents values like
+ * "15 : 10" from wrapping to two lines when the column narrows
+ * (Dashboard Recent Games + ReplayList unified history both
+ * hit this). `tabular-nums` keeps digit widths equal so the
+ * min-width is predictable; 56 px fits a two-digit : two-digit
+ * pair plus separator without truncation at typical font sizes.
+ * Mirrors the batch-tab chip rule introduced in F-R4 (32b95108).
+ */
+.score-cell {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  min-width: 56px;
+}
+
 /* ── Winner colors (FE 사용 중) ────────────────────────── */
 .winner-agent {
   color: var(--color-success);

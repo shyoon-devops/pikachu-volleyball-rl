@@ -9,6 +9,17 @@ vi.mock('../../lib/api', () => ({
   getTrainingRuns: (page?: number, limit?: number) => getTrainingRuns(page, limit),
 }))
 
+// FC-R7B: TrainingRunList reads `gameResultSeq` from the shared
+// training-state hook to trigger a refetch whenever a new game:result
+// lands on the ws. Tests render in isolation (no TrainingStateProvider),
+// so we mock the hook directly. The mocked object is mutated by
+// individual tests via `mockTrainingState.gameResultSeq = N` + rerender
+// to simulate the live bump.
+const mockTrainingState = { gameResultSeq: 0 }
+vi.mock('../../hooks/useTrainingState', () => ({
+  useTrainingState: () => mockTrainingState,
+}))
+
 import { TrainingRunList } from './TrainingRunList'
 
 function run(overrides: Partial<TrainingRun> = {}): TrainingRun {
@@ -31,6 +42,7 @@ function page(runs: TrainingRun[]): PaginatedResponse<TrainingRun> {
 
 beforeEach(() => {
   getTrainingRuns.mockReset()
+  mockTrainingState.gameResultSeq = 0
 })
 
 afterEach(() => {
@@ -171,5 +183,68 @@ describe('TrainingRunList (FC-R6H level-1)', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent(/runs endpoint down/)
     })
+  })
+
+  // FC-R7B: a bump on `gameResultSeq` from the shared hook must
+  // re-run `getTrainingRuns` so the list picks up the freshly-landed
+  // game without the user manually refreshing. Mirrors the same path
+  // we wired in ReplayList.
+  it('refetches runs when gameResultSeq bumps (live game:result sync)', async () => {
+    getTrainingRuns.mockResolvedValueOnce(page([run({ title: 'run-a', totalGames: 1 })]))
+    const { rerender } = render(
+      <MemoryRouter>
+        <TrainingRunList />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'run-a' })).toBeInTheDocument()
+    })
+    expect(getTrainingRuns).toHaveBeenCalledTimes(1)
+
+    // Simulate a ws game:result landing → seq bump + rerender. The
+    // effect's dep array watches gameResultSeq, so a new fetch fires.
+    getTrainingRuns.mockResolvedValueOnce(page([run({ title: 'run-a', totalGames: 2 })]))
+    mockTrainingState.gameResultSeq = 1
+    rerender(
+      <MemoryRouter>
+        <TrainingRunList />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      expect(getTrainingRuns).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  // FC-R7A regression guard: qa-observed crash where runs
+  // aggregate returned rows with null fields (title / numeric /
+  // status) — rendering must not throw.
+  it('renders a row whose every nullable field is null/zero without crashing', async () => {
+    getTrainingRuns.mockResolvedValueOnce(
+      page([
+        {
+          title: null as unknown as string,
+          experimentId: null,
+          startedAt: null,
+          endedAt: null,
+          totalGames: null as unknown as number,
+          winRate: Number.NaN,
+          avgRallyLength: null as unknown as number,
+          status: null as unknown as string,
+        },
+      ]),
+    )
+    render(
+      <MemoryRouter>
+        <TrainingRunList />
+      </MemoryRouter>,
+    )
+    // Title falls back to "untitled"; numeric cells fall back to 0.
+    await waitFor(() => {
+      expect(screen.getAllByRole('link', { name: /untitled/ }).length).toBeGreaterThan(0)
+    })
+    // No error banner.
+    expect(screen.queryByRole('alert')).toBeNull()
+    // Status chip defaults to "Finished" when BE status is null.
+    expect(screen.getAllByText('Finished').length).toBeGreaterThan(0)
   })
 })

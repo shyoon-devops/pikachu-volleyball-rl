@@ -403,7 +403,7 @@ export function Dashboard() {
                       </td>
                       <td className="text-muted">{formatEpisode(g.episode)}</td>
                       <td>{formatBotLevel(g.botLevel)}</td>
-                      <td>
+                      <td className="score-cell">
                         <span className="score-p1">{g.score1}</span>
                         {' : '}
                         <span className="score-p2">{g.score2}</span>
