@@ -137,7 +137,14 @@ export function ReplayList() {
                 const replay = replayByGameId.get(joinKey)
                 return (
                   <tr key={g.id}>
-                    <td className="text-muted">
+                    {/*
+                      Time reads as primary text, not `.text-muted` — see
+                      R2-redo fix in Dashboard.tsx (2026-04-18). The
+                      timestamp is primary context on the History page;
+                      only true secondary fields (Frames / Rallies /
+                      Avg Rally) stay muted.
+                    */}
+                    <td>
                       {formatKstDateTime(g.timestamp)}
                     </td>
                     <td>{formatBotLevel(g.botLevel)}</td>

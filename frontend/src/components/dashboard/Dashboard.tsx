@@ -123,7 +123,17 @@ export function Dashboard() {
                   {recentGames.slice(0, 20).map((g, i) => (
                     <tr key={g.id}>
                       <td className="text-muted">{i + 1}</td>
-                      <td className="text-muted">{formatKstDateTime(g.timestamp)}</td>
+                      {/*
+                        Time reads as primary text, not `.text-muted` — the
+                        cell sits next to non-muted columns (Bot Level,
+                        Score, Winner) and being the only gray-colored
+                        numeric cell in the middle of the row made the
+                        leading "2026" look washed-out next to its
+                        neighbours (R2-redo user report, 2026-04-18).
+                        Rank / Frames / Rallies / Avg Rally stay muted
+                        because they ARE secondary metadata.
+                      */}
+                      <td>{formatKstDateTime(g.timestamp)}</td>
                       <td>{formatBotLevel(g.botLevel)}</td>
                       <td>
                         <span className="score-p1">{g.score1}</span>
