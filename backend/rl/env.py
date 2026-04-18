@@ -428,11 +428,7 @@ class PikachuVolleyballEnv(gymnasium.Env):
                 reward += self._STALL_PENALTY_PER_FRAME
 
         # --- AUX 4: approach ball (gradient for early training) ---
-        if ball.x <= NET_PILLAR_X and not state.is_round_over:
-            prev_dist = abs(self._prev_ball_x - self._prev_p1_x)
-            curr_dist = abs(float(ball.x) - float(p1.x))
-            if curr_dist < prev_dist:
-                reward += self._APPROACH_REWARD
+        reward += self._approach_reward(state)
 
         # --- AUX 5: offensive pressure (NEW) ---
         # When the ball is on the opponent's side, high in the air, and
@@ -467,6 +463,26 @@ class PikachuVolleyballEnv(gymnasium.Env):
     # byte-identical to the pre-refactor monolith. Pure helpers (no state
     # mutation) are extracted first; mutation-carrying ones follow.
     # ------------------------------------------------------------------
+    def _approach_reward(self, state: Any) -> float:
+        """Gradient shaping when the agent moves toward the ball on its own
+        court half. Pure — no state mutation.
+
+        Gated by ``not is_round_over`` so scoring-freeze frames don't
+        double-count, and by ``ball.x <= NET_PILLAR_X`` so the signal
+        applies only while the ball is defendable. The previous-frame
+        distances are taken from ``self._prev_ball_x`` / ``self._prev_p1_x``
+        (set at the end of ``step``) so approach is measured as
+        "got closer vs. last frame".
+        """
+        ball = state.ball
+        p1 = state.player1
+        if ball.x <= NET_PILLAR_X and not state.is_round_over:
+            prev_dist = abs(self._prev_ball_x - self._prev_p1_x)
+            curr_dist = abs(float(ball.x) - float(p1.x))
+            if curr_dist < prev_dist:
+                return self._APPROACH_REWARD
+        return 0.0
+
     def _game_outcome_reward(self, state: Any) -> float:
         """Terminal win / loss bonus. Pure — no state mutation.
 
