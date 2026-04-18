@@ -18,8 +18,11 @@ Short, durable records — **one decision per file**. ADRs can be `Accepted`, `S
 | [0008](adr/0008-ws-gameresult-payload-validation.md) | Validate `game:result` WS payloads against the full `GameRecord` schema | Accepted |
 | [0009](adr/0009-fe-dual-channel-dispatch-and-hydration.md) | FE dispatches commands on both WS + REST, and hydrates state on mount / reconnect | Accepted |
 | [0010](adr/0010-devops-redeploy-batching.md) | DevOps batches in-flight merges into the current redeploy cycle | Accepted |
+| [0011](adr/0011-faithful-port-with-parity-test.md) | Faithful port with parity test as acceptance criterion | Accepted |
+| [0012](adr/0012-refactor-sprint-area-by-area-with-parity-gates.md) | Refactor sprint — area-by-area with strict parity gates | Accepted |
+| [0013](adr/0013-unified-runs-navigation.md) | Unified Training Runs navigation replacing /history + /evaluation split | Accepted |
 
-Next ADR number: **0011**.
+Next ADR number: **0014**.
 
 ## Design specs (`design/`)
 
@@ -83,6 +86,14 @@ Per-version release notes. See the `releases/` directory; TEMPLATE.md lists the 
 - [SPRINT1-ASSIGNMENT.md](SPRINT1-ASSIGNMENT.md), [SPRINT2-STATUS.md](SPRINT2-STATUS.md)
 - [DISK-CLEANUP-REPORT-20260412.md](DISK-CLEANUP-REPORT-20260412.md)
 - [VERSIONS.yml](VERSIONS.yml) — version matrix
+- [DEPS-MAJOR-BUMP-CANDIDATES.md](DEPS-MAJOR-BUMP-CANDIDATES.md) — major dep upgrades deferred from A7
+
+## v1.0.0 release artifacts
+
+- [RELEASE-NOTES-v1.0.0.md](RELEASE-NOTES-v1.0.0.md) — user-facing What's New (KR + EN), migration, known issues
+- [RETROSPECTIVE-v1.0.0.md](RETROSPECTIVE-v1.0.0.md) — cycle retrospective (well / learned / improve)
+- [API-REFERENCE-v1.0.0.md](API-REFERENCE-v1.0.0.md) — REST / WS / MongoDB schema changes since v0.2.5
+- [CHANGELOG.md § 1.0.0](../CHANGELOG.md#100---2026-04-19)
 
 ## How to add a new ADR
 
