@@ -290,6 +290,20 @@ export interface TrainingRun {
    *  title matches this row; "done" otherwise. Legacy records with
    *  no status default to "done". */
   status: 'running' | 'done' | string
+  /**
+   * Snapshot of the hyperparameters the run was launched with
+   * (FC-R8b). `null` / undefined means the run record pre-dates
+   * BE-T10 (no persisted hyperparams) — the FE renders a
+   * placeholder summary in that case.
+   *
+   * [BE-WAITING] Populated once BE-T10 teaches `title_service.
+   * register()` to persist the HyperparamFormSubmission payload on
+   * `training_runs`, and extends `aggregate_by_title` to carry it
+   * forward. Shape mirrors `Hyperparams` (the 10 canonical PPO
+   * knobs) so the FE can render without coupling to BE snake_case
+   * at the display layer — `snakeToCamel` handles the wire format.
+   */
+  hyperparams?: Partial<Hyperparams> | null
 }
 
 export interface EvalResult {
