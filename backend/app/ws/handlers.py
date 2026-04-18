@@ -133,11 +133,32 @@ async def _dispatch(
             if params.bot_level is not None
             else current["bot_level"]
         )
-        experiment_id = await training_service.start(
-            hyperparams=params.hyperparams,
-            bot_level=effective_bot_level,
-            total_timesteps=params.total_timesteps,
-        )
+        # Extended PPO hyperparams (2026-04-18): n_epochs / ent_coef /
+        # gae_lambda are already consumed from the hp dict by
+        # ``TrainingManager._train_loop``, but the WS envelope used to
+        # expose them only via the free-form ``hyperparams`` blob. Now
+        # each has a first-class range-validated field on the payload;
+        # merge any supplied top-level field into the hp dict so the
+        # trainer path stays a single source of truth and explicit
+        # top-level fields win over ``hyperparams``-blob duplicates.
+        hp: dict[str, Any] = dict(params.hyperparams or {})
+        if params.n_epochs is not None:
+            hp["n_epochs"] = params.n_epochs
+        if params.ent_coef is not None:
+            hp["ent_coef"] = params.ent_coef
+        if params.gae_lambda is not None:
+            hp["gae_lambda"] = params.gae_lambda
+        # n_envs is NOT a PPO ctor arg — it configures make_vec_env, so
+        # it travels as a separate kwarg to manager.start (below). None
+        # means "use the manager default".
+        start_kwargs: dict[str, Any] = {
+            "hyperparams": hp,
+            "bot_level": effective_bot_level,
+            "total_timesteps": params.total_timesteps,
+        }
+        if params.n_envs is not None:
+            start_kwargs["n_envs"] = params.n_envs
+        experiment_id = await training_service.start(**start_kwargs)
         logger.info(
             "Training started: experiment=%s bot_level=%d",
             experiment_id, effective_bot_level,

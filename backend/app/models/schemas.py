@@ -97,7 +97,26 @@ class WsTrainingStartPayload(BaseModel):
     # falls back to the current ``status.bot_level`` — no implicit reset
     # to L1. Range check still applies when the field is supplied.
     bot_level: int | None = Field(default=None, ge=1, le=5)
-    total_timesteps: int = Field(default=2_000_000, ge=1000)
+    # total_timesteps range tightened 2026-04-18: ge=100_000 so a typo
+    # like `1000` doesn't silently burn a GPU slot on a run that would
+    # learn nothing; le=10_000_000 to cap unintended runaway runs. FE
+    # default stays at 2M (see chore(training) commit).
+    total_timesteps: int = Field(default=2_000_000, ge=100_000, le=10_000_000)
+    # Parallel env count — PPO rollout width. More envs = more gradient
+    # samples per update but also more GPU memory + more WS env-frame
+    # broadcast bandwidth. 32 caps pragmatically given the 4070 Ti headroom.
+    n_envs: int | None = Field(default=None, ge=1, le=32)
+    # PPO epochs per rollout. Low values under-fit; high values over-fit
+    # on stale rollout data and wreck convergence. 30 is well past
+    # diminishing returns.
+    n_epochs: int | None = Field(default=None, ge=1, le=30)
+    # Entropy bonus coefficient. 0.0 disables exploration bonus entirely
+    # (policy can collapse). 0.05 upper cap picked so exploration can't
+    # swamp the task-reward signal.
+    ent_coef: float | None = Field(default=None, ge=0.0, le=0.05)
+    # GAE lambda — advantage-estimator bias/variance knob. 0.9 is the
+    # aggressively-biased end; 1.0 is plain discounted returns.
+    gae_lambda: float | None = Field(default=None, ge=0.9, le=1.0)
 
 
 class WsSetLevelPayload(BaseModel):
