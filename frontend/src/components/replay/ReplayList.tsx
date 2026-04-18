@@ -8,6 +8,7 @@ import {
   formatAvgRallyLength,
   formatExperimentIdShort,
   formatEnvId,
+  formatEpisode,
 } from '../../lib/formatGame'
 import { formatKstDateTime } from '../../lib/formatTime'
 import './ReplayList.css'
@@ -25,11 +26,22 @@ const DEFAULT_N_ENVS = 8
 /** URL query parameter key for the env filter (spec §6: `?env=N`). */
 const ENV_QUERY_KEY = 'env'
 
-function parseEnvParam(raw: string | null): number | null {
+/**
+ * Parse `?env=...` into a canonical filter token. BE emits env_id as
+ * a STRING ("0".."7" for parallel envs, "demo" for the standalone
+ * game — see `backend/rl/callbacks.py`), so the filter compares
+ * string-vs-string. Accepts:
+ *   ?env=3    → "3"      (matches ENV 3 rows)
+ *   ?env=demo → "demo"   (matches the demo-game row)
+ *   absent / bogus → null (= All)
+ */
+function parseEnvParam(raw: string | null): string | null {
   if (raw === null) return null
-  const n = Number(raw)
-  if (Number.isNaN(n) || !Number.isInteger(n) || n < 0) return null
-  return n
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+  if (trimmed.toLowerCase() === 'demo') return 'demo'
+  if (/^\d+$/.test(trimmed)) return trimmed
+  return null
 }
 
 /**
@@ -75,12 +87,12 @@ export function ReplayList() {
   const envFilter = parseEnvParam(searchParams.get(ENV_QUERY_KEY))
 
   const setEnvFilter = useCallback(
-    (next: number | null) => {
+    (next: string | null) => {
       const params = new URLSearchParams(searchParams)
       if (next === null) {
         params.delete(ENV_QUERY_KEY)
       } else {
-        params.set(ENV_QUERY_KEY, String(next))
+        params.set(ENV_QUERY_KEY, next)
       }
       setSearchParams(params, { replace: true })
     },
@@ -135,6 +147,7 @@ export function ReplayList() {
    */
   const filteredGames = useMemo(() => {
     if (envFilter === null) return games
+    // BE emits env_id as a string; filter comparison is string===string.
     return games.filter(g => g.envId === envFilter)
   }, [games, envFilter])
 
@@ -157,17 +170,20 @@ export function ReplayList() {
           Env
           <select
             className="replay-list-filter-select"
-            value={envFilter === null ? 'all' : String(envFilter)}
+            value={envFilter ?? 'all'}
             onChange={e => {
               const v = e.target.value
-              setEnvFilter(v === 'all' ? null : Number(v))
+              setEnvFilter(v === 'all' ? null : v)
             }}
             aria-label="Filter by parallel env"
           >
             <option value="all">All</option>
             {Array.from({ length: DEFAULT_N_ENVS }, (_, i) => (
-              <option key={i} value={i}>ENV {i}</option>
+              <option key={i} value={String(i)}>ENV {i}</option>
             ))}
+            {/* BE emits "demo" for the standalone LiveFrameCallback game;
+                surface it in the filter so users can slice demo vs parallel. */}
+            <option value="demo">DEMO</option>
           </select>
         </label>
         {envFilter !== null && (
@@ -184,6 +200,7 @@ export function ReplayList() {
               {[
                 'Date',
                 'Env',
+                'Episode',
                 'Bot Level',
                 'Score',
                 'Winner',
@@ -200,11 +217,11 @@ export function ReplayList() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={10} className="replay-list-empty">Loading...</td>
+                <td colSpan={11} className="replay-list-empty">Loading...</td>
               </tr>
             ) : filteredGames.length === 0 ? (
               <tr>
-                <td colSpan={10} className="replay-list-empty empty-state">
+                <td colSpan={11} className="replay-list-empty empty-state">
                   {envFilter === null
                     ? 'No games recorded yet.'
                     : `No games match env_id=${envFilter} on this page.`}
@@ -240,6 +257,7 @@ export function ReplayList() {
                         {formatEnvId(g.envId)}
                       </span>
                     </td>
+                    <td className="text-muted">{formatEpisode(g.episode)}</td>
                     <td>{formatBotLevel(g.botLevel)}</td>
                     <td>
                       <span className="score-p1">{g.score1}</span>

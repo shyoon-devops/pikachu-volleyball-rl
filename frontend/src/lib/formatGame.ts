@@ -99,17 +99,39 @@ export function formatExperimentIdShort(id: string | null | undefined): string {
 }
 
 /**
- * Render the History page's env chip. ENV 0..15 map to `ENV N`;
- * missing env id renders as an em-dash so the column stays tidy for
- * demo / single-env rows (and for any game saved before BE started
- * emitting the field).
+ * Render the History page's env chip. BE emits `env_id` as a string
+ * (`"0".."7"` for parallel gradient envs, `"demo"` for the standalone
+ * demo game) — FE preserves that shape. Output:
+ *   "0"..."15"  → `ENV N`
+ *   "demo"      → `DEMO`
+ *   missing     → `—`
+ *   anything else → render the raw value (forward-compat for envs
+ *                   BE may add later, e.g. a dedicated `"eval"` lane)
  *
- * Stays a stringly helper (not a React component) so it can sit next
- * to the other formatGame helpers and reuse the same testing setup.
+ * Legacy `number` form kept in the signature for callers that minted
+ * an int themselves — those also route through the same "ENV N"
+ * branch.
  */
-export function formatEnvId(envId: number | null | undefined): string {
-  if (envId === null || envId === undefined || Number.isNaN(envId)) {
-    return '—'
+export function formatEnvId(
+  envId: string | number | null | undefined,
+): string {
+  if (envId === null || envId === undefined) return '—'
+  if (typeof envId === 'number') {
+    if (Number.isNaN(envId)) return '—'
+    return `ENV ${envId}`
   }
-  return `ENV ${envId}`
+  const trimmed = envId.trim()
+  if (trimmed === '') return '—'
+  if (/^\d+$/.test(trimmed)) return `ENV ${trimmed}`
+  return trimmed.toUpperCase()
+}
+
+/**
+ * Per-game episode number (see `GameRecord.episode` BE-WAITING
+ * note). Renders `—` when missing so the column never claims
+ * "episode 0" for records the BE hasn't tagged yet.
+ */
+export function formatEpisode(ep: number | null | undefined): string {
+  if (ep === null || ep === undefined || Number.isNaN(ep)) return '—'
+  return ep.toLocaleString()
 }

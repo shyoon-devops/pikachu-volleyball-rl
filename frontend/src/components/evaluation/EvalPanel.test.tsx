@@ -65,10 +65,14 @@ beforeEach(() => {
   // Default: one model, empty results.
   mockGetModels.mockResolvedValue([makeModel('models/latest.zip')])
   mockGetEvalResults.mockResolvedValue([])
+  // Wipe session storage so a prior test's active-job id doesn't
+  // cross-contaminate the next test's mount.
+  try { sessionStorage.clear() } catch { /* ignore in SSR-like envs */ }
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
+  try { sessionStorage.clear() } catch { /* ignore */ }
 })
 
 describe('EvalPanel — async job polling (2026-04-18)', () => {
@@ -167,4 +171,82 @@ describe('EvalPanel — async job polling (2026-04-18)', () => {
     await waitFor(() => expect(getRunButton()).toHaveTextContent('Run Evaluation'))
     expect(getRunButton()).toBeEnabled()
   }, 10_000)
+})
+
+describe('EvalPanel — mount-resume via sessionStorage (FC-R3, 2026-04-18)', () => {
+  // The panel unmounts on tab navigation; before this fix the active
+  // jobId lived in React state and died with the component. Users
+  // returning to /evaluation saw the Run button lit back up, clicked,
+  // and got a 409 "already in progress" error. sessionStorage bridges
+  // the unmount gap without needing a BE-side "active job" endpoint.
+
+  function getRunButton(): HTMLButtonElement {
+    const btn = document.querySelector('.eval-form-submit')
+    if (!btn) throw new Error('Run Evaluation button not mounted')
+    return btn as HTMLButtonElement
+  }
+
+  it('resumes polling on mount when sessionStorage has a stored job id', async () => {
+    sessionStorage.setItem('eval:active_job_id', 'job-resumed')
+    mockGetEvaluationStatus
+      .mockResolvedValueOnce(jobStatus('running', {
+        jobId: 'job-resumed',
+        progress: { current: 17, total: 50 },
+      }))
+
+    render(<EvalPanel />)
+
+    await waitFor(() => {
+      expect(mockGetEvaluationStatus).toHaveBeenCalledWith('job-resumed')
+    })
+    // Button label reflects the resumed progress.
+    await waitFor(
+      () => expect(getRunButton()).toHaveTextContent(/Running\s+17\/50/),
+      { timeout: 2000 },
+    )
+  }, 10_000)
+
+  it('clears stale sessionStorage when the resumed /status returns done', async () => {
+    sessionStorage.setItem('eval:active_job_id', 'job-stale')
+    mockGetEvaluationStatus
+      .mockResolvedValueOnce(jobStatus('done', {
+        jobId: 'job-stale',
+        progress: { current: 50, total: 50 },
+      }))
+
+    render(<EvalPanel />)
+
+    await waitFor(() => {
+      expect(sessionStorage.getItem('eval:active_job_id')).toBeNull()
+    })
+    // UI should be idle (Run Evaluation label, enabled) — nothing to resume.
+    await waitFor(() => expect(getRunButton()).toHaveTextContent('Run Evaluation'))
+  })
+
+  it('clears stale sessionStorage when the resumed /status 404s', async () => {
+    sessionStorage.setItem('eval:active_job_id', 'job-evicted')
+    mockGetEvaluationStatus.mockRejectedValueOnce(new Error('404 Job not found'))
+
+    render(<EvalPanel />)
+
+    await waitFor(() => {
+      expect(sessionStorage.getItem('eval:active_job_id')).toBeNull()
+    })
+  })
+
+  it('persists a new job_id in sessionStorage on successful POST', async () => {
+    mockRunEvaluation.mockResolvedValueOnce({ jobId: 'job-persisted', state: 'pending' })
+    mockGetEvaluationStatus.mockResolvedValue(jobStatus('running', {
+      jobId: 'job-persisted',
+      progress: { current: 1, total: 50 },
+    }))
+
+    render(<EvalPanel />)
+    await waitFor(() => expect(getRunButton()).toBeEnabled())
+    fireEvent.click(getRunButton())
+
+    await waitFor(() => {
+      expect(sessionStorage.getItem('eval:active_job_id')).toBe('job-persisted')
+    })
+  })
 })

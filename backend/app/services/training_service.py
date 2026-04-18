@@ -18,11 +18,20 @@ class TrainingServiceWrapper:
         hyperparams: dict[str, Any] | None = None,
         bot_level: int = 1,
         total_timesteps: int = 2_000_000,
+        n_envs: int = 8,
     ) -> str:
+        """Start a new training run.
+
+        ``n_envs`` is accepted explicitly (rather than tucked into
+        ``hyperparams``) because it drives ``make_vec_env`` — not the
+        PPO constructor — and defaults to the manager's 8-env baseline
+        when the caller does not specify.
+        """
         return await self.manager.start(
             hyperparams=hyperparams,
             bot_level=bot_level,
             total_timesteps=total_timesteps,
+            n_envs=n_envs,
         )
 
     async def stop(self, *, force: bool = True) -> dict[str, Any]:
