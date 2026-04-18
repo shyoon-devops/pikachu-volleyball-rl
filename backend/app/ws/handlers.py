@@ -360,6 +360,11 @@ async def results_push_loop(
                 winner=data["winner"],
                 duration_frames=data["duration_frames"],
                 rally_count=data.get("rally_count", 0),
+                # env_id: "demo" for the demo callback; "0".."7" for
+                # parallel training envs (BE-A2). Legacy producers that
+                # never learned the field are treated as demo — matches
+                # pre-A2 behavior since only the demo saved games.
+                env_id=data.get("env_id"),
             )
         except Exception as e:
             logger.exception("Invalid game result payload, routing to dead-letter")

@@ -95,6 +95,18 @@ class PikachuVolleyballEnv(gymnasium.Env):
         self._prev_p1_x = 0.0
         self._consecutive_touches = 0
         self._frames_since_crossing = 0
+        # Per-match net-crossing counter (rally_count in the GameRecord).
+        # Increments on any net crossing (either direction) and resets on
+        # reset() — matches the definition the offline evaluator uses
+        # (rl/evaluator.py:82-85) so /api/games and avg_rally_length are
+        # comparable. The BE-A2 drain_pending_results hook reads it at
+        # game-end and ships the total in the result dict.
+        self._rally_count: int = 0
+        self._prev_ball_side_right: bool = False
+        # Finished matches queued for the trainer-thread drain hook
+        # (BE-A2). Each entry is a plain dict matching the producer
+        # contract expected by handlers.results_push_loop.
+        self._pending_results: list[dict[str, Any]] = []
 
     def reset(
         self,
@@ -121,6 +133,12 @@ class PikachuVolleyballEnv(gymnasium.Env):
         self._prev_p1_x = float(state.player1.x)
         self._consecutive_touches = 0
         self._frames_since_crossing = 0
+        # rally_count and ball-side tracker reset together; pending
+        # results intentionally survive reset so the trainer-side drain
+        # can still collect a game that ended on the last step of the
+        # prior episode (VecEnv auto-reset races with env_method).
+        self._rally_count = 0
+        self._prev_ball_side_right = state.ball.x > NET_PILLAR_X
         return self._get_obs(state), {}
 
     def step(
@@ -171,6 +189,27 @@ class PikachuVolleyballEnv(gymnasium.Env):
             reward += self._RALLY_TIMEOUT_PENALTY
             truncated = True
 
+        # Net-crossing rally counter — both directions count (matches the
+        # offline evaluator so /api/games rally_count matches eval avg).
+        ball_side_right = new_state.ball.x > NET_PILLAR_X
+        if ball_side_right != self._prev_ball_side_right:
+            self._rally_count += 1
+        self._prev_ball_side_right = ball_side_right
+
+        # BE-A2: terminal game result snapshot. Only on natural ``terminated``
+        # (a side reached MAX_SCORE). Truncation (max_steps, stall penalty)
+        # is NOT a completed match and must not be saved — otherwise the
+        # Recent Games list would fill with abandoned episodes. The drain
+        # hook on the trainer thread picks these up.
+        if terminated and not truncated:
+            self._pending_results.append({
+                "score1": int(new_state.score1),
+                "score2": int(new_state.score2),
+                "winner": 1 if new_state.score1 >= MAX_SCORE else 2,
+                "duration_frames": int(new_state.frame),
+                "rally_count": int(self._rally_count),
+            })
+
         self._prev_score1 = new_state.score1
         self._prev_score2 = new_state.score2
         self._prev_ball_x = float(new_state.ball.x)
@@ -188,6 +227,19 @@ class PikachuVolleyballEnv(gymnasium.Env):
         }
 
         return obs, reward, terminated, truncated, info
+
+    def drain_pending_results(self) -> list[dict[str, Any]]:
+        """Pop completed-match dicts queued by ``step`` (BE-A2).
+
+        Called via ``VecEnv.env_method`` from the EnvResultCallback so
+        each parallel env's terminated matches can be flushed to Mongo.
+        Returns a shallow copy of the internal list and clears it in one
+        step so a concurrent callback tick on the same env cannot
+        double-save.
+        """
+        results = list(self._pending_results)
+        self._pending_results.clear()
+        return results
 
     def get_frame_snapshot(self) -> dict[str, Any]:
         """Return a serialized picture of this env's current game state.

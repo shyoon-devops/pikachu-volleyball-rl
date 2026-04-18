@@ -19,6 +19,13 @@ class GameRecord(BaseModel):
     winner: int = Field(ge=1, le=2)
     duration_frames: int = Field(ge=0)
     rally_count: int = Field(ge=0)
+    # Which RL environment produced this game. "demo" marks the single
+    # standalone demo game LiveFrameCallback plays every play_interval
+    # steps; "0".."7" (string, stable across FE queries) marks one of the
+    # n_envs parallel gradient envs. Optional so legacy pre-A2 records
+    # (all demo-only) still validate — missing value is treated as "demo"
+    # by downstream consumers.
+    env_id: str | None = None
 
     model_config = {"populate_by_name": True}
 

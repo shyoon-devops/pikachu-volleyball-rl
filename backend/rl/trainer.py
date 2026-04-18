@@ -21,6 +21,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from backend.rl.callbacks import (
     CheckpointCallback,
     EnvFrameCallback,
+    EnvResultCallback,
     LiveFrameCallback,
     MetricsCallback,
 )
@@ -410,6 +411,12 @@ class TrainingManager:
                     env_frames_queue=self.env_frames_queue,
                     loop=loop,
                     broadcast_interval=hp.get("env_frame_interval", 4),
+                ),
+                EnvResultCallback(
+                    results_queue=self.results_queue,
+                    loop=loop,
+                    manager=self,
+                    drain_interval=hp.get("env_result_drain_interval", 4),
                 ),
                 _StopEventCallback(self._stop_event, self._pause_event, self),
             ])

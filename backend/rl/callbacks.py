@@ -230,6 +230,82 @@ class EnvFrameCallback(BaseCallback):
         return True
 
 
+class EnvResultCallback(BaseCallback):
+    """Drain terminated-match results from each parallel training env (BE-A2).
+
+    Each ``PikachuVolleyballEnv.step()`` queues a result dict when a
+    match naturally terminates (score hits MAX_SCORE — truncation from
+    max_steps or stall-out is intentionally NOT saved). This callback
+    drains those per-env queues every ``drain_interval`` vec steps and
+    pushes them onto ``results_queue`` with the experiment's bookkeeping
+    (``experiment_id``, ``bot_level``, ``env_id``, fresh ``game_id``).
+    The existing ``results_push_loop`` handler then persists each as a
+    ``GameRecord`` row.
+
+    Scale note: at ~2 minutes/game per env on RTX 4070 Ti, 8 envs yield
+    ~4 saves/minute sustained — well inside MongoDB's insert budget and
+    the per-env index added in indexes.py.
+    """
+
+    def __init__(
+        self,
+        results_queue: asyncio.Queue[dict[str, Any]],
+        loop: asyncio.AbstractEventLoop,
+        manager: Any | None = None,
+        drain_interval: int = 4,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.results_queue = results_queue
+        self.loop = loop
+        self.drain_interval = max(1, int(drain_interval))
+        # Back-reference used to snapshot ``experiment_id`` / ``bot_level``
+        # at save-time, matching the LiveFrameCallback pattern. Kept
+        # Optional so unit tests can instantiate without a full manager.
+        self._manager = manager
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.drain_interval != 0:
+            return True
+
+        env = self.training_env
+        if env is None:
+            return True
+        try:
+            per_env: list[list[dict[str, Any]]] = env.env_method("drain_pending_results")
+        except Exception:  # noqa: BLE001 — never abort training on drain failure
+            logger.exception("env_method(drain_pending_results) failed")
+            return True
+
+        mgr = self._manager
+        experiment_id = (
+            str(getattr(mgr, "_experiment_id", "") or "") if mgr is not None else ""
+        )
+        bot_level = int(getattr(mgr, "_bot_level", 1)) if mgr is not None else 1
+
+        for env_id, results in enumerate(per_env):
+            if not results:
+                continue
+            for result in results:
+                if not isinstance(result, dict):
+                    continue
+                payload = {
+                    "game_id": str(uuid.uuid4()),
+                    "experiment_id": experiment_id,
+                    "bot_level": bot_level,
+                    "score1": int(result.get("score1", 0)),
+                    "score2": int(result.get("score2", 0)),
+                    "winner": int(result.get("winner", 1)),
+                    "duration_frames": int(result.get("duration_frames", 0)),
+                    "rally_count": int(result.get("rally_count", 0)),
+                    # env_id stringified so "demo" and "0".."7" share the
+                    # same column in /api/games + Mongo index.
+                    "env_id": str(env_id),
+                }
+                _safe_enqueue(self.loop, self.results_queue, payload)
+        return True
+
+
 class LiveFrameCallback(BaseCallback):
     """Runs a demo game every M steps and pushes frames + result to queues.
 
@@ -379,6 +455,9 @@ class LiveFrameCallback(BaseCallback):
             # field; the handler used to default to 0, which is why every
             # game in /api/games showed 0 rallies.
             "rally_count": rally_count,
+            # Tag this as the standalone demo so BE-A2 can distinguish
+            # demo results from parallel-env gradient games in /api/games.
+            "env_id": "demo",
         }
         _safe_enqueue(self.loop, self.results_queue, result)
 
