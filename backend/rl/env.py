@@ -397,12 +397,7 @@ class PikachuVolleyballEnv(gymnasium.Env):
         counter_reset_this_frame = counter_reset_this_frame or crossing_reset
 
         # --- AUX 3: stall penalty ---
-        # Only increment when no reset this frame (counter represents frames
-        # since last crossing; this frame is stale only if nothing happened).
-        if not state.is_round_over and not counter_reset_this_frame:
-            self._frames_since_crossing += 1
-            if self._frames_since_crossing > self._STALL_THRESHOLD:
-                reward += self._STALL_PENALTY_PER_FRAME
+        reward += self._stall_penalty(state, counter_reset_this_frame)
 
         # --- AUX 4: approach ball (gradient for early training) ---
         reward += self._approach_reward(state)
@@ -421,6 +416,29 @@ class PikachuVolleyballEnv(gymnasium.Env):
     # byte-identical to the pre-refactor monolith. Pure helpers (no state
     # mutation) are extracted first; mutation-carrying ones follow.
     # ------------------------------------------------------------------
+    def _stall_penalty(self, state: Any, counter_reset_this_frame: bool) -> float:
+        """Per-frame penalty when the rally has stalled past the threshold.
+        Mutates ``_frames_since_crossing`` (increment only; resets happen
+        inside the score / net-crossing helpers).
+
+        Gate: ``not is_round_over`` AND ``not counter_reset_this_frame``.
+        The counter tracks "frames since the last meaningful event"; on
+        any frame where a score, concede, or net-crossing fired the
+        counter was already zeroed by that helper, so we must NOT
+        increment it here — otherwise the threshold comparison would
+        slip by one frame.
+
+        Returns ``_STALL_PENALTY_PER_FRAME`` only once the counter
+        CROSSES ``_STALL_THRESHOLD`` (strictly greater). Pre-threshold
+        frames return 0.0 even though the counter still ticks.
+        """
+        if state.is_round_over or counter_reset_this_frame:
+            return 0.0
+        self._frames_since_crossing += 1
+        if self._frames_since_crossing > self._STALL_THRESHOLD:
+            return self._STALL_PENALTY_PER_FRAME
+        return 0.0
+
     def _touch_reward(self, state: Any) -> float:
         """Diminishing-returns bonus for agent touching the ball.
         Mutates ``_consecutive_touches`` only (not frames_since_crossing).
