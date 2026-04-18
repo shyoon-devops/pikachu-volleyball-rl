@@ -19,6 +19,44 @@ import './EvalPanel.css'
  */
 const EVAL_POLL_INTERVAL_MS = 2000
 
+/**
+ * sessionStorage key for the active evaluation job id (FC-R3 user
+ * report, 2026-04-18). The panel state itself is unmounted on tab
+ * navigation — without persistence the job_id leaks and the Run
+ * button lights back up, which users promptly re-click → 409
+ * "Evaluation already in progress".
+ *
+ * sessionStorage (not localStorage) is the right scope: the job
+ * lives on the single BE process, so re-opening the tab later after
+ * a server restart should not resume a dead id. Cleared on any
+ * terminal state (done/failed) and on 404 (job evicted).
+ *
+ * [BE-WAITING] Once BE adds `GET /api/evaluation/active` (returns
+ * the current running job_id or 404), we can drop the sessionStorage
+ * shim in favour of a fetch on mount. Until then, this is FE-only
+ * and adequate for in-tab route changes.
+ */
+const ACTIVE_EVAL_JOB_KEY = 'eval:active_job_id'
+
+function readStoredJobId(): string | null {
+  try {
+    return sessionStorage.getItem(ACTIVE_EVAL_JOB_KEY)
+  } catch {
+    // Private-mode Safari throws on sessionStorage access.
+    return null
+  }
+}
+
+function writeStoredJobId(jobId: string | null): void {
+  try {
+    if (jobId === null) sessionStorage.removeItem(ACTIVE_EVAL_JOB_KEY)
+    else sessionStorage.setItem(ACTIVE_EVAL_JOB_KEY, jobId)
+  } catch {
+    // As above — swallow storage failures; the runtime fallback is
+    // "no persistence" which is still better than crashing.
+  }
+}
+
 type JobUiState =
   | { kind: 'idle' }
   | { kind: 'running'; jobId: string; current: number; total: number }
@@ -95,6 +133,7 @@ export function EvalPanel() {
       if (s.state === 'done') {
         stopPolling()
         jobIdRef.current = null
+        writeStoredJobId(null)
         setJob({ kind: 'idle' })
         // Re-pull the results list so the new row lands in the table
         // even if the BE doesn't push it via another channel.
@@ -105,6 +144,7 @@ export function EvalPanel() {
       if (s.state === 'failed') {
         stopPolling()
         jobIdRef.current = null
+        writeStoredJobId(null)
         setJob({ kind: 'idle' })
         setError(s.error ?? 'Evaluation failed')
       }
@@ -115,6 +155,7 @@ export function EvalPanel() {
       if (msg.includes('404') || msg.includes('not found')) {
         stopPolling()
         jobIdRef.current = null
+        writeStoredJobId(null)
         setJob({ kind: 'idle' })
         setError('Evaluation job not found — it may have been evicted. Try again.')
       }
@@ -138,12 +179,43 @@ export function EvalPanel() {
     [pollOnce, stopPolling],
   )
 
+  /**
+   * Resume polling on mount if a prior evaluation was still in flight
+   * when the user navigated away (FC-R3, 2026-04-18). We write the
+   * job_id to sessionStorage on POST and clear it on any terminal
+   * transition, so the presence of a stored id here means "the last
+   * job is still pending/running as far as the FE knows" — we call
+   * /status once to confirm:
+   *   pending/running → restore UI to running + resume polling
+   *   done/failed     → clean terminal transitions (clears storage,
+   *                     refetches results if done)
+   *   404             → storage was stale (BE restart / TTL eviction);
+   *                     silently drop the id and start fresh
+   *
+   * Intentionally runs ONCE on mount. Re-subscribing on every id
+   * change would race the Run handler's own startPolling call.
+   */
+  useEffect(() => {
+    const storedId = readStoredJobId()
+    if (!storedId) return
+    jobIdRef.current = storedId
+    setJob({
+      kind: 'running',
+      jobId: storedId,
+      current: 0,
+      total: 0,
+    })
+    startPolling(storedId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleRun = useCallback(async () => {
     if (!selectedModel) return
     if (job.kind !== 'idle') return
     setError(null)
     try {
       const ack = await runEvaluation(selectedModel, botLevel, nGames)
+      writeStoredJobId(ack.jobId)
       setJob({
         kind: 'running',
         jobId: ack.jobId,

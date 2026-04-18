@@ -219,7 +219,7 @@ describe('ReplayList — env filter + chip column (FC-history, Designer §6)', (
   it('renders an env chip per row using the envId field', async () => {
     getGames.mockResolvedValue({
       data: [
-        gameRow({ id: 'm1', gameId: 'u1', envId: 3 }),
+        gameRow({ id: 'm1', gameId: 'u1', envId: '3' }),
         gameRow({ id: 'm2', gameId: 'u2', envId: undefined }),
       ],
       total: 2,
@@ -244,9 +244,9 @@ describe('ReplayList — env filter + chip column (FC-history, Designer §6)', (
   it('filters the row list when ?env=N is present in the URL', async () => {
     getGames.mockResolvedValue({
       data: [
-        gameRow({ id: 'm1', gameId: 'u1', envId: 0 }),
-        gameRow({ id: 'm2', gameId: 'u2', envId: 3 }),
-        gameRow({ id: 'm3', gameId: 'u3', envId: 3 }),
+        gameRow({ id: 'm1', gameId: 'u1', envId: '0' }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: '3' }),
+        gameRow({ id: 'm3', gameId: 'u3', envId: '3' }),
         gameRow({ id: 'm4', gameId: 'u4', envId: undefined }),
       ],
       total: 4,
@@ -274,8 +274,8 @@ describe('ReplayList — env filter + chip column (FC-history, Designer §6)', (
   it('shows all rows when the filter dropdown is set to All', async () => {
     getGames.mockResolvedValue({
       data: [
-        gameRow({ id: 'm1', gameId: 'u1', envId: 0 }),
-        gameRow({ id: 'm2', gameId: 'u2', envId: 5 }),
+        gameRow({ id: 'm1', gameId: 'u1', envId: '0' }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: '5' }),
       ],
       total: 2,
       page: 1,
@@ -297,7 +297,7 @@ describe('ReplayList — env filter + chip column (FC-history, Designer §6)', (
 
   it('renders a dedicated empty-state when a filter matches no games on the page', async () => {
     getGames.mockResolvedValue({
-      data: [gameRow({ id: 'm1', gameId: 'u1', envId: 0 })],
+      data: [gameRow({ id: 'm1', gameId: 'u1', envId: '0' })],
       total: 1,
       page: 1,
       limit: 20,
@@ -319,7 +319,7 @@ describe('ReplayList — env filter + chip column (FC-history, Designer §6)', (
     // parseEnvParam is strict — non-integer / negative values fall back
     // to "all" so a broken bookmark doesn't blank the whole page.
     getGames.mockResolvedValue({
-      data: [gameRow({ id: 'm1', gameId: 'u1', envId: 2 })],
+      data: [gameRow({ id: 'm1', gameId: 'u1', envId: '2' })],
       total: 1,
       page: 1,
       limit: 20,
@@ -337,5 +337,74 @@ describe('ReplayList — env filter + chip column (FC-history, Designer §6)', (
     })
     // No filter hint rendered when effective filter is null.
     expect(screen.queryByText(/env_id=/i)).toBeNull()
+  })
+
+  it('supports the ?env=demo filter for the standalone LiveFrameCallback game', async () => {
+    // BE emits env_id="demo" for the single-game LiveFrameCallback,
+    // distinct from "0".."7" for parallel gradient envs. Filter must
+    // treat them as separate tokens and match string-exactly.
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'm1', gameId: 'u1', envId: '0' }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: 'demo' }),
+      ],
+      total: 2,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/history?env=demo']}>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('DEMO')).toBeInTheDocument()
+    })
+    // ENV 0 row should be filtered OUT.
+    expect(screen.queryByLabelText('Env 0')).toBeNull()
+  })
+})
+
+describe('ReplayList — episode column (FC-R2, 2026-04-18)', () => {
+  it('renders the episode number when BE provides it', async () => {
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'm1', gameId: 'u1', episode: 1234 })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      // Locale-formatted — "1,234" on en-*, any separator elsewhere.
+      expect(screen.getByText(/1.?234/)).toBeInTheDocument()
+    })
+  })
+
+  it('renders "—" when the episode field is missing [BE-WAITING]', async () => {
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'm1', gameId: 'u1', episode: undefined })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      // At least one em-dash (from Episode + maybe other missing fields).
+      const dashes = screen.getAllByText('—')
+      expect(dashes.length).toBeGreaterThanOrEqual(1)
+    })
   })
 })

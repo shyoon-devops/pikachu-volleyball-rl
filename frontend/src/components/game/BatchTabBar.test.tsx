@@ -180,7 +180,12 @@ describe('BatchTabBar', () => {
     expect(dot?.className).toContain('batch-tab-dot--warning')
   })
 
-  it('switches ≥9 envs to scroll-snap layout (spec §5)', () => {
+  it('renders all tabs in a single flex-wrap container for >8 envs (spec v2 §5)', () => {
+    // FC-R4 / Designer spec v2 (19848eb8): layout switched from
+    // grid + snap-scroll to flex-wrap. `data-overflow` attribute
+    // was retired because the container no longer has two variants.
+    // A 12-env run still renders every chip — CSS handles row
+    // distribution via flex-basis breakpoints.
     const { container } = render(
       <BatchTabBar
         envFrames={{}}
@@ -190,19 +195,106 @@ describe('BatchTabBar', () => {
       />,
     )
     const bar = container.querySelector('.batch-tab-bar')
-    expect(bar?.getAttribute('data-overflow')).toBe('scroll')
+    expect(bar).toBeTruthy()
+    expect(bar?.getAttribute('data-overflow')).toBeNull()
+    expect(bar?.getAttribute('data-env-count')).toBe('12')
+    expect(screen.getAllByRole('tab')).toHaveLength(12)
   })
 
-  it('uses grid layout for ≤8 envs', () => {
+  it('exposes n_envs via the --n-envs CSS custom property', () => {
+    // The CSS reads --n-envs for downstream analytics (e.g. a future
+    // "Env count: N" meta badge); pin the attribute as a regression
+    // guard against a future refactor dropping the inline style.
     const { container } = render(
       <BatchTabBar
         envFrames={{}}
-        nEnvs={8}
+        nEnvs={6}
         activeEnvId={0}
         onSelect={vi.fn()}
       />,
     )
-    const bar = container.querySelector('.batch-tab-bar')
-    expect(bar?.getAttribute('data-overflow')).toBe('grid')
+    const bar = container.querySelector('.batch-tab-bar') as HTMLElement
+    expect(bar.style.getPropertyValue('--n-envs')).toBe('6')
+  })
+
+  // FC-R1 regression guards — roving-tabindex + follow-focus pattern.
+  // Ensures the click-then-arrow flow no longer leaves two tabs
+  // wearing the accent (clicked one via :focus-visible, active one
+  // via `.batch-tab--active`).
+  describe('roving tabindex + follow-focus (FC-R1)', () => {
+    it('keeps exactly one tab in the tab order (tabIndex=0 on active only)', () => {
+      render(
+        <BatchTabBar
+          envFrames={envMap(envPayload(0, [0, 0]))}
+          nEnvs={4}
+          activeEnvId={2}
+          onSelect={vi.fn()}
+        />,
+      )
+      const tabs = screen.getAllByRole('tab') as HTMLButtonElement[]
+      expect(tabs[0].tabIndex).toBe(-1)
+      expect(tabs[1].tabIndex).toBe(-1)
+      expect(tabs[2].tabIndex).toBe(0)
+      expect(tabs[3].tabIndex).toBe(-1)
+    })
+
+    it('moves focus to the new active tab on re-render (when focus was inside the bar)', () => {
+      const { rerender } = render(
+        <BatchTabBar
+          envFrames={envMap(envPayload(0, [0, 0]))}
+          nEnvs={4}
+          activeEnvId={0}
+          onSelect={vi.fn()}
+        />,
+      )
+      const tabs = screen.getAllByRole('tab') as HTMLButtonElement[]
+      // User clicks tab 1, focus follows the click naturally.
+      tabs[1].focus()
+      expect(document.activeElement).toBe(tabs[1])
+
+      // Parent advances activeEnvId via arrow-key handler.
+      rerender(
+        <BatchTabBar
+          envFrames={envMap(envPayload(0, [0, 0]))}
+          nEnvs={4}
+          activeEnvId={2}
+          onSelect={vi.fn()}
+        />,
+      )
+
+      // Focus must have migrated to tab 2 so the outline ring rides
+      // along with `.batch-tab--active`.
+      expect(document.activeElement).toBe(tabs[2])
+    })
+
+    it('does NOT steal focus when the bar is not currently focused', () => {
+      // A score widget elsewhere might update activeEnvId via URL
+      // routing; we shouldn't yank focus from whatever the user is
+      // currently typing in.
+      const stray = document.createElement('input')
+      document.body.appendChild(stray)
+      stray.focus()
+
+      const { rerender } = render(
+        <BatchTabBar
+          envFrames={envMap(envPayload(0, [0, 0]))}
+          nEnvs={4}
+          activeEnvId={0}
+          onSelect={vi.fn()}
+        />,
+      )
+      expect(document.activeElement).toBe(stray)
+      rerender(
+        <BatchTabBar
+          envFrames={envMap(envPayload(0, [0, 0]))}
+          nEnvs={4}
+          activeEnvId={2}
+          onSelect={vi.fn()}
+        />,
+      )
+      // Focus stays on the stray input.
+      expect(document.activeElement).toBe(stray)
+      stray.remove()
+    })
   })
 })
