@@ -235,7 +235,7 @@ export function Dashboard() {
     if (incoming && incoming !== prev) {
       lastBroadcastTitleRef.current = incoming
       // eslint-disable-next-line no-console
-      console.info(`[training] 학습 시작: ${incoming}`)
+      console.info(`[training] Training started: ${incoming}`)
       // Full toast UX lives in a separate component; surfacing via
       // console for now keeps R6G scoped to data flow. The
       // DESIGN-HYPERPARAM-TOAST follow-up owns visible notification.
@@ -310,14 +310,14 @@ export function Dashboard() {
               role="status"
               aria-live="polite"
             >
-              학습 환경 정보 대기 중…
+              Waiting for environment data…
             </div>
           ) : (
             <div
               className="dashboard-batch-tab-placeholder dashboard-batch-tab-placeholder--idle"
               role="status"
             >
-              활성 학습 없음
+              No active training
             </div>
           )}
         </ErrorBoundary>

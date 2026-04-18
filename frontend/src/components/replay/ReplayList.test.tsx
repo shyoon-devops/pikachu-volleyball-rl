@@ -556,14 +556,14 @@ describe('ReplayList — titleFilter prop (FC-R6H level-2 reuse)', () => {
         <ReplayList
           titleFilter="empty-run"
           hideTitleColumn
-          emptyStateOverride="이 학습에는 아직 기록된 게임이 없습니다."
+          emptyStateOverride="No games recorded for this training run yet."
         />
       </MemoryRouter>,
     )
 
     await waitFor(() => {
       expect(
-        screen.getByText('이 학습에는 아직 기록된 게임이 없습니다.'),
+        screen.getByText('No games recorded for this training run yet.'),
       ).toBeInTheDocument()
     })
   })

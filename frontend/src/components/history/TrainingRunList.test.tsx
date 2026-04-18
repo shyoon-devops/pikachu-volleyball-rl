@@ -160,11 +160,11 @@ describe('TrainingRunList (FC-R6H level-1)', () => {
       target: { value: 'nonexistent' },
     })
     await waitFor(
-      () => expect(screen.getByText(/검색 결과가 없습니다/)).toBeInTheDocument(),
+      () => expect(screen.getByText(/No results for/)).toBeInTheDocument(),
       { timeout: 800 },
     )
     // Click-to-clear restores the original list.
-    fireEvent.click(screen.getByRole('button', { name: /검색 지우기/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Clear search/ }))
     await waitFor(
       () => expect(screen.getByRole('link', { name: 'run-alpha' })).toBeInTheDocument(),
       { timeout: 800 },
@@ -179,9 +179,9 @@ describe('TrainingRunList (FC-R6H level-1)', () => {
       </MemoryRouter>,
     )
     await waitFor(() => {
-      expect(screen.getByText(/학습 내역이 없습니다/)).toBeInTheDocument()
+      expect(screen.getByText(/No training runs yet/)).toBeInTheDocument()
     })
-    expect(screen.getByRole('link', { name: /학습 시작/ })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('link', { name: /Start Training/ })).toHaveAttribute('href', '/')
   })
 
   it('surfaces a fetch error without crashing', async () => {
@@ -261,14 +261,14 @@ describe('TrainingRunList (FC-R6H level-1)', () => {
         <TrainingRunList linkBase="/evaluation/" mode="evaluation" />
       </MemoryRouter>,
     )
-    // Row title renders but without a Link. Count shows "0개".
+    // Row title renders but without a Link. Count shows "0".
     await waitFor(() => {
-      expect(screen.getAllByText('0개').length).toBeGreaterThan(0)
+      expect(screen.getAllByText('0').length).toBeGreaterThan(0)
     })
     // No link for empty-run in the table — the title cell is a
     // disabled span with the no-models tooltip.
     expect(screen.queryByRole('link', { name: 'empty-run' })).toBeNull()
-    expect(screen.getAllByTitle(/저장된 모델 없음/).length).toBeGreaterThan(0)
+    expect(screen.getAllByTitle(/No saved checkpoints/).length).toBeGreaterThan(0)
   })
 
   // FC-R7A regression guard: qa-observed crash where runs

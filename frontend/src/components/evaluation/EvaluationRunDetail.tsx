@@ -5,10 +5,11 @@ import {
   deleteModels,
   runEvaluation,
   getEvaluationStatus,
+  getEvalResults,
 } from '../../lib/api'
 import { formatKstDateTime } from '../../lib/formatTime'
 import { useTrainingState } from '../../hooks/useTrainingState'
-import type { ModelInfo } from '../../lib/types'
+import type { EvalResult, ModelInfo } from '../../lib/types'
 import { DeleteCheckpointsModal } from './DeleteCheckpointsModal'
 import './EvaluationRunDetail.css'
 
@@ -141,6 +142,19 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleteToast, setDeleteToast] = useState<string | null>(null)
 
+  /**
+   * FC-R9b: evaluation results history scoped to this training run.
+   *
+   * BE `/api/evaluation/results` returns every recorded evaluation
+   * (up to 100, newest first); no server-side `title=` filter exists
+   * today. We pull the full list and filter client-side on
+   * `trainingTitle`. Legacy rows without the field are excluded from
+   * the scoped view — they belong to an unnamed run and would
+   * pollute every training's detail page.
+   */
+  const [evalResults, setEvalResults] = useState<EvalResult[]>([])
+  const [evalResultsError, setEvalResultsError] = useState<string | null>(null)
+
   const jobIdRef = useRef<string | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -182,6 +196,32 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
     return () => clearInterval(id)
   }, [isActiveRun, fetchModels])
 
+  // FC-R9b: fetch + refetch the evaluation results for this run.
+  // Refreshes on mount and after each completed eval job (see the
+  // `handleRun` success path below) so a freshly-run eval surfaces
+  // without a manual refresh. No BE-side filter on `training_title`
+  // exists today, so the client-side pass does the narrowing.
+  const fetchEvalResults = useCallback(async () => {
+    try {
+      const rows = await getEvalResults()
+      setEvalResults(rows)
+      setEvalResultsError(null)
+    } catch (err) {
+      setEvalResultsError(err instanceof Error ? err.message : 'Failed to load evaluation results')
+    }
+  }, [])
+
+  useEffect(() => {
+    void fetchEvalResults()
+  }, [fetchEvalResults])
+
+  /** Results scoped to this training run via `trainingTitle`. */
+  const filteredEvalResults = useMemo(() => {
+    const target = decoded.trim()
+    if (target === '') return []
+    return evalResults.filter(r => (r.trainingTitle ?? '').trim() === target)
+  }, [evalResults, decoded])
+
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current)
@@ -205,9 +245,9 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
         jobIdRef.current = null
         writeStoredJobId(null)
         setJob({ kind: 'idle' })
-        // No post-run results table on this page — the toast-equivalent
-        // is just the button clearing. A follow-up may add an inline
-        // result chip; omitted to keep R7C scope tight.
+        // FC-R9b: refetch the results history so the newly-finished
+        // eval lands in the table below without a manual refresh.
+        void fetchEvalResults()
         return
       }
       if (s.state === 'failed') {
@@ -228,7 +268,7 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
       }
       // Transient errors are silent — next tick retries.
     }
-  }, [stopPolling])
+  }, [stopPolling, fetchEvalResults])
 
   const startPolling = useCallback(
     (jobId: string) => {
@@ -274,8 +314,8 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
   const isRunning = job.kind === 'running' || job.kind === 'busy-already'
   const selectedStepLabel = useMemo(() => {
     const row = models.find(m => m.path === selectedPath)
-    if (!row) return '체크포인트를 선택하세요'
-    return `선택됨: step ${formatStep(row.step)}`
+    if (!row) return 'Select a checkpoint'
+    return `Selected: step ${formatStep(row.step)}`
   }, [models, selectedPath])
 
   // Highest-step checkpoint surfaced for the modal's latest-warning
@@ -371,10 +411,10 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
           return [...byPath.values()]
         })
         setDeleteError(
-          `일부 파일 삭제 실패 (${res.failed.length}개): ${res.failed[0].reason}`,
+          `Some files failed to delete (${res.failed.length}): ${res.failed[0].reason}`,
         )
       } else {
-        setDeleteToast(`${res.deleted.length}개 삭제 완료`)
+        setDeleteToast(`${res.deleted.length} file${res.deleted.length === 1 ? '' : 's'} deleted`)
       }
       setSelectedForDelete(new Set())
       setDeleteMode(false)
@@ -383,7 +423,7 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
       setModels(prevModels)
       const msg = err instanceof Error ? err.message : 'Failed to delete checkpoints'
       if (msg.includes('409')) {
-        setDeleteError('진행 중인 학습의 체크포인트는 삭제할 수 없습니다. 학습 종료 후 다시 시도하세요.')
+        setDeleteError('Cannot delete checkpoints of an active training run. Stop the run and retry.')
       } else {
         setDeleteError(msg)
       }
@@ -400,7 +440,7 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
   }, [deleteToast])
 
   const activeRunTooltip =
-    '진행 중인 학습의 체크포인트는 삭제할 수 없습니다. 학습 종료 후 다시 시도하세요.'
+    'Cannot delete checkpoints of an active training run. Stop the run and retry.'
 
   return (
     <div className={`eval-run-detail${embedded ? ' eval-run-detail--embedded' : ''}`}>
@@ -440,7 +480,7 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
 
       {/*
         Delete-mode toolbar (FC-R7D, spec §2). Lives above the table.
-        The "선택 삭제" entry button is disabled + tooltipped when the
+        The "Delete selected" entry button is disabled + tooltipped when the
         live training matches this title; `title` attr keeps the
         tooltip reachable without a custom popover layer.
       */}
@@ -453,26 +493,26 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
             title={isActiveRun ? activeRunTooltip : undefined}
             className="eval-run-detail-delete-enter btn btn-ghost"
           >
-            선택 삭제
+            Delete selected
           </button>
         ) : (
           <>
             <span className="eval-run-detail-delete-count">
-              {`선택됨: ${selectedForDelete.size} / ${models.length}`}
+              {`Selected: ${selectedForDelete.size} / ${models.length}`}
             </span>
             <button
               type="button"
               onClick={selectAll}
               className="eval-run-detail-delete-link"
             >
-              모두 선택
+              Select all
             </button>
             <button
               type="button"
               onClick={clearSelection}
               className="eval-run-detail-delete-link"
             >
-              모두 해제
+              Clear selection
             </button>
             <div className="eval-run-detail-delete-spacer" />
             <button
@@ -482,14 +522,14 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
               title={isActiveRun ? activeRunTooltip : undefined}
               className="eval-run-detail-delete-commit btn btn-danger"
             >
-              {`선택한 ${selectedForDelete.size}개 삭제`}
+              {`Delete ${selectedForDelete.size} selected`}
             </button>
             <button
               type="button"
               onClick={exitDeleteMode}
               className="eval-run-detail-delete-cancel btn btn-ghost"
             >
-              취소
+              Cancel
             </button>
           </>
         )}
@@ -547,8 +587,8 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
               <tr>
                 <td colSpan={deleteMode ? 6 : 5} className="eval-run-detail-empty empty-state">
                   {isActiveRun
-                    ? '이 학습의 체크포인트가 아직 없습니다. 학습이 진행되면 자동 저장됩니다.'
-                    : '이 학습의 체크포인트가 없습니다.'}
+                    ? 'No checkpoints saved yet. They will appear automatically while training runs.'
+                    : 'No checkpoints for this training run.'}
                 </td>
               </tr>
             ) : (
@@ -655,7 +695,7 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
               ? `Running ${job.current}/${job.total}`
               : job.kind === 'busy-already'
                 ? 'Waiting…'
-                : '평가 실행'}
+                : 'Run Evaluation'}
           </button>
         </div>
         {job.kind === 'running' && job.total > 0 && (
@@ -667,6 +707,71 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
           />
         )}
       </div>
+
+      {/*
+        FC-R9b: evaluation results history scoped to this run. BE's
+        `/api/evaluation/results` has no title filter so we pull the
+        global list and narrow client-side via `trainingTitle`. The
+        table refreshes whenever a fresh eval finishes (see `pollOnce`
+        done branch) so the user sees the result land without a
+        manual refresh.
+      */}
+      <section className="eval-run-detail-results" aria-label="Evaluation results">
+        <h3 className="eval-run-detail-results-title">Evaluation Results</h3>
+        {evalResultsError && (
+          <div className="eval-run-detail-error alert-error" role="alert">
+            {evalResultsError}
+          </div>
+        )}
+        <div className="eval-run-detail-table-wrapper card table-scroll">
+          <table className="eval-run-detail-table" aria-label="Evaluation results history">
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Bot Level</th>
+                <th scope="col">Games</th>
+                <th scope="col">Win Rate</th>
+                <th scope="col">Avg Score</th>
+                <th scope="col">Avg Rally</th>
+                <th scope="col">Model</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredEvalResults.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="eval-run-detail-empty empty-state">
+                    No evaluation results for this run yet.
+                  </td>
+                </tr>
+              ) : (
+                filteredEvalResults.map((r, idx) => {
+                  const filename = r.modelPath.split('/').pop() ?? r.modelPath
+                  return (
+                    <tr key={`${r.timestamp ?? 'ts'}-${idx}`}>
+                      <td className="text-muted">
+                        {r.timestamp ? formatKstDateTime(r.timestamp) : '—'}
+                      </td>
+                      <td>L{r.botLevel}</td>
+                      <td className="text-muted">{r.nGames}</td>
+                      <td className="eval-run-detail-winrate">
+                        {(r.winRate * 100).toFixed(1)}%
+                      </td>
+                      <td className="text-muted">{r.avgScore.toFixed(1)}</td>
+                      <td className="text-muted">{r.avgRallyLength.toFixed(1)}</td>
+                      <td
+                        className="text-muted text-mono eval-run-detail-cell-filename"
+                        title={r.modelPath}
+                      >
+                        {filename}
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <DeleteCheckpointsModal
         open={confirmOpen}

@@ -70,7 +70,7 @@ export const HYPERPARAM_SCHEMA: readonly HyperparamFieldSchema[] = [
     step: 100_000,
     slider: true,
     integer: true,
-    hint: '학습 길이 (timestep 수). 클수록 오래, 잘 학습됨',
+    hint: 'Training length (timestep count). Higher = longer + better-trained.',
   },
   {
     key: 'n_envs',
@@ -80,7 +80,7 @@ export const HYPERPARAM_SCHEMA: readonly HyperparamFieldSchema[] = [
     range: [1, 32],
     step: 1,
     integer: true,
-    hint: '동시에 학습 중인 게임 수 (많을수록 빠르지만 CPU 부담)',
+    hint: 'Parallel env count (higher = faster but heavier on CPU).',
   },
   {
     key: 'learning_rate',
@@ -89,7 +89,7 @@ export const HYPERPARAM_SCHEMA: readonly HyperparamFieldSchema[] = [
     default: 3e-4,
     range: [1e-5, 1e-2],
     step: 1e-5,
-    hint: '학습률 (policy/value 업데이트 크기)',
+    hint: 'Learning rate (policy/value update magnitude).',
   },
   {
     key: 'n_steps',
@@ -99,7 +99,7 @@ export const HYPERPARAM_SCHEMA: readonly HyperparamFieldSchema[] = [
     range: [64, 8192],
     step: 64,
     integer: true,
-    hint: '한 rollout에서 수집할 step 수 (업데이트당 샘플)',
+    hint: 'Steps per rollout (samples per policy update).',
   },
   {
     key: 'batch_size',
@@ -109,7 +109,7 @@ export const HYPERPARAM_SCHEMA: readonly HyperparamFieldSchema[] = [
     range: [16, 512],
     step: 16,
     integer: true,
-    hint: '미니배치 크기 (gradient step당)',
+    hint: 'Mini-batch size per gradient step.',
   },
   {
     key: 'n_epochs',
@@ -119,7 +119,7 @@ export const HYPERPARAM_SCHEMA: readonly HyperparamFieldSchema[] = [
     range: [1, 30],
     step: 1,
     integer: true,
-    hint: 'rollout마다 반복 학습 횟수 (너무 크면 과적합)',
+    hint: 'Training passes per rollout (too high → overfitting).',
   },
   {
     key: 'gamma',
@@ -128,7 +128,7 @@ export const HYPERPARAM_SCHEMA: readonly HyperparamFieldSchema[] = [
     default: 0.99,
     range: [0.8, 0.9999],
     step: 0.001,
-    hint: '할인율 (미래 보상 가중치)',
+    hint: 'Discount factor (future-reward weighting).',
   },
   {
     key: 'clip_range',
@@ -137,7 +137,7 @@ export const HYPERPARAM_SCHEMA: readonly HyperparamFieldSchema[] = [
     default: 0.2,
     range: [0.05, 0.5],
     step: 0.01,
-    hint: 'PPO clip 범위 (policy update 보수성)',
+    hint: 'PPO clip range (policy-update conservativeness).',
   },
   {
     key: 'ent_coef',
@@ -147,7 +147,7 @@ export const HYPERPARAM_SCHEMA: readonly HyperparamFieldSchema[] = [
     range: [0.0, 0.05],
     step: 0.001,
     slider: true,
-    hint: '탐험 강도 (entropy bonus). 높이면 다양한 행동 시도',
+    hint: 'Exploration strength (entropy bonus). Higher = more varied actions.',
   },
   {
     key: 'gae_lambda',
@@ -156,7 +156,7 @@ export const HYPERPARAM_SCHEMA: readonly HyperparamFieldSchema[] = [
     default: 0.95,
     range: [0.9, 1.0],
     step: 0.01,
-    hint: 'GAE 평활화 (분산-편향 tradeoff)',
+    hint: 'GAE smoothing (variance–bias tradeoff).',
   },
 ] as const
 

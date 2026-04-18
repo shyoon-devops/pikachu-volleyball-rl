@@ -126,7 +126,7 @@ export interface ReplayListProps {
   hideTitleColumn?: boolean
   /**
    * Override the "no games" empty-state message. Level-2 uses
-   * "이 학습에는 아직 기록된 게임이 없습니다." per §2c; unfiltered
+   * "No games recorded for this training run yet." per §2c; unfiltered
    * view keeps the generic "No games recorded yet." default.
    */
   emptyStateOverride?: string
