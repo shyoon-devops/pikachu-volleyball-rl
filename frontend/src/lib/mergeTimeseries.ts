@@ -13,10 +13,10 @@
  * `MetricsService.recent_points`).
  *
  * Missing-field policy: absent fields collapse to 0 rather than being
- * dropped, matching the existing convention in `getMetricsHistory`
- * (`Number(b.avg_mean_reward ?? 0)`). 0 can draw a misleading line on
- * win_rate charts but is consistent with the rest of the pipeline; if
- * the chart ever gets a "skip missing" option we can revisit.
+ * dropped (`Number(b.avg_mean_reward ?? 0)`). 0 can draw a misleading
+ * line on win_rate charts but is consistent with the rest of the
+ * pipeline; if the chart ever gets a "skip missing" option we can
+ * revisit.
  *
  * Return value is sorted by step ascending so the chart can render
  * without resorting. Caller is responsible for slicing to a max-points

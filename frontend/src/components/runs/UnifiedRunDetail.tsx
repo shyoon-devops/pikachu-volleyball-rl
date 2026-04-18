@@ -51,7 +51,7 @@ export function UnifiedRunDetail() {
   }
 
   // FC-R8b: pull the matching TrainingRun for hyperparams +
-  // overview stats. Same fetch shape as TrainingRunDetail so the
+  // overview stats. Same fetch shape the run list uses so the
   // hyperparam summary path is identical.
   const [run, setRun] = useState<TrainingRun | null>(null)
   useEffect(() => {

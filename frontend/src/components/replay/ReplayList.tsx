@@ -114,7 +114,7 @@ export interface ReplayListProps {
    * Scope the page to a single training run (R6H, spec §2). When
    * set, the component fetches `getGames(page, limit, titleFilter)`
    * so BE filters server-side. Mostly used by
-   * `TrainingRunDetail` — when omitted the component behaves as
+   * `UnifiedRunDetail` — when omitted the component behaves as
    * the legacy unified history list.
    */
   titleFilter?: string
