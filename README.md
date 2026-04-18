@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/shyoon-devops/pikachu-volleyball-rl/actions"><img src="https://github.com/shyoon-devops/pikachu-volleyball-rl/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-0.2.5-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=white" alt="React">
   <img src="https://img.shields.io/badge/SB3-PPO-FF6F00" alt="Stable-Baselines3">
@@ -31,7 +31,7 @@ PPO 에이전트가 Rule-based Bot(L1~L5)을 상대로 피카추 배구를 학�
 
 > Inspired by the original [Pikachu Volleyball](https://github.com/gorisanson/pikachu-volleyball) (1997).
 
-**Status**: v0.2.4 deployed to all 3 envs (dev/qa/prod, v0.2.4 main reachable) · **v0.2.5 tagged on dev — Phase 2 bug bundle (gameplay FX + bot L1-L5 upgrade + metrics fidelity + P0 match-end freeze), DevOps 재배포 중** — see [release note](docs/releases/v0.2.5.md) · [deployment status](docs/DEPLOYMENT-STATUS.md) · [VERSIONS.yml](docs/VERSIONS.yml). Trainer PR #42 + Evaluator PR #44 deferred to v0.2.6+.
+**Status**: v0.2.5 deployed to all 3 envs (dev/qa/prod, main reachable) · **v1.0.0 prepared on `v1.x-prep-pd`** — faithful port (physics/view/audio 1:1) + Evaluator E1-E10 (Elo + baseline comparator + batch eval + async report) + unified `/runs` navigation + refactor sprint A1-A8 — see [release notes](docs/RELEASE-NOTES-v1.0.0.md) · [retrospective](docs/RETROSPECTIVE-v1.0.0.md) · [deployment status](docs/DEPLOYMENT-STATUS.md) · [VERSIONS.yml](docs/VERSIONS.yml) · [INDEX](docs/INDEX.md). QA 19/19 PASS.
 
 ## Quick Start
 
@@ -85,22 +85,25 @@ Frontend 배포: `scripts/deploy-frontend.sh` — 로컬 빌드 후 yoonbian-2 r
 |-------|-----------|
 | Backend | Python 3.11+ / FastAPI / Uvicorn |
 | RL | Stable-Baselines3 (PPO) / Gymnasium |
-| Frontend | React 19 / TypeScript / PixiJS 8 / Vite 8 |
+| Frontend | React 19 / TypeScript / PixiJS 8.18 / Vite 8 / React Router 7.14 |
+| Validation | zod (WS payload discriminated union — v1.0 A6) |
 | Charts | Recharts |
-| Real-time | WebSocket |
+| Real-time | WebSocket (training:frame / training:metrics / training:game_end / training:env_frame) |
 | Database | MongoDB 7 (motor async) |
-| Deploy | Docker Compose / GitHub Actions CI/CD |
-| Testing | pytest / Vitest |
+| Deploy | Docker Compose / GitHub Actions CI/CD / scripts/deploy-frontend.sh auto-advance |
+| Testing | pytest + engine parity suite (11k assertions) / Vitest / Playwright visual regression |
 
 ## Key Features
 
-**Game Engine** — Physics-based 2D volleyball with collisions, gravity, net, 15-point scoring. Five difficulty bot levels (L1 beginner ~ L5 perfect).
+**Game Engine** — Physics-based 2D volleyball, **faithful 1:1 port** of `gorisanson/pikachu-volleyball` (1997). Full state machine including `slowMotion` / `afterEndOfRound` / `beforeStartOfNextRound`. 25fps game loop. Five difficulty bot levels (L1 beginner ~ L5 perfect).
 
-**RL Training** — PPO via SB3 with curriculum learning (bot difficulty ramps up). 8 parallel SubprocVecEnv. Real-time metric streaming over WebSocket.
+**RL Training** — PPO via SB3. 8 parallel SubprocVecEnv with per-env frame broadcast (`training:env_frame`) and per-env game save (`env_id` on `GameRecord`). Extended hyperparameter form — `total_timesteps` / `n_envs` / `n_epochs` / `ent_coef` / `gae_lambda`. Training runs tagged by user-entered title, propagated to model filename and downstream records.
 
-**Web Dashboard** — Live game visualization (PixiJS, 30→60fps interpolation). Training controls, metric charts, replay player with seek/speed, model evaluation panel.
+**Web Dashboard** — Unified `/runs` navigation with Overview / Games / Evaluation sub-tabs (v1.0 ADR-0013). Live game visualization (PixiJS, original view.js port). Replay player with seek/speed, bulk-delete multi-select, batch-tab multi-env live view.
 
-**Multi-Environment** — dev/qa/prod split across two hosts. Backend + MongoDB on GPU server via Docker Compose, frontend served via nginx on yoonbian-2.
+**Model Evaluator (E1-E10)** — Full stack: Elo rating (L1/L3/L5 anchors), dominance score, baseline comparator, best-model auto-selection, parallel batch CLI, markdown report generator with charts + Elo leaderboard. Async `/api/evaluation/run` with `/status/{id}` polling.
+
+**Multi-Environment** — dev/qa/prod split across two hosts. Backend + MongoDB on GPU server via Docker Compose, frontend served via nginx on yoonbian-2. `deploy-frontend.sh` auto-advances `github/<env>` ref post-deploy.
 
 > **Authoritative port source:** [`docs/VERSIONS.yml`](docs/VERSIONS.yml). The table below reflects curl-verified state as of 2026-04-12. If it drifts from VERSIONS.yml, VERSIONS.yml wins. Any port change requires a PR updating VERSIONS.yml, this README, and `docs/DEPLOYMENT-STATUS.md` **before** the deploy — see [WORKFLOW.md § Port Change Policy](docs/WORKFLOW.md#port-change-policy).
 
@@ -134,16 +137,27 @@ docker compose up mongodb
 
 ```
 backend/
-  game/         Physics engine, bot, constants
-  rl/           Gymnasium env, PPO trainer, evaluator, callbacks
-  app/          FastAPI server (api/, ws/, services/, models/)
-  tests/        pytest (10 modules)
+  game/         Physics engine, bot, constants (faithful port of physics.js + cloud_and_wave.js)
+  rl/           Gymnasium env, PPO trainer, evaluator (E1-E10), callbacks, sweep, elo, baseline_comparator,
+                batch_evaluate, best_model_selector, comparison_chart, report_generator
+  app/          FastAPI server (api/, ws/, services/, models/) — /runs aggregation, /evaluations CRUD,
+                /evaluation/run async + status, /models bulk delete, timeseries endpoint
+  tests/        pytest: physics parity (11k assertions), engine scenarios, evaluator unit, training API
 frontend/src/
-  components/   dashboard/ game/ replay/ evaluation/
-  hooks/        useWebSocket, useTrainingState
+  components/   dashboard/ game/ replay/ evaluation/ runs/ (unified)
+  shared/       ScoreCell, TimestampText, EnvChip (A5 extracted)
+  hooks/        useWebSocket (+zod validated), useTrainingState
+  ws/           Discriminated union + zod schema for training:* messages (A6)
   styles/       Design tokens, global CSS
-scripts/        deploy, promote, release, status
-docs/           Specs, workflow, proposals, releases
+scripts/        deploy (auto-advances github/<env>), promote, release, status
+docs/
+  adr/          ADR-0001..0013 (0011 parity port, 0012 refactor gates, 0013 unified /runs)
+  design/       7 DESIGN-*.md specs (runs merged, batch tabs, eval/history drilldown, bulk delete,
+                hyperparam form, training title)
+  audits/       port diffs, constants inventory, state-machine cross-walk
+  reports/      PM reports + notices archive
+  releases/     Per-version release notes
+  INDEX.md      Master catalogue of ADRs + specs + audits + reports
 ```
 
 ## Testing
@@ -202,5 +216,5 @@ This project is for educational and research purposes.
 ---
 
 <p align="center">
-  <sub>v0.2.5 &bull; <a href="CHANGELOG.md">Changelog</a> &bull; <a href="docs/DEPLOYMENT-STATUS.md">Deployment Status</a></sub>
+  <sub>v1.0.0 &bull; <a href="CHANGELOG.md">Changelog</a> &bull; <a href="docs/RELEASE-NOTES-v1.0.0.md">Release Notes</a> &bull; <a href="docs/DEPLOYMENT-STATUS.md">Deployment Status</a></sub>
 </p>
