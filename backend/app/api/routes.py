@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import shutil
+from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -693,29 +694,246 @@ async def get_replay(request: Request, game_id: str):
     return {"game_id": game_id, "frames": frames, "game": game}
 
 
+def _parse_checkpoint_filename(stem: str) -> tuple[str | None, int | None]:
+    """Return ``(slug, step)`` parsed from a ``{slug}__{exp8}__{step}`` stem.
+
+    Legacy files (``{exp_id}/final``, ``{exp_id}/200000``) have no
+    double-underscore marker and return ``(None, None)``. The ``step``
+    segment can be either an int string or the literal ``"final"`` —
+    we coerce ``"final"`` to a sentinel large-but-finite integer so it
+    always sorts above numbered checkpoints for the UI "latest" view.
+    """
+    parts = stem.split("__")
+    if len(parts) < 3:
+        return None, None
+    slug = parts[0] or None
+    step_str = parts[-1]
+    if step_str == "final":
+        # Finite sentinel — large enough to win a ``key=step desc``
+        # sort against any real step value we'd actually train to.
+        return slug, 10**12
+    try:
+        return slug, int(step_str)
+    except ValueError:
+        return slug, None
+
+
 @router.get("/models")
 @endpoint_guard("list_models")
-@cache_ttl(seconds=10, max_entries=1)
-async def list_models():
+@cache_ttl(seconds=10, max_entries=8, include=("title", "limit"))
+async def list_models(
+    title: str | None = Query(default=None, max_length=60),
+    limit: int | None = Query(default=None, ge=1, le=500),
+):
+    """List model checkpoints, optionally filtered by training title (BE-T8).
+
+    Without ``title``: returns every ``*.zip`` under ``MODEL_DIR`` with
+    the legacy ``{path, size_bytes}`` shape plus the new enriched
+    fields (``filename``, ``slug``, ``step``, ``created_at``, ``title``).
+    Legacy callers that only read ``path`` / ``size_bytes`` keep working.
+
+    With ``title``: returns ONLY checkpoints whose filename slug
+    matches ``slugify(title)``. Sorted by ``step`` desc (latest first)
+    per the drill-down spec. Unparseable filenames are excluded from
+    the filtered response.
+    """
+    from backend.app.services.title_service import slugify
+
     model_dir = Path(os.getenv("MODEL_DIR", "./models")).resolve()
     if not model_dir.exists():
         logger.info("list_models: model_dir missing (%s)", model_dir)
         return {"models": []}
     try:
-        files = sorted(
-            model_dir.rglob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
+        files = list(model_dir.rglob("*.zip"))
     except OSError:
         logger.exception("list_models: failed to scan model_dir=%s", model_dir)
         raise HTTPException(status_code=500, detail="Failed to read model directory")
-    # Only include files that resolve within the model directory
+    # Defensive: a ``.zip`` symlinked outside the model dir would be a
+    # path-traversal smell. Exclude it.
     safe_files = [f for f in files if str(f.resolve()).startswith(str(model_dir))]
-    return {
-        "models": [
-            {"path": str(f.relative_to(model_dir)), "size_bytes": f.stat().st_size}
-            for f in safe_files
-        ]
-    }
+
+    filter_slug: str | None = None
+    if title is not None:
+        filter_slug = slugify(title)
+
+    rows: list[dict[str, Any]] = []
+    for f in safe_files:
+        stat = f.stat()
+        slug, step = _parse_checkpoint_filename(f.stem)
+        if filter_slug is not None and slug != filter_slug:
+            continue
+        rows.append({
+            # Backward-compat fields for callers that haven't migrated.
+            "path": str(f.relative_to(model_dir)),
+            "size_bytes": stat.st_size,
+            # Enriched fields (BE-T8).
+            "filename": f.name,
+            "slug": slug,
+            # Surfaced as ``title`` for the FE drill-down — this is the
+            # slug extracted from the filename, not the original user
+            # title. Good enough for the evaluation dialog's label.
+            "title": slug,
+            "step": step,
+            "created_at": datetime.fromtimestamp(
+                stat.st_mtime, tz=timezone.utc
+            ).isoformat(),
+        })
+
+    if filter_slug is not None:
+        # Drill-down view: newest-step-first. Rows whose step didn't
+        # parse go to the tail so the UI can still render them.
+        rows.sort(key=lambda r: (r["step"] is None, -(r["step"] or 0)))
+    else:
+        # Default view keeps the old mtime-desc ordering so the
+        # evaluation dialog's "latest model" dropdown stays stable.
+        rows.sort(
+            key=lambda r: r.get("created_at") or "",
+            reverse=True,
+        )
+    if limit is not None:
+        rows = rows[:limit]
+    return {"models": rows}
+
+
+class DeleteModelsRequest(BaseModel):
+    """Bulk-delete request body for ``DELETE /api/models`` (BE-T9)."""
+
+    # Capped at 100 so a stray loop on the FE can't issue an arbitrarily
+    # large delete. Empty list is accepted (no-op) so the FE can replay
+    # the last request idempotently after a network blip.
+    paths: list[str] = Field(default_factory=list, max_length=100)
+
+
+@router.delete("/models")
+@endpoint_guard("delete_models")
+async def delete_models(request: Request, body: DeleteModelsRequest):
+    """Bulk-delete checkpoint files under ``MODEL_DIR`` (BE-T9).
+
+    Per-path validation:
+      * Must resolve inside ``MODEL_DIR`` (path-traversal rejection).
+      * Must not be the active training run's experiment directory
+        (returns 409 for the whole request — "fail loud, fail early"
+        so the UI shows the user exactly which run is protected).
+      * File must exist — missing paths appear in ``failed`` as
+        ``reason="not_found"``.
+      * Symlinks resolved, never followed outside ``MODEL_DIR``.
+
+    Response shape:
+      { "deleted": ["a.zip", "b.zip"],
+        "failed":  [{"path": "c.zip", "reason": "..."}] }
+    """
+    model_dir = Path(os.getenv("MODEL_DIR", "./models")).resolve()
+
+    # Active-training protection. If ANY requested path points into
+    # the running experiment's directory, reject the WHOLE batch with
+    # 409 — FE can then re-surface the list minus the protected rows.
+    # Deliberately coarse: protecting individual files inside the
+    # active dir is still racy (the training thread may write a new
+    # checkpoint between our check and the unlink), so the safe
+    # boundary is the directory.
+    training_service = getattr(request.app.state, "training_service", None)
+    active_exp_dir: Path | None = None
+    if training_service is not None:
+        status = training_service.status()
+        if status.get("state") == "running":
+            active_exp_id = status.get("experiment_id") or ""
+            if active_exp_id:
+                active_exp_dir = (model_dir / active_exp_id).resolve()
+
+    # Two-pass: resolve + validate every path first so a protected
+    # entry can abort the batch before any ``unlink`` runs. Partial
+    # deletion before a 409 would be worse than useless — the user
+    # couldn't tell from the response which files are still on disk.
+    resolved: list[tuple[str, Path]] = []
+    failed: list[dict[str, str]] = []
+    protected: list[str] = []
+    seen_traversal_or_invalid = False
+
+    for raw_path in body.paths:
+        rel = (raw_path or "").strip()
+        if not rel:
+            failed.append({"path": raw_path, "reason": "empty_path"})
+            continue
+        # Strip any leading ``models/`` the FE may have supplied so
+        # the UX matches the ``path`` field /api/models returns.
+        if rel.startswith(("models/", "./models/")):
+            rel = rel.split("models/", 1)[1]
+
+        try:
+            target = (model_dir / rel).resolve()
+        except (OSError, ValueError):
+            failed.append({"path": raw_path, "reason": "invalid_path"})
+            seen_traversal_or_invalid = True
+            continue
+
+        # Containment check — rejects ``..``, absolute paths escaping
+        # the model dir, and symlinks pointing elsewhere.
+        try:
+            target.relative_to(model_dir)
+        except ValueError:
+            logger.warning(
+                "delete_models: traversal rejected path=%r resolved=%s",
+                raw_path, target,
+            )
+            failed.append({"path": raw_path, "reason": "outside_model_dir"})
+            seen_traversal_or_invalid = True
+            continue
+
+        if active_exp_dir is not None:
+            try:
+                target.relative_to(active_exp_dir)
+                protected.append(raw_path)
+                continue
+            except ValueError:
+                # Not inside the active dir — allowed to delete.
+                pass
+
+        resolved.append((raw_path, target))
+
+    if protected:
+        logger.info(
+            "delete_models: %d path(s) belonged to active run; rejecting batch",
+            len(protected),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Refusing to delete checkpoints of an active run",
+                "protected": protected,
+            },
+        )
+
+    deleted: list[str] = []
+    for raw_path, target in resolved:
+        if not target.exists():
+            failed.append({"path": raw_path, "reason": "not_found"})
+            continue
+        if not target.is_file():
+            failed.append({"path": raw_path, "reason": "not_a_file"})
+            continue
+
+        try:
+            size = target.stat().st_size
+            target.unlink()
+        except OSError as e:
+            logger.exception("delete_models: unlink failed for %s", target)
+            failed.append({"path": raw_path, "reason": f"unlink_failed: {e}"})
+            continue
+        deleted.append(raw_path)
+        # Audit trail — INFO level so the operator can reconstruct
+        # who deleted what without turning on debug logs.
+        logger.info(
+            "delete_models: removed %s (%d bytes)",
+            target,
+            size,
+        )
+
+    logger.info(
+        "delete_models: deleted=%d failed=%d",
+        len(deleted),
+        len(failed),
+    )
+    return {"deleted": deleted, "failed": failed}
 
 
 class EvalRunRequest(BaseModel):
