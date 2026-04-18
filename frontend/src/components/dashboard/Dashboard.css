@@ -452,3 +452,43 @@
     gap: var(--space-3);
   }
 }
+
+/*
+ * ── Title cell (FC-R6G, spec §2) ────────────────────────
+ * 140px desktop, shrinks on mobile. Truncates with
+ * ellipsis so long auto-generated names don't blow up
+ * the column layout; full text available via tooltip.
+ */
+.recent-games-title-cell {
+  min-width: 140px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .recent-games-title-cell {
+    min-width: 100px;
+    max-width: 140px;
+  }
+}
+
+/* R6H: Recent Games title-cell link — ghost-style link so the row
+   hover behaviour matches the rest of the table; turns accent on
+   hover to tell the user it's a drill-down target. */
+.recent-games-title-link {
+  color: var(--color-text-primary);
+  text-decoration: none;
+}
+
+.recent-games-title-link:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.recent-games-title-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}

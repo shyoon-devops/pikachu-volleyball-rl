@@ -8,6 +8,7 @@ import {
   normalizeHyperparam,
   formatScalar,
 } from '../../lib/hyperparams'
+import { TitleInput, type TitleValidationState } from './TitleInput'
 import './HyperparamForm.css'
 
 // DEFAULT_HYPERPARAMS lives in its own file so this module stays
@@ -20,6 +21,16 @@ interface HyperparamFormProps {
   onParamsChange: (next: Hyperparams) => void
   /** Disable all inputs (e.g. while disconnected). */
   disabled: boolean
+  /** Controlled title value (FC-R6G — lives at Dashboard so Start
+   *  can pass it on the WS payload). Empty is valid; BE
+   *  auto-generates on submit. */
+  title: string
+  onTitleChange: (next: string) => void
+  /** Reports title-field validation so the Dashboard's Start gate
+   *  can block on duplicates / over-length. `checking` is NOT a
+   *  block — the user can still submit during an in-flight dup
+   *  check; BE enforces final uniqueness on save. */
+  onTitleValidationChange: (state: TitleValidationState) => void
 }
 
 /**
@@ -49,6 +60,9 @@ export function HyperparamForm({
   params,
   onParamsChange,
   disabled,
+  title,
+  onTitleChange,
+  onTitleValidationChange,
 }: HyperparamFormProps) {
   // Advanced group collapsed by default per Designer §2. Basic is
   // always open (no collapse affordance needed).
@@ -98,6 +112,13 @@ export function HyperparamForm({
       <h3 className="hyperparam-form-title" id="hyperparam-form-title">
         Hyperparameters
       </h3>
+
+      <TitleInput
+        value={title}
+        onChange={onTitleChange}
+        disabled={disabled}
+        onValidationChange={onTitleValidationChange}
+      />
 
       <HyperparamGroupView
         title="Basic"

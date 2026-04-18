@@ -172,6 +172,14 @@ export interface TrainingStatus {
    *  scope `/api/training/timeseries` queries to the current run so a
    *  refresh doesn't mix last session's points into this one. */
   experimentId?: string | null
+  /**
+   * Human-authored training title (BE T1, commit a7351e57). BE echoes
+   * the final title — either the user's value or an auto-generated
+   * `run-{adj}-{noun}-{4hex}` — in the `training:start` response and
+   * on `GET /api/training/status`. Optional because legacy pre-T1
+   * sessions have no title.
+   */
+  title?: string | null
 }
 
 /** Raw (step, value) point from GET /api/training/timeseries. Timestamps
@@ -245,6 +253,13 @@ export interface GameRecord {
    */
   envId?: string
   /**
+   * Denormalised training title snapshot (BE T1, commit a7351e57).
+   * Preserved at save time so a later rename on the training run
+   * doesn't orphan history rows. Optional because pre-T1 records
+   * have no title — FE renders `—` in those cells.
+   */
+  title?: string | null
+  /**
    * Monotonic episode number at game-end, sourced from
    * `TrainingManager.current_episode` (`backend/rl/trainer.py`).
    * Optional: BE does NOT include it on per-game result broadcasts
@@ -258,6 +273,25 @@ export interface GameRecord {
   episode?: number
 }
 
+/**
+ * Per-title training run summary from `GET /api/training/runs`
+ * (BE T4, commit fc38f3d8). Powers the history page's level-1
+ * drill-down list.
+ */
+export interface TrainingRun {
+  title: string
+  experimentId: string | null
+  startedAt: string | null
+  endedAt: string | null
+  totalGames: number
+  winRate: number
+  avgRallyLength: number
+  /** BE emits "running" when the live training manager's current
+   *  title matches this row; "done" otherwise. Legacy records with
+   *  no status default to "done". */
+  status: 'running' | 'done' | string
+}
+
 export interface EvalResult {
   modelPath: string
   botLevel: number
@@ -265,6 +299,14 @@ export interface EvalResult {
   winRate: number
   avgScore: number
   avgRallyLength: number
+  /**
+   * ISO-8601 UTC timestamp, set by BE Pydantic default on the
+   * `EvaluationRecord` (`backend/app/models/schemas.py:58`).
+   * Optional on the FE side because older stored records may be
+   * missing the field; `formatKstDateTime` falls back to an
+   * em-dash when absent.
+   */
+  timestamp?: string
 }
 
 /**
