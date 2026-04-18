@@ -30,6 +30,7 @@ from backend.app.services.metrics_service import MetricsService
 from backend.app.services.replay_service import ReplayService
 from backend.app.services.training_service import TrainingServiceWrapper
 from backend.app.ws.handlers import (
+    env_frames_push_loop,
     frames_push_loop,
     metrics_push_loop,
     results_push_loop,
@@ -79,6 +80,9 @@ async def lifespan(app: FastAPI):
             )
         ),
         asyncio.create_task(frames_push_loop(app.state.ws_manager, app.state.training_service)),
+        asyncio.create_task(
+            env_frames_push_loop(app.state.ws_manager, app.state.training_service)
+        ),
         asyncio.create_task(
             results_push_loop(
                 app.state.ws_manager, app.state.training_service, app.state.game_service

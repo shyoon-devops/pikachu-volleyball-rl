@@ -161,6 +161,151 @@ class CheckpointCallback(BaseCallback):
         return True
 
 
+class EnvFrameCallback(BaseCallback):
+    """Broadcast each training VecEnv's live state to FE subscribers.
+
+    The training loop runs ``n_envs`` parallel environments for gradient
+    collection; historically only the standalone demo game was visible
+    on the dashboard. This callback samples every env's game state via
+    ``VecEnv.env_method("get_frame_snapshot")`` once every
+    ``broadcast_interval`` vec steps and enqueues per-env payloads onto
+    ``env_frames_queue``. The WS handler (env_frames_push_loop) wraps
+    each into ``{"type": "training:env_frame", "payload": ...}``.
+
+    Backpressure: reuses ``_enqueue_with_drop`` so a slow subscriber
+    (or a closed loop) can never stall the training thread. Payload
+    size is bounded — per-env ~200-300 bytes, so at n_envs=8 and
+    broadcast_interval=4 (~6.25 broadcasts/s at the typical 25 fps
+    training tick) the wire cost is ~10-15 KB/s, well within any
+    WS / nginx budget.
+    """
+
+    def __init__(
+        self,
+        env_frames_queue: asyncio.Queue[dict[str, Any]],
+        loop: asyncio.AbstractEventLoop,
+        broadcast_interval: int = 4,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.env_frames_queue = env_frames_queue
+        self.loop = loop
+        # Cap the broadcast rate. 1 emits every vec step (~25/s per env,
+        # 200/s total at n_envs=8) — too chatty. 4 lands at ~6 emits/s
+        # per env, which matches the FE's typical 60fps interpolation
+        # cadence after network smoothing.
+        self.broadcast_interval = max(1, int(broadcast_interval))
+
+    def _on_step(self) -> bool:
+        # Guard: skip unless this vec step is on the broadcast cadence.
+        # num_timesteps increments by n_envs per vec step, so modulo on
+        # the self-local ``n_calls`` gives a per-step cadence.
+        if self.n_calls % self.broadcast_interval != 0:
+            return True
+
+        env = self.training_env
+        if env is None:
+            return True
+        try:
+            # SubprocVecEnv dispatches to each worker; returns list[dict].
+            snapshots: list[dict[str, Any]] = env.env_method("get_frame_snapshot")
+        except Exception:  # noqa: BLE001 — observability hook, never stop training
+            logger.exception("env_method(get_frame_snapshot) failed")
+            return True
+
+        for env_id, snap in enumerate(snapshots):
+            if not isinstance(snap, dict):
+                continue
+            payload = {
+                "env_id": env_id,
+                "frame": snap,
+                # Convenience surfacing of the fields FE renders as a row
+                # header — duplicated into the top level so simple
+                # subscribers don't have to know the inner frame schema.
+                "score": snap.get("score", [0, 0]),
+                "state_name": snap.get("state_name", "live"),
+                "step": int(self.num_timesteps),
+            }
+            _safe_enqueue(self.loop, self.env_frames_queue, payload)
+        return True
+
+
+class EnvResultCallback(BaseCallback):
+    """Drain terminated-match results from each parallel training env (BE-A2).
+
+    Each ``PikachuVolleyballEnv.step()`` queues a result dict when a
+    match naturally terminates (score hits MAX_SCORE — truncation from
+    max_steps or stall-out is intentionally NOT saved). This callback
+    drains those per-env queues every ``drain_interval`` vec steps and
+    pushes them onto ``results_queue`` with the experiment's bookkeeping
+    (``experiment_id``, ``bot_level``, ``env_id``, fresh ``game_id``).
+    The existing ``results_push_loop`` handler then persists each as a
+    ``GameRecord`` row.
+
+    Scale note: at ~2 minutes/game per env on RTX 4070 Ti, 8 envs yield
+    ~4 saves/minute sustained — well inside MongoDB's insert budget and
+    the per-env index added in indexes.py.
+    """
+
+    def __init__(
+        self,
+        results_queue: asyncio.Queue[dict[str, Any]],
+        loop: asyncio.AbstractEventLoop,
+        manager: Any | None = None,
+        drain_interval: int = 4,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.results_queue = results_queue
+        self.loop = loop
+        self.drain_interval = max(1, int(drain_interval))
+        # Back-reference used to snapshot ``experiment_id`` / ``bot_level``
+        # at save-time, matching the LiveFrameCallback pattern. Kept
+        # Optional so unit tests can instantiate without a full manager.
+        self._manager = manager
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.drain_interval != 0:
+            return True
+
+        env = self.training_env
+        if env is None:
+            return True
+        try:
+            per_env: list[list[dict[str, Any]]] = env.env_method("drain_pending_results")
+        except Exception:  # noqa: BLE001 — never abort training on drain failure
+            logger.exception("env_method(drain_pending_results) failed")
+            return True
+
+        mgr = self._manager
+        experiment_id = (
+            str(getattr(mgr, "_experiment_id", "") or "") if mgr is not None else ""
+        )
+        bot_level = int(getattr(mgr, "_bot_level", 1)) if mgr is not None else 1
+
+        for env_id, results in enumerate(per_env):
+            if not results:
+                continue
+            for result in results:
+                if not isinstance(result, dict):
+                    continue
+                payload = {
+                    "game_id": str(uuid.uuid4()),
+                    "experiment_id": experiment_id,
+                    "bot_level": bot_level,
+                    "score1": int(result.get("score1", 0)),
+                    "score2": int(result.get("score2", 0)),
+                    "winner": int(result.get("winner", 1)),
+                    "duration_frames": int(result.get("duration_frames", 0)),
+                    "rally_count": int(result.get("rally_count", 0)),
+                    # env_id stringified so "demo" and "0".."7" share the
+                    # same column in /api/games + Mongo index.
+                    "env_id": str(env_id),
+                }
+                _safe_enqueue(self.loop, self.results_queue, payload)
+        return True
+
+
 class LiveFrameCallback(BaseCallback):
     """Runs a demo game every M steps and pushes frames + result to queues.
 
@@ -314,6 +459,9 @@ class LiveFrameCallback(BaseCallback):
             # field; the handler used to default to 0, which is why every
             # game in /api/games showed 0 rallies.
             "rally_count": rally_count,
+            # Tag this as the standalone demo so BE-A2 can distinguish
+            # demo results from parallel-env gradient games in /api/games.
+            "env_id": "demo",
         }
         _safe_enqueue(self.loop, self.results_queue, result)
 

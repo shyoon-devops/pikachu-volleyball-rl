@@ -259,6 +259,27 @@ async def frames_push_loop(
         await manager.broadcast({"type": "training:frame", "payload": data})
 
 
+async def env_frames_push_loop(
+    manager: ConnectionManager,
+    training_service: TrainingServiceWrapper,
+) -> None:
+    """Drain per-env frame queue and broadcast to all WS clients.
+
+    Separate channel from ``training:frame`` (the demo game) — each
+    payload is ``{env_id, frame, score, state_name, step}`` so the FE
+    can render all 8 parallel envs side-by-side. Graceful degradation:
+    if the manager has no ``env_frames_queue`` attribute (older
+    manager, or a test fake), this loop parks idle.
+    """
+    queue = getattr(training_service.manager, "env_frames_queue", None)
+    if queue is None:
+        logger.info("env_frames_push_loop: no env_frames_queue attribute; idle")
+        return
+    while True:
+        data = await queue.get()
+        await manager.broadcast({"type": "training:env_frame", "payload": data})
+
+
 SAVE_RETRY_ATTEMPTS = 3
 SAVE_RETRY_BASE_DELAY = 0.5  # seconds; doubled each attempt (0.5, 1.0, 2.0)
 DEAD_LETTER_PATH = Path(os.getenv("FAILED_RESULTS_PATH", "data/failed_results.jsonl"))
@@ -339,6 +360,11 @@ async def results_push_loop(
                 winner=data["winner"],
                 duration_frames=data["duration_frames"],
                 rally_count=data.get("rally_count", 0),
+                # env_id: "demo" for the demo callback; "0".."7" for
+                # parallel training envs (BE-A2). Legacy producers that
+                # never learned the field are treated as demo — matches
+                # pre-A2 behavior since only the demo saved games.
+                env_id=data.get("env_id"),
             )
         except Exception as e:
             logger.exception("Invalid game result payload, routing to dead-letter")

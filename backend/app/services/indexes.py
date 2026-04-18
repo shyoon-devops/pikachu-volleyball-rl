@@ -64,6 +64,15 @@ _GAME_INDEXES = _IndexSpec(
             [("experiment_id", ASCENDING), ("timestamp", DESCENDING)],
             name="games_experiment_timestamp",
         ),
+        # Per-env history — BE-A2. ``env_id`` is "demo" for the demo
+        # callback's game or "0".."7" for the parallel training envs.
+        # Partial index over docs that actually carry the field so legacy
+        # records (no env_id) don't consume index space.
+        IndexModel(
+            [("env_id", ASCENDING), ("timestamp", DESCENDING)],
+            name="games_env_timestamp",
+            partialFilterExpression={"env_id": {"$type": "string"}},
+        ),
     ),
 )
 
