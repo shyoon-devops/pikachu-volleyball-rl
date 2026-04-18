@@ -1,5 +1,6 @@
 import { memo, useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
+import { ScoreCell } from '../shared/ScoreCell'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { BatchTabBar } from '../game/BatchTabBar'
@@ -446,11 +447,7 @@ const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecor
       </td>
       <td className="text-muted">{formatEpisode(g.episode)}</td>
       <td>{formatBotLevel(g.botLevel)}</td>
-      <td className="score-cell">
-        <span className="score-p1">{g.score1}</span>
-        {' : '}
-        <span className="score-p2">{g.score2}</span>
-      </td>
+      <ScoreCell s1={g.score1} s2={g.score2} />
       <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
         {g.winner === 1 ? 'RL Agent' : 'Bot'}
       </td>

@@ -52,6 +52,7 @@ import {
   formatEpisode,
 } from '../../lib/formatGame'
 import { formatKstDateTime } from '../../lib/formatTime'
+import { ScoreCell } from '../shared/ScoreCell'
 import './ReplayList.css'
 
 const PAGE_LIMIT = 20
@@ -454,11 +455,7 @@ const GameRow = memo(
         </td>
         <td className="text-muted">{formatEpisode(g.episode)}</td>
         <td>{formatBotLevel(g.botLevel)}</td>
-        <td className="score-cell">
-          <span className="score-p1">{g.score1}</span>
-          {' : '}
-          <span className="score-p2">{g.score2}</span>
-        </td>
+        <ScoreCell s1={g.score1} s2={g.score2} />
         <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
           {g.winner === 1 ? 'RL Agent' : 'Bot'}
         </td>
