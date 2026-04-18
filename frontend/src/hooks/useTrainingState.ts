@@ -99,12 +99,22 @@ export function useTrainingStateImpl(): TrainingState {
     // surfaces should follow.
     //
     // Defensive `Math.max`: a delayed metrics payload from a previous
-    // experiment shouldn't roll the counter backwards. Same guard
-    // applies to currentEpisode for symmetry.
+    // experiment shouldn't roll the counter backwards.
+    //
+    // CurrentEpisode is NOT bumped from `payload.episode` (user report
+    // 2026-04-18): that field is `len(self._episode_rewards)` with
+    // `maxlen=100` in `backend/rl/callbacks.py::MetricsCallback._on_step`
+    // — a moving-window count for the mean-reward calculation, bounded
+    // at 100. It is NOT the monotonic live counter. The authoritative
+    // value lives on `TrainingManager.current_episode` and is exposed
+    // only via REST `/api/training/status`. Using `Math.max` here was
+    // harmless (payload.episode ≤ authoritative after 100 episodes) but
+    // obscured the fact that the WS never carries the live value —
+    // removing it keeps the code honest and makes the REST-poll path
+    // below the single source of live updates.
     setStatus(prev => ({
       ...prev,
       currentStep: Math.max(prev.currentStep, payload.step),
-      currentEpisode: Math.max(prev.currentEpisode, payload.episode),
     }))
   }, [])
 
@@ -179,6 +189,49 @@ export function useTrainingStateImpl(): TrainingState {
       })
     return () => { cancelled = true }
   }, [connectionState])
+
+  // Live poll of `/api/training/status` while training is running or
+  // paused (user report 2026-04-18: episode counter stale until refresh).
+  //
+  // Why this exists: `TrainingManager.current_episode` is monotonic and
+  // incremented on every env `info["episode"]` completion
+  // (`backend/rl/trainer.py::_on_step`), but it's exposed ONLY via
+  // REST `/api/training/status`. The WS `training:metrics` payload
+  // carries a different `episode` field — `len(deque(maxlen=100))` for
+  // the moving-window mean-reward calculation
+  // (`backend/rl/callbacks.py:95, 129`) — which is bounded at 100 and
+  // does NOT reflect the live cumulative count. WS `training:status`
+  // only fires on state transitions (start/stop/pause/resume/level),
+  // so between transitions the FE has no live source for the counter.
+  //
+  // Polling cadence: 2s. Matches the /api/games 5s cache TTL (so we
+  // won't stress the BE) and gives the UI a live-feeling update without
+  // a tight loop. Skipping the poll while `state === 'stopped'` saves
+  // the burn when nothing's running; the training:status WS push fires
+  // on the next Start click so the loop kicks back in immediately.
+  //
+  // [BE-WAITING] When BE adds `current_episode` to either the
+  // `training:metrics` broadcast or a periodic status push, this poll
+  // becomes redundant and can be retired — the status REST probe on
+  // mount/reconnect will still cover the cold-start case.
+  useEffect(() => {
+    if (connectionState !== 'connected') return
+    if (status.state === 'stopped') return
+    let cancelled = false
+    const tick = () => {
+      getTrainingStatus()
+        .then(fresh => {
+          if (cancelled) return
+          setStatus(prev => ({ ...prev, ...fresh }))
+        })
+        .catch(() => { /* transient — next tick retries */ })
+    }
+    const interval = setInterval(tick, 2000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [connectionState, status.state])
 
   // First-mount REST probe, even before the WebSocket opens, so the header
   // and primary CTA are correct on refresh regardless of WS timing.

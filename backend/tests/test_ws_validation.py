@@ -61,7 +61,7 @@ def test_parse_accepts_training_start_defaults():
     # set_level. ``None`` here tells the dispatcher to carry over the
     # current status.bot_level instead of defaulting to 1.
     assert result.payload.bot_level is None
-    assert result.payload.total_timesteps == 1_000_000
+    assert result.payload.total_timesteps == 2_000_000
 
 
 def test_parse_training_start_preserves_explicit_bot_level():

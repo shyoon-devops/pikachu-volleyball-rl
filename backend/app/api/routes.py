@@ -20,14 +20,21 @@ from backend.app.metrics import (
     sample_runtime_metrics,
 )
 from backend.app.models.schemas import PaginatedResponse
+from backend.app.services.eval_jobs import EvalJobRegistry
 from backend.app.services.metrics_service import allowed_buckets
 from backend.app.util.ttl_cache import cache_ttl
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Limit concurrent evaluations (each can run minutes)
+# Limit concurrent evaluations (each can run minutes). Evaluations now
+# run as background tasks; the semaphore still gates them to 1-at-a-time
+# so a flood of POSTs cannot starve the GPU or spawn parallel PPO loads.
 _eval_semaphore = asyncio.Semaphore(1)
+
+# In-memory job registry — async-safe, LRU-capped. See eval_jobs.py for
+# the rationale on why restart-loss of in-flight state is acceptable.
+_eval_jobs = EvalJobRegistry()
 
 # Health check thresholds
 _DISK_USAGE_THRESHOLD = 0.90  # 90%
@@ -650,9 +657,67 @@ class EvalRunRequest(BaseModel):
     n_games: int = Field(default=50, ge=1, le=500)
 
 
-@router.post("/evaluation/run")
+async def _run_evaluation_job(
+    job_id: str,
+    eval_service: Any,
+    body: EvalRunRequest,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
+    """Background task body for a single evaluation.
+
+    Runs under ``_eval_semaphore`` so only one evaluation executes at a
+    time even if multiple POSTs queue up. Exceptions are caught and
+    surfaced through the job registry — they MUST NOT propagate, or the
+    task would die silently and the poller would see a stuck "running".
+    """
+    # Progress callback fires on the worker thread; marshal the state
+    # update back onto the event loop so the registry lock stays on a
+    # single thread. Fire-and-forget — a dropped progress update is a
+    # cosmetic issue, not a correctness one.
+    def _on_progress(current: int, total: int) -> None:
+        asyncio.run_coroutine_threadsafe(
+            _eval_jobs.update_progress(job_id, current), loop
+        )
+
+    async with _eval_semaphore:
+        try:
+            # Total isn't known inside the evaluator at callback-time, so
+            # seed it here from the request before running. This also
+            # gives the UI a "0 / N" to render while waiting on game 1.
+            await _eval_jobs.mark_running(job_id, body.n_games)
+            result = await eval_service.run(
+                model_path=body.model_path,
+                bot_level=body.bot_level,
+                n_games=body.n_games,
+                progress_callback=_on_progress,
+            )
+        except FileNotFoundError as e:
+            logger.info("eval job %s: %s", job_id, e)
+            await _eval_jobs.mark_failed(job_id, f"not_found: {e}")
+            return
+        except Exception as e:  # noqa: BLE001
+            logger.exception("eval job %s crashed", job_id)
+            await _eval_jobs.mark_failed(job_id, f"{type(e).__name__}: {e}")
+            return
+
+    await _eval_jobs.mark_done(job_id, result)
+    logger.info(
+        "eval job %s ok model=%s bot_level=%d n_games=%d",
+        job_id, body.model_path, body.bot_level, body.n_games,
+    )
+
+
+@router.post("/evaluation/run", status_code=202)
 @endpoint_guard("run_evaluation")
 async def run_evaluation(request: Request, body: EvalRunRequest):
+    """Fire-and-forget evaluation: returns immediately with a job_id.
+
+    The evaluation itself (minutes to tens of minutes) runs as a
+    background asyncio task. Poll GET /api/evaluation/status/{job_id}
+    for progress and the final result. 409 is still returned when
+    another job is already running — FE can render "busy" without
+    having to mint a dead job id.
+    """
     eval_service = getattr(request.app.state, "eval_service", None)
     if eval_service is None:
         logger.warning("run_evaluation called but eval_service is not initialized")
@@ -660,21 +725,60 @@ async def run_evaluation(request: Request, body: EvalRunRequest):
     if _eval_semaphore.locked():
         logger.info("run_evaluation rejected — another evaluation is in progress")
         raise HTTPException(status_code=409, detail="Evaluation already in progress")
-    async with _eval_semaphore:
+
+    # Synchronous path pre-flight — traversal / missing-file errors come
+    # back as a 404 on the POST itself. Otherwise the job would always
+    # accept (202), only for the poller to discover the failure on the
+    # next tick. Keeps backward-compat with callers that treat the POST
+    # as "reject-fast on obvious input errors".
+    if hasattr(eval_service, "validate_model_path"):
         try:
-            result = await eval_service.run(
-                model_path=body.model_path,
-                bot_level=body.bot_level,
-                n_games=body.n_games,
-            )
+            eval_service.validate_model_path(body.model_path)
         except FileNotFoundError as e:
-            logger.info("run_evaluation: %s", e)
+            logger.info("run_evaluation rejected: %s", e)
             raise HTTPException(status_code=404, detail=str(e))
-    logger.info(
-        "run_evaluation ok model=%s bot_level=%d n_games=%d",
-        body.model_path, body.bot_level, body.n_games,
+
+    job_id = await _eval_jobs.create()
+    loop = asyncio.get_running_loop()
+    # Detach the task — we never await it; the response must return now
+    # so nginx's upstream timeout does not eat the HTTP connection.
+    asyncio.create_task(
+        _run_evaluation_job(job_id, eval_service, body, loop),
+        name=f"eval-job-{job_id}",
     )
-    return result
+    logger.info(
+        "eval job %s accepted model=%s bot_level=%d n_games=%d",
+        job_id, body.model_path, body.bot_level, body.n_games,
+    )
+    return {"job_id": job_id, "state": "pending"}
+
+
+@router.get("/evaluation/status/{job_id}")
+@endpoint_guard("get_evaluation_status")
+async def get_evaluation_status(job_id: str):
+    """Return the current state of an async evaluation job.
+
+    Response shape is stable across states; ``result`` is populated only
+    when ``state == "done"`` and ``error`` only when ``state == "failed"``.
+    Unknown job_id returns 404 so FE polling loops can detect evicted /
+    restart-lost jobs cleanly.
+    """
+    job = await _eval_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": job["job_id"],
+        "state": job["state"],
+        "progress": {
+            "current": job["progress_current"],
+            "total": job["progress_total"],
+        },
+        "result": job["result"],
+        "error": job["error"],
+        "created_at": job["created_at"],
+        "started_at": job["started_at"],
+        "finished_at": job["finished_at"],
+    }
 
 
 @router.get("/evaluation/results")
