@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import type { ModelInfo, PaginatedResponse, TrainingRun, TrainingStatus, GameRecord, ReplayInfo } from '../../lib/types'
+import type { EvalResult, ModelInfo, PaginatedResponse, TrainingRun, TrainingStatus, GameRecord, ReplayInfo } from '../../lib/types'
 import type { EvaluationJobAck, EvaluationJobStatus } from '../../lib/api'
 
 // ── Module mocks ─────────────────────────────────────────────
@@ -12,6 +12,7 @@ const getEvaluationStatus = vi.fn<(jobId: string) => Promise<EvaluationJobStatus
 const deleteModels = vi.fn<(paths: string[]) => Promise<{ deleted: string[]; failed: Array<{ path: string; reason: string }> }>>()
 const getGames = vi.fn<(page?: number, limit?: number, title?: string) => Promise<PaginatedResponse<GameRecord>>>()
 const getAvailableReplays = vi.fn<() => Promise<ReplayInfo[]>>()
+const getEvalResults = vi.fn<() => Promise<EvalResult[]>>()
 
 vi.mock('../../lib/api', async () => {
   const actual = await vi.importActual<typeof import('../../lib/api')>('../../lib/api')
@@ -25,6 +26,7 @@ vi.mock('../../lib/api', async () => {
     deleteModels: (paths: string[]) => deleteModels(paths),
     getGames: (page?: number, limit?: number, title?: string) => getGames(page, limit, title),
     getAvailableReplays: () => getAvailableReplays(),
+    getEvalResults: () => getEvalResults(),
   }
 })
 
@@ -82,11 +84,13 @@ beforeEach(() => {
   deleteModels.mockReset()
   getGames.mockReset()
   getAvailableReplays.mockReset()
+  getEvalResults.mockReset()
   // Sensible defaults so sub-tabs that fetch on mount don't crash.
   getTrainingRuns.mockResolvedValue({ data: [runRow()], total: 1, page: 1, limit: 100 })
   getModels.mockResolvedValue([])
   getGames.mockResolvedValue({ data: [], total: 0, page: 1, limit: 20 })
   getAvailableReplays.mockResolvedValue([])
+  getEvalResults.mockResolvedValue([])
   try { sessionStorage.clear() } catch { /* ignore */ }
   mockTrainingState.gameResultSeq = 0
   mockTrainingState.status = { state: 'stopped', currentStep: 0, currentEpisode: 0 }

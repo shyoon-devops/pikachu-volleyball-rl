@@ -8,6 +8,9 @@ const getModels = vi.fn<(title?: string, limit?: number) => Promise<ModelInfo[]>
 const runEvaluation = vi.fn<(modelPath: string, botLevel: number, nGames: number) => Promise<EvaluationJobAck>>()
 const getEvaluationStatus = vi.fn<(jobId: string) => Promise<EvaluationJobStatus>>()
 const deleteModels = vi.fn<(paths: string[]) => Promise<{ deleted: string[]; failed: Array<{ path: string; reason: string }> }>>()
+// FC-R9b: results-history fetch; tests that exercise the run
+// detail mock this so the unrelated network path doesn't throw.
+const getEvalResults = vi.fn<() => Promise<import('../../lib/types').EvalResult[]>>()
 
 vi.mock('../../lib/api', () => ({
   getModels: (title?: string, limit?: number) => getModels(title, limit),
@@ -15,6 +18,7 @@ vi.mock('../../lib/api', () => ({
     runEvaluation(modelPath, botLevel, nGames),
   getEvaluationStatus: (jobId: string) => getEvaluationStatus(jobId),
   deleteModels: (paths: string[]) => deleteModels(paths),
+  getEvalResults: () => getEvalResults(),
 }))
 
 // Shared training-state context is provided by TrainingStateProvider at
@@ -56,6 +60,10 @@ beforeEach(() => {
   runEvaluation.mockReset()
   getEvaluationStatus.mockReset()
   deleteModels.mockReset()
+  getEvalResults.mockReset()
+  // Default: empty eval-results list so tests that don't assert on
+  // the history table don't hit an unhandled promise rejection.
+  getEvalResults.mockResolvedValue([])
   try { sessionStorage.clear() } catch { /* ignore */ }
   mockTrainingState.status = { state: 'stopped', currentStep: 0, currentEpisode: 0 }
 })
@@ -187,7 +195,54 @@ describe('EvaluationRunDetail (FC-R7C level-2)', () => {
     getModels.mockRejectedValueOnce(new Error('models endpoint down'))
     renderAt('/evaluation/broken-run')
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(/models endpoint down/)
+      const alerts = screen.getAllByRole('alert').map(el => el.textContent ?? '')
+      expect(alerts.some(t => /models endpoint down/.test(t))).toBe(true)
+    })
+  })
+
+  // FC-R9b: evaluation-results history scoped to this run via the
+  // `trainingTitle` field. Rows from other runs must not leak in.
+  it('renders evaluation results filtered by trainingTitle', async () => {
+    getModels.mockResolvedValueOnce([])
+    getEvalResults.mockResolvedValueOnce([
+      {
+        modelPath: 'exp/my-run__e__100.zip',
+        botLevel: 3,
+        nGames: 20,
+        winRate: 0.75,
+        avgScore: 13.5,
+        avgRallyLength: 6.2,
+        timestamp: '2026-04-17T11:00:00Z',
+        trainingTitle: 'my-run',
+      },
+      {
+        modelPath: 'exp/other__e__100.zip',
+        botLevel: 2,
+        nGames: 10,
+        winRate: 0.5,
+        avgScore: 10,
+        avgRallyLength: 5,
+        timestamp: '2026-04-17T09:00:00Z',
+        trainingTitle: 'different-run',
+      },
+    ])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Evaluation Results/i })).toBeInTheDocument()
+    })
+    // Win-rate for the matching row renders; the non-matching row must not.
+    await waitFor(() => {
+      expect(screen.getByText('75.0%')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('50.0%')).toBeNull()
+  })
+
+  it('shows the empty placeholder when no results exist for this run', async () => {
+    getModels.mockResolvedValueOnce([])
+    getEvalResults.mockResolvedValueOnce([])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => {
+      expect(screen.getByText(/No evaluation results for this run yet/)).toBeInTheDocument()
     })
   })
 })

@@ -315,3 +315,25 @@
     overflow-x: auto;
   }
 }
+
+/* FC-R9b: evaluation results history table */
+.eval-run-detail-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.eval-run-detail-results-title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+}
+
+.eval-run-detail-winrate {
+  color: var(--color-success, #22c55e);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
