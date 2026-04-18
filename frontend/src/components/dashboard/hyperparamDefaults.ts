@@ -1,14 +1,14 @@
 import type { Hyperparams } from '../../lib/types'
+import { DEFAULT_HYPERPARAMS_EXTENDED } from '../../lib/hyperparams'
 
 /**
  * Default PPO hyperparameters used by the training start form.
- * Lives in its own module so HyperparamForm.tsx stays a pure
- * component file (react-refresh/only-export-components).
+ * Re-exported from `lib/hyperparams.ts` so HyperparamForm.tsx stays
+ * a pure component file (react-refresh/only-export-components) and
+ * the schema module owns the single source of truth for defaults.
+ *
+ * Values match BE (`WsTrainingStartPayload` on commit cc4daaf3).
  */
 export const DEFAULT_HYPERPARAMS: Hyperparams = {
-  learning_rate: 3e-4,
-  n_steps: 2048,
-  batch_size: 64,
-  gamma: 0.99,
-  clip_range: 0.2,
+  ...DEFAULT_HYPERPARAMS_EXTENDED,
 }

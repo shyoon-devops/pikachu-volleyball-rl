@@ -267,12 +267,29 @@ export interface EvalResult {
   avgRallyLength: number
 }
 
+/**
+ * Extended hyperparam set. BE (`WsTrainingStartPayload`, commit
+ * cc4daaf3) accepts some fields top-level and some inside the
+ * `hyperparams` blob; the FE form keeps them flat and the submit
+ * path unbundles via `HYPERPARAM_WIRE_POSITION` in
+ * `frontend/src/lib/hyperparams.ts`.
+ */
 export interface Hyperparams {
   learning_rate: number
   n_steps: number
   batch_size: number
   gamma: number
   clip_range: number
+  /** Training length in PPO timesteps. Top-level on the wire. */
+  total_timesteps: number
+  /** Parallel env count (SubprocVecEnv). Top-level on the wire. */
+  n_envs: number
+  /** PPO epochs per rollout. Top-level on the wire. */
+  n_epochs: number
+  /** Entropy bonus coefficient. Top-level on the wire. */
+  ent_coef: number
+  /** GAE lambda. Top-level on the wire. */
+  gae_lambda: number
 }
 
 export interface ModelInfo {

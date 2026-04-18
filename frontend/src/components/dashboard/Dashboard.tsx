@@ -18,6 +18,12 @@ import {
   formatEpisode,
 } from '../../lib/formatGame'
 import { formatKstDateTime } from '../../lib/formatTime'
+import {
+  HYPERPARAM_SCHEMA,
+  HYPERPARAM_WIRE_POSITION,
+  validateHyperparam,
+  type HyperparamKey,
+} from '../../lib/hyperparams'
 import './Dashboard.css'
 
 /** Default env count. BE's training run defaults to 8 parallel envs;
@@ -98,11 +104,39 @@ export function Dashboard() {
     return <DashboardSkeleton />
   }
 
+  /**
+   * Build the `training:start` payload. BE
+   * (`WsTrainingStartPayload`, cc4daaf3) accepts 5 fields at the
+   * TOP LEVEL (total_timesteps / n_envs / n_epochs / ent_coef /
+   * gae_lambda) and the rest inside the free-form `hyperparams`
+   * blob. `HYPERPARAM_WIRE_POSITION` (lib/hyperparams.ts) is the
+   * single source of truth for that split — moving a field to the
+   * other shape is a one-line table edit, no submit-path change.
+   *
+   * Option A (2026-04-12) still holds: `bot_level` is NOT sent from
+   * here — the BE dispatcher carries `status.bot_level` forward.
+   */
+  const formInvalid = useMemo(
+    () => HYPERPARAM_SCHEMA.some(f => !validateHyperparam(f.key, params[f.key as HyperparamKey]).valid),
+    [params],
+  )
+
   const handleStart = () => {
-    // Option A: bot_level omitted — BE uses status.bot_level (set via the
-    // L1–L5 buttons in <TrainingControls />). Sending it here would
-    // silently override a level the user just picked.
-    send('training:start', { hyperparams: params })
+    if (formInvalid) return
+    const hyperparamsBlob: Record<string, number> = {}
+    const topLevel: Record<string, number> = {}
+    for (const f of HYPERPARAM_SCHEMA) {
+      const value = params[f.key as HyperparamKey]
+      if (HYPERPARAM_WIRE_POSITION[f.key] === 'top-level') {
+        topLevel[f.key] = value
+      } else {
+        hyperparamsBlob[f.key] = value
+      }
+    }
+    send('training:start', {
+      ...topLevel,
+      hyperparams: hyperparamsBlob,
+    })
   }
 
   return (

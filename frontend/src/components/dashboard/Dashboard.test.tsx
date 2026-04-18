@@ -166,6 +166,42 @@ describe('Dashboard loading state', () => {
     expect(call[1]).not.toHaveProperty('bot_level')
   })
 
+  // ── FC-R5: extended hyperparams unbundle into top-level + blob ──
+  it('training:start unbundles top-level fields per HYPERPARAM_WIRE_POSITION', () => {
+    // BE cc4daaf3 accepts total_timesteps / n_envs / n_epochs /
+    // ent_coef / gae_lambda at the top level of the payload; the
+    // remaining 5 fields ride inside `hyperparams`. Verify both
+    // sides of the split.
+    const send = vi.fn()
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0, botLevel: 4 },
+      send,
+    })
+    renderDashboard()
+
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const [, payload] = send.mock.calls[0] as [string, Record<string, unknown>]
+    // Top-level fields — must be on the outer payload, not in the blob.
+    expect(payload).toHaveProperty('total_timesteps')
+    expect(payload).toHaveProperty('n_envs')
+    expect(payload).toHaveProperty('n_epochs')
+    expect(payload).toHaveProperty('ent_coef')
+    expect(payload).toHaveProperty('gae_lambda')
+    // PPO ctor args — must live inside hyperparams.
+    const blob = payload.hyperparams as Record<string, unknown>
+    expect(blob).toHaveProperty('learning_rate')
+    expect(blob).toHaveProperty('n_steps')
+    expect(blob).toHaveProperty('batch_size')
+    expect(blob).toHaveProperty('gamma')
+    expect(blob).toHaveProperty('clip_range')
+    // And the inverse — no top-level PPO-ctor leakage.
+    expect(payload).not.toHaveProperty('learning_rate')
+    expect(payload).not.toHaveProperty('gamma')
+  })
+
   it('does not show the skeleton when reconnecting mid-session with data present', () => {
     resetMockState({
       connectionState: 'connecting',
