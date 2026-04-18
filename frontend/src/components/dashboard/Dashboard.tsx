@@ -152,18 +152,6 @@ export function Dashboard() {
     }
   }, [])
 
-  // Show skeleton only on the very first connect attempt while we have no
-  // data at all. After anything arrives (frame / metrics / recent games)
-  // we keep the real UI up — even through reconnects — so the layout
-  // doesn't flash back to skeletons mid-session. A persistent
-  // disconnect should surface the reconnect banner, not a skeleton.
-  const hasAnyData =
-    latestFrame !== null || metrics.length > 0 || recentGames.length > 0
-  const isInitialLoading = connectionState === 'connecting' && !hasAnyData
-  if (isInitialLoading) {
-    return <DashboardSkeleton />
-  }
-
   /**
    * Build the `training:start` payload. BE
    * (`WsTrainingStartPayload`, cc4daaf3) accepts 5 fields at the
@@ -250,6 +238,21 @@ export function Dashboard() {
       lastBroadcastTitleRef.current = incoming
     }
   }, [status.title])
+
+  // R7A follow-up (React error #310, 2026-04-18): the skeleton gate
+  // MUST sit below every hook — earlier revisions placed this check
+  // mid-function and the later useMemo (formInvalid) + useEffect
+  // (title echo) only ran on the non-skeleton path, tripping
+  // "Rendered more hooks than during the previous render" when the
+  // skeleton → real transition occurred on first connect. With the
+  // gate moved here, every render — skeleton or real — invokes the
+  // same hook sequence in the same order.
+  const hasAnyData =
+    latestFrame !== null || metrics.length > 0 || recentGames.length > 0
+  const isInitialLoading = connectionState === 'connecting' && !hasAnyData
+  if (isInitialLoading) {
+    return <DashboardSkeleton />
+  }
 
   return (
     <div className="dashboard">

@@ -225,6 +225,37 @@ describe('Dashboard loading state', () => {
     expect(payload.title).toBe('')
   })
 
+  // R7A follow-up — React error #310 ("Rendered more hooks than
+  // during the previous render"). Skeleton gate used to sit between
+  // the hooks; transitioning from skeleton (connecting + no data) to
+  // the real UI (connected + data) ran a different number of hooks
+  // across consecutive renders and React tore down the tree. The
+  // gate now lives below every hook, so this transition must be
+  // stable.
+  it('transitions from skeleton to real UI without hook-order violation', () => {
+    resetMockState({ connectionState: 'connecting' })
+    const { rerender } = renderDashboard()
+    expect(screen.getByRole('status', { name: /loading dashboard/i })).toBeInTheDocument()
+
+    // Simulate WS connect + data landing → gate flips to false.
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      metrics: [
+        { step: 1, episode: 1, meanReward: 0, winRate: 0, policyLoss: 0, valueLoss: 0 } as TrainingMetrics,
+      ],
+    })
+    expect(() =>
+      rerender(
+        <MemoryRouter>
+          <Dashboard />
+        </MemoryRouter>,
+      ),
+    ).not.toThrow()
+    expect(screen.queryByRole('status', { name: /loading dashboard/i })).not.toBeInTheDocument()
+    expect(screen.getByTestId('game-canvas')).toBeInTheDocument()
+  })
+
   it('does not show the skeleton when reconnecting mid-session with data present', () => {
     resetMockState({
       connectionState: 'connecting',
