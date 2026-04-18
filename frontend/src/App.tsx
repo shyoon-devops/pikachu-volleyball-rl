@@ -4,7 +4,7 @@ import { Dashboard } from './components/dashboard/Dashboard'
 import { TrainingRunList } from './components/history/TrainingRunList'
 import { TrainingRunDetail } from './components/history/TrainingRunDetail'
 import { ReplayPlayer } from './components/replay/ReplayPlayer'
-import { EvalPanel } from './components/evaluation/EvalPanel'
+import { EvaluationRunDetail } from './components/evaluation/EvaluationRunDetail'
 import { VisualHarness } from './components/game/VisualHarness'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ConnectionIndicator } from './components/ConnectionIndicator'
@@ -79,9 +79,22 @@ function App() {
                     <ReplayPlayer />
                   </ErrorBoundary>
                 } />
+                {/*
+                  Evaluation drill-down (R7C, spec bf7bfaa4):
+                    /evaluation          → runs aggregate list (level-1)
+                    /evaluation/:title   → checkpoints of one run + eval runner
+                  Reuses TrainingRunList for level-1 with a `/evaluation/`
+                  link base, so the history and evaluation landing pages
+                  share the same search/filter/card UX.
+                */}
                 <Route path="/evaluation" element={
                   <ErrorBoundary>
-                    <EvalPanel />
+                    <TrainingRunList linkBase="/evaluation/" />
+                  </ErrorBoundary>
+                } />
+                <Route path="/evaluation/:title" element={
+                  <ErrorBoundary>
+                    <EvaluationRunDetail />
                   </ErrorBoundary>
                 } />
                 <Route path="/visual" element={<VisualHarness />} />

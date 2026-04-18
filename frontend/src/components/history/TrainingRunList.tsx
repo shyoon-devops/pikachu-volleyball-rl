@@ -28,7 +28,19 @@ const SEARCH_DEBOUNCE_MS = 200
 const SEARCH_QUERY_KEY = 'q'
 const PAGE_LIMIT = 50
 
-export function TrainingRunList() {
+/**
+ * Route the per-row link to. Defaults to the history drill-down
+ * (`/history/`) so existing callers stay unchanged; the evaluation
+ * page passes `/evaluation/` (FC-R7C) to reuse the same L1 surface
+ * with an eval-intent destination. CTA in the empty state still
+ * points at `/` — starting a new training is the only escape hatch
+ * regardless of which L1 surface the user is on.
+ */
+export interface TrainingRunListProps {
+  linkBase?: string
+}
+
+export function TrainingRunList({ linkBase = '/history/' }: TrainingRunListProps = {}) {
   const [searchParams, setSearchParams] = useSearchParams()
   const { gameResultSeq } = useTrainingState()
   const [runs, setRuns] = useState<TrainingRun[]>([])
@@ -149,7 +161,7 @@ export function TrainingRunList() {
               </thead>
               <tbody>
                 {filteredRuns.map(run => (
-                  <RunRow key={run.title} run={run} query={debouncedQuery} />
+                  <RunRow key={run.title} run={run} query={debouncedQuery} linkBase={linkBase} />
                 ))}
               </tbody>
             </table>
@@ -158,7 +170,7 @@ export function TrainingRunList() {
           {/* Mobile card stack. Hidden on ≥768px via CSS. */}
           <div className="training-run-list-cards">
             {filteredRuns.map(run => (
-              <RunCard key={run.title} run={run} query={debouncedQuery} />
+              <RunCard key={run.title} run={run} query={debouncedQuery} linkBase={linkBase} />
             ))}
           </div>
         </>
@@ -170,9 +182,10 @@ export function TrainingRunList() {
 interface RunRowProps {
   run: TrainingRun
   query: string
+  linkBase: string
 }
 
-function RunRow({ run, query }: RunRowProps) {
+function RunRow({ run, query, linkBase }: RunRowProps) {
   // FC-R7A null-safety: every scalar falls back to a safe value
   // before any method access. BE sends `null` for untitled legacy
   // records + empty aggregates; a null `title.toLowerCase()` or
@@ -185,7 +198,7 @@ function RunRow({ run, query }: RunRowProps) {
     <tr className="training-run-list-row">
       <td className="training-run-list-cell-title">
         <Link
-          to={`/history/${encodeURIComponent(safeTitle)}`}
+          to={`${linkBase}${encodeURIComponent(safeTitle)}`}
           className="training-run-list-title-link"
         >
           <HighlightedText text={safeTitle} query={query} />
@@ -210,7 +223,7 @@ function RunRow({ run, query }: RunRowProps) {
   )
 }
 
-function RunCard({ run, query }: RunRowProps) {
+function RunCard({ run, query, linkBase }: RunRowProps) {
   // Same null-safety as RunRow — mobile card stack reuses the
   // same fallback rules.
   const safeTitle = run.title && run.title.trim() !== '' ? run.title : 'untitled'
@@ -218,7 +231,7 @@ function RunCard({ run, query }: RunRowProps) {
   const safeWinRate = Number.isFinite(run.winRate) ? run.winRate : 0
   return (
     <Link
-      to={`/history/${encodeURIComponent(safeTitle)}`}
+      to={`${linkBase}${encodeURIComponent(safeTitle)}`}
       className="training-run-card card"
     >
       <div className="training-run-card-row-1">
