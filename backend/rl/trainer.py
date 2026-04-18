@@ -88,6 +88,11 @@ class TrainingManager:
         self._experiment_id: str = ""
         self._bot_level: int = 1
         self._hyperparams: dict[str, Any] = {}
+        # Human title + its filesystem slug for this run. Both are set
+        # by start() before the thread kicks off; callbacks that tag
+        # result/frame payloads read them off this object at emit time.
+        self._title: str = ""
+        self._slug: str = "run"
         self._started_at: float = 0.0
         # ISO-8601 start timestamp surfaced by /api/training/status; None
         # until the first start() call. Kept separate from ``_started_at``
@@ -102,14 +107,28 @@ class TrainingManager:
         bot_level: int = 1,
         total_timesteps: int = 2_000_000,
         n_envs: int = 8,
+        title: str = "",
+        slug: str = "",
     ) -> str:
-        """Start a new training experiment. Returns experiment_id."""
+        """Start a new training experiment. Returns experiment_id.
+
+        ``title`` / ``slug`` come from ``title_service.allocate_title`` +
+        ``slugify`` at the WS handler layer — the manager takes whatever
+        is handed in and stores it for downstream tagging. An empty
+        title is permitted at this layer (legacy / test callers); the
+        slug falls back to ``"run"`` via the title service.
+        """
         if self.status == "running":
             raise RuntimeError("Training is already running")
 
         self._experiment_id = str(uuid.uuid4())
         self._bot_level = bot_level
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
+        # Title + slug set BEFORE the thread starts so the first demo-
+        # tick + result-drain both see them. Slug defaults keep legacy
+        # tests that don't supply a title compiling.
+        self._title = title or ""
+        self._slug = slug or "run"
         self._stop_event.clear()
         self._pause_event.clear()
         self.current_step = 0
@@ -397,6 +416,7 @@ class TrainingManager:
                     experiment_id=self._experiment_id,
                     model_dir=self.model_dir,
                     save_interval=hp.get("checkpoint_interval", 10000),
+                    slug=self._slug,
                 ),
                 LiveFrameCallback(
                     frames_queue=self.frames_queue,
@@ -439,12 +459,20 @@ class TrainingManager:
                 pass
 
     def _save_final_checkpoint(self) -> None:
-        """Save a final checkpoint with the label 'final'."""
+        """Save a final checkpoint — slug-prefixed per BE-T2.
+
+        Filename: ``{slug}__{exp8}__final.zip``. The legacy
+        ``final.zip`` name stays forever-resolvable via the
+        ``_find_latest_checkpoint`` glob below, which picks up any
+        ``*.zip`` in the experiment directory.
+        """
         if self._model is None:
             return
         checkpoint_dir = Path(self.model_dir) / self._experiment_id
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        self._model.save(str(checkpoint_dir / "final"))
+        exp8 = (self._experiment_id or "unknown0")[:8]
+        name = f"{self._slug or 'run'}__{exp8}__final"
+        self._model.save(str(checkpoint_dir / name))
 
     def _find_latest_checkpoint(self) -> str | None:
         """Find the latest checkpoint .zip for the current experiment."""

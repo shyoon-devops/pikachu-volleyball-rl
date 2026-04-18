@@ -107,6 +107,53 @@ describe('BatchTabBar', () => {
     expect(onSelect).toHaveBeenCalledWith(1)
   })
 
+  it('jumps rows via ↑ / ↓ keyboard (FC-R6A wrap layout)', () => {
+    // jsdom doesn't evaluate media-query-driven --batch-cols, so the
+    // handler falls back to 4 cols. With nEnvs=8 the grid is
+    //   row 0: [0, 1, 2, 3]
+    //   row 1: [4, 5, 6, 7]
+    // ↓ from col 2 row 0 → col 2 row 1 → id 6.
+    const onSelect = vi.fn()
+    const { rerender } = render(
+      <BatchTabBar
+        envFrames={envMap(envPayload(0, [0, 0]))}
+        nEnvs={8}
+        activeEnvId={2}
+        onSelect={onSelect}
+      />,
+    )
+    fireEvent.keyDown(window, { code: 'ArrowDown' })
+    expect(onSelect).toHaveBeenLastCalledWith(6)
+
+    // Parent advances activeEnvId; ↑ should go back up a row.
+    rerender(
+      <BatchTabBar
+        envFrames={envMap(envPayload(0, [0, 0]))}
+        nEnvs={8}
+        activeEnvId={6}
+        onSelect={onSelect}
+      />,
+    )
+    fireEvent.keyDown(window, { code: 'ArrowUp' })
+    expect(onSelect).toHaveBeenLastCalledWith(2)
+  })
+
+  it('wraps ↑ from the top row onto the last row, preserving column', () => {
+    // activeEnvId=1 (row 0 col 1, 4-col grid). ↑ computes 1 - 4 = -3,
+    // then `((-3 % 8) + 8) % 8 = 5` — row 1 col 1.
+    const onSelect = vi.fn()
+    render(
+      <BatchTabBar
+        envFrames={envMap(envPayload(0, [0, 0]))}
+        nEnvs={8}
+        activeEnvId={1}
+        onSelect={onSelect}
+      />,
+    )
+    fireEvent.keyDown(window, { code: 'ArrowUp' })
+    expect(onSelect).toHaveBeenLastCalledWith(5)
+  })
+
   it('cycles via ← / → keyboard', () => {
     const onSelect = vi.fn()
     render(

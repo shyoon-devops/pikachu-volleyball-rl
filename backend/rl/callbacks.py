@@ -138,7 +138,15 @@ class MetricsCallback(BaseCallback):
 
 
 class CheckpointCallback(BaseCallback):
-    """Saves model checkpoints every K steps."""
+    """Saves model checkpoints every K steps.
+
+    Filename format (BE-T2, spec §6): ``{slug}__{exp8}__{step}.zip``.
+    The slug is the 40-char sanitised training title; ``exp8`` is the
+    first 8 hex chars of the experiment UUID, which guarantees
+    collision-safety even across identical slugs. A legacy-compatible
+    subdirectory per experiment_id is kept so existing
+    ``models/{exp}/*.zip`` consumers still find their checkpoints.
+    """
 
     def __init__(
         self,
@@ -146,17 +154,25 @@ class CheckpointCallback(BaseCallback):
         model_dir: str = "models",
         save_interval: int = 10000,
         verbose: int = 0,
+        slug: str = "run",
     ) -> None:
         super().__init__(verbose)
         self.experiment_id = experiment_id
         self.model_dir = model_dir
         self.save_interval = save_interval
+        # Slug defaults to ``"run"`` so legacy callers that don't pass
+        # one still produce a valid filename matching the spec fallback.
+        self.slug = slug or "run"
+        self._exp8 = (experiment_id or "unknown0")[:8]
         self._checkpoint_dir = Path(model_dir) / experiment_id
         self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     def _on_step(self) -> bool:
         if self.num_timesteps % self.save_interval == 0:
-            path = self._checkpoint_dir / f"{self.num_timesteps}"
+            # SB3 appends .zip on save; pass the base filename so the
+            # final file lands at "{slug}__{exp8}__{step}.zip" on disk.
+            name = f"{self.slug}__{self._exp8}__{self.num_timesteps}"
+            path = self._checkpoint_dir / name
             self.model.save(str(path))
         return True
 
@@ -282,6 +298,12 @@ class EnvResultCallback(BaseCallback):
             str(getattr(mgr, "_experiment_id", "") or "") if mgr is not None else ""
         )
         bot_level = int(getattr(mgr, "_bot_level", 1)) if mgr is not None else 1
+        title = str(getattr(mgr, "_title", "") or "") if mgr is not None else ""
+        # Episode counter snapshot at drain time (BE-T6). All env games
+        # drained on this tick share the same counter value — episode
+        # granularity in SB3 is per rollout, not per env, so that's
+        # semantically correct. 0 when the manager isn't wired.
+        episode = int(getattr(mgr, "current_episode", 0) or 0) if mgr is not None else 0
 
         for env_id, results in enumerate(per_env):
             if not results:
@@ -301,6 +323,10 @@ class EnvResultCallback(BaseCallback):
                     # env_id stringified so "demo" and "0".."7" share the
                     # same column in /api/games + Mongo index.
                     "env_id": str(env_id),
+                    # Title denormalised onto every game row (BE-T1).
+                    "title": title,
+                    # Episode counter at game save-time (BE-T6).
+                    "episode": episode,
                 }
                 _safe_enqueue(self.loop, self.results_queue, payload)
         return True
@@ -368,9 +394,11 @@ class LiveFrameCallback(BaseCallback):
         if self._manager is not None:
             current_bot_level = int(getattr(self._manager, "_bot_level", self.bot_level))
             current_experiment_id = str(getattr(self._manager, "_experiment_id", "") or "")
+            current_title = str(getattr(self._manager, "_title", "") or "")
         else:
             current_bot_level = self.bot_level
             current_experiment_id = ""
+            current_title = ""
 
         # Replay viewer needs the full pikavolley.js display state machine —
         # slow-motion on score, 5f fade-out, 30f ready-message ramp, 211f
@@ -462,6 +490,17 @@ class LiveFrameCallback(BaseCallback):
             # Tag this as the standalone demo so BE-A2 can distinguish
             # demo results from parallel-env gradient games in /api/games.
             "env_id": "demo",
+            # Title snapshot (BE-T1): denormalised so later renames
+            # don't orphan historical rows. Empty string for runs
+            # started before title support landed.
+            "title": current_title,
+            # Episode counter at demo-save time (BE-T6). Read off the
+            # manager (the same counter /api/training/status surfaces
+            # and MetricsCallback appends to). 0 when the manager isn't
+            # wired or is freshly started.
+            "episode": int(
+                getattr(self._manager, "current_episode", 0) or 0
+            ) if self._manager is not None else 0,
         }
         _safe_enqueue(self.loop, self.results_queue, result)
 

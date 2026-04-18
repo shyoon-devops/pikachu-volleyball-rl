@@ -1,10 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { BatchTabBar } from '../game/BatchTabBar'
+import { ErrorBoundary } from '../ErrorBoundary'
 import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
+import type { TitleValidationState } from './TitleInput'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
@@ -26,10 +29,22 @@ import {
 } from '../../lib/hyperparams'
 import './Dashboard.css'
 
-/** Default env count. BE's training run defaults to 8 parallel envs;
- *  this value drives the BatchTabBar when `/api/training/status` hasn't
- *  surfaced a different count yet. Spec §1 supports 1..16. */
+/**
+ * Baseline env count before WS data arrives or when the user hasn't
+ * yet started a training run. Spec supports 1..16; 8 matches BE's
+ * training run default and the HyperparamForm's baseline for n_envs.
+ *
+ * Effective count is `max(baseline, params.n_envs, observed+1)` —
+ * see `effectiveNEnvs` below. The derivation lives FE-side because
+ * `/api/training/status` doesn't expose `n_envs` today;
+ * [BE-WAITING] adding `"n_envs": self.manager._n_envs` to
+ * `backend/app/services/training_service.py::status()` would let us
+ * drop the observed-map derivation. For now the observed path
+ * catches any count the user configured, including values above the
+ * form default (n_envs=16 when the user bumps it).
+ */
 const DEFAULT_N_ENVS = 8
+const MAX_N_ENVS = 16
 /** Matches the 180ms canvas crossfade per Designer spec §3. */
 const CANVAS_FADE_MS = 180
 
@@ -47,6 +62,24 @@ export function Dashboard() {
   // dispatcher carries it over into training:start when the payload
   // omits ``bot_level`` (schemas.py:92, handlers.py:131-135).
   const [params, setParams] = useState<Hyperparams>(DEFAULT_HYPERPARAMS)
+
+  /**
+   * Title for the next training run (FC-R6G, Designer spec c77baa0b
+   * as revised by 1bc882ab). Empty is valid — BE auto-generates.
+   * Submit is gated on the form's debounced duplicate check — a
+   * user-typed duplicate or over-length title blocks; empty and
+   * "checking" states are both submit-enabled.
+   */
+  const [title, setTitle] = useState('')
+  const [titleValidation, setTitleValidation] = useState<TitleValidationState>({ kind: 'ok' })
+
+  /**
+   * Track the prior status.title so we can toast when BE echoes a
+   * new value (either our input or an auto-generated name). Echo
+   * lands on the `training:status` broadcast right after
+   * `training:start` is accepted.
+   */
+  const lastBroadcastTitleRef = useRef<string | null | undefined>(undefined)
 
   /**
    * Currently-selected env for the batch tab bar + canvas mirror.
@@ -69,6 +102,33 @@ export function Dashboard() {
     if (envFrame?.frame) return envFrame.frame
     return latestFrame
   }, [envFrames, activeEnvId, latestFrame])
+
+  /**
+   * Effective env count = max of:
+   *   - baseline (DEFAULT_N_ENVS)
+   *   - user's configured form value (params.n_envs)
+   *   - observed envFrames max id + 1 (catches runs where user
+   *     bumped n_envs beyond the form default, or where BE
+   *     dispatches more envs than the status payload suggests)
+   *
+   * Clamped to MAX_N_ENVS (spec ceiling, 16). Without this FC-R6B
+   * derivation a run with n_envs=16 rendered only the first 8 chips
+   * because the old code hardcoded the baseline.
+   */
+  const effectiveNEnvs = useMemo(() => {
+    // FC-R6C defensive: `envFrames` is always `{}` out of the hook
+    // but a future refactor could nullify it accidentally.
+    // `Object.keys(undefined)` throws — the only render-error trigger
+    // a user could plausibly hit on refresh before WS data lands.
+    const source = envFrames ?? {}
+    const observed = Object.keys(source)
+      .map(Number)
+      .filter(n => Number.isFinite(n) && n >= 0)
+      .reduce((max, id) => Math.max(max, id + 1), 0)
+    const rawRequested = Number(params?.n_envs)
+    const requested = Number.isFinite(rawRequested) ? rawRequested : DEFAULT_N_ENVS
+    return Math.max(1, Math.min(MAX_N_ENVS, Math.max(DEFAULT_N_ENVS, requested, observed)))
+  }, [envFrames, params])
 
   const score1 = displayFrame?.score1 ?? 0
   const score2 = displayFrame?.score2 ?? 0
@@ -117,12 +177,28 @@ export function Dashboard() {
    * here — the BE dispatcher carries `status.bot_level` forward.
    */
   const formInvalid = useMemo(
-    () => HYPERPARAM_SCHEMA.some(f => !validateHyperparam(f.key, params[f.key as HyperparamKey]).valid),
+    () =>
+      // FC-R6C defensive: coerce explicitly through `Number()` so a
+      // stale-state `params` object missing a freshly-added key
+      // (e.g. NaN → invalid) surfaces cleanly via the form's error
+      // UI instead of crashing the render.
+      HYPERPARAM_SCHEMA.some(
+        f => !validateHyperparam(f.key, Number(params?.[f.key as HyperparamKey])).valid,
+      ),
     [params],
   )
 
+  /**
+   * Title blocks submit ONLY on hard-invalid states (too-long or
+   * duplicate of a user-typed value). Empty title and in-flight
+   * "checking" states are submit-enabled — see Designer spec §1
+   * (1bc882ab revision: BE auto-generates on empty).
+   */
+  const titleBlocksSubmit =
+    titleValidation.kind === 'tooLong' || titleValidation.kind === 'duplicate'
+
   const handleStart = () => {
-    if (formInvalid) return
+    if (formInvalid || titleBlocksSubmit) return
     const hyperparamsBlob: Record<string, number> = {}
     const topLevel: Record<string, number> = {}
     for (const f of HYPERPARAM_SCHEMA) {
@@ -133,11 +209,47 @@ export function Dashboard() {
         hyperparamsBlob[f.key] = value
       }
     }
+    // FC-R6G: send title verbatim. Empty string → BE auto-generates
+    // (spec §0 rev 1bc882ab). Trim first so a user who hit space bar
+    // gets the auto-gen path. We keep the un-trimmed display value in
+    // the form state so the cursor position doesn't jump mid-type.
+    const wireTitle = title.trim()
     send('training:start', {
       ...topLevel,
       hyperparams: hyperparamsBlob,
+      title: wireTitle,
     })
   }
+
+  /**
+   * Toast when BE echoes the final title on the `training:status`
+   * broadcast after Start. The echo carries either the user's input
+   * (validated + accepted) or an auto-generated `run-{adj}-{noun}-
+   * {4hex}` — either way the user learns what their run is named.
+   *
+   * Matching via the `lastBroadcastTitleRef`: record undefined on
+   * first observation to skip the initial REST-hydration path (no
+   * toast on page load), then fire on any id transition to a new
+   * non-empty title.
+   */
+  useEffect(() => {
+    const incoming = status.title ?? null
+    const prev = lastBroadcastTitleRef.current
+    if (prev === undefined) {
+      lastBroadcastTitleRef.current = incoming
+      return
+    }
+    if (incoming && incoming !== prev) {
+      lastBroadcastTitleRef.current = incoming
+      // eslint-disable-next-line no-console
+      console.info(`[training] 학습 시작: ${incoming}`)
+      // Full toast UX lives in a separate component; surfacing via
+      // console for now keeps R6G scoped to data flow. The
+      // DESIGN-HYPERPARAM-TOAST follow-up owns visible notification.
+    } else if (incoming !== prev) {
+      lastBroadcastTitleRef.current = incoming
+    }
+  }, [status.title])
 
   return (
     <div className="dashboard">
@@ -151,33 +263,48 @@ export function Dashboard() {
           onStart={handleStart}
         />
 
-        <div
-          className={`dashboard-game-wrapper${canvasFading ? ' batch-canvas-fading' : ''}`}
-          role="tabpanel"
-          aria-labelledby={`batch-tab-${activeEnvId}`}
-          aria-label={`Live game canvas — Env ${activeEnvId}`}
-        >
-          <GameCanvas gameState={displayFrame} />
-          <GameOverlay score1={score1} score2={score2} />
-          {!displayFrame && status.state === 'running' && (
-            <div className="dashboard-game-waiting" role="status" aria-live="polite">
-              Waiting for game frames...
-            </div>
-          )}
-        </div>
+        {/*
+          Local ErrorBoundary (FC-R6C, 2026-04-18): a refresh
+          before any WS frame lands occasionally threw inside the
+          canvas + batch-tab subtree ("Something unexpected..."
+          message users reported). Global ErrorBoundary blanked
+          the whole page; this local one contains any render
+          failure so the controls + metrics + recent-games
+          surfaces stay usable. The user can hit "Try again" on
+          the boundary to remount just the canvas.
+        */}
+        <ErrorBoundary>
+          <div
+            className={`dashboard-game-wrapper${canvasFading ? ' batch-canvas-fading' : ''}`}
+            role="tabpanel"
+            aria-labelledby={`batch-tab-${activeEnvId}`}
+            aria-label={`Live game canvas — Env ${activeEnvId}`}
+          >
+            <GameCanvas gameState={displayFrame} />
+            <GameOverlay score1={score1} score2={score2} />
+            {!displayFrame && status.state === 'running' && (
+              <div className="dashboard-game-waiting" role="status" aria-live="polite">
+                Waiting for game frames...
+              </div>
+            )}
+          </div>
 
-        <BatchTabBar
-          envFrames={envFrames}
-          nEnvs={DEFAULT_N_ENVS}
-          activeEnvId={activeEnvId}
-          onSelect={handleEnvSelect}
-        />
+          <BatchTabBar
+            envFrames={envFrames ?? {}}
+            nEnvs={effectiveNEnvs}
+            activeEnvId={activeEnvId}
+            onSelect={handleEnvSelect}
+          />
+        </ErrorBoundary>
 
         {isStopped && (
           <HyperparamForm
             params={params}
             onParamsChange={setParams}
             disabled={connectionState !== 'connected'}
+            title={title}
+            onTitleChange={setTitle}
+            onTitleValidationChange={setTitleValidation}
           />
         )}
       </section>
@@ -216,19 +343,27 @@ export function Dashboard() {
                       top-to-bottom ordering — dropping it kills the
                       adjacency at its source without loss of information.
                     */}
-                    {[
-                      'Time',
-                      'Env',
-                      'Episode',
-                      'Bot Level',
-                      'Score',
-                      'Winner',
-                      'Frames',
-                      'Rallies',
-                      'Avg Rally',
-                      'Experiment',
-                    ].map(h => (
-                      <th key={h} scope="col">{h}</th>
+                    {([
+                      ['Time'],
+                      // FC-R6G (2026-04-18): GameRecord.title (BE T1,
+                      // commit a7351e57) carries the human training
+                      // label. Legacy rows render "—".
+                      ['Title'],
+                      ['Env'],
+                      // FC-R6D (2026-04-18): em-dash values are
+                      // BE-WAITING — the field isn't on
+                      // GameRecord yet. Surface a tooltip so users
+                      // understand the column isn't broken.
+                      ['Episode', 'Pending BE support — field not yet saved per game'],
+                      ['Bot Level'],
+                      ['Score'],
+                      ['Winner'],
+                      ['Frames'],
+                      ['Rallies'],
+                      ['Avg Rally'],
+                      ['Experiment'],
+                    ] as Array<[string, string?]>).map(([h, tip]) => (
+                      <th key={h} scope="col" title={tip}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -236,6 +371,23 @@ export function Dashboard() {
                   {recentGames.slice(0, 20).map((g) => (
                     <tr key={g.id}>
                       <td>{formatKstDateTime(g.timestamp)}</td>
+                      <td
+                        className="recent-games-title-cell"
+                        title={g.title ?? undefined}
+                      >
+                        {g.title && g.title.trim() !== '' ? (
+                          // R6H spec §0: Recent Games rows deep-link
+                          // to the level-2 drill-down for their run.
+                          <Link
+                            to={`/history/${encodeURIComponent(g.title)}`}
+                            className="recent-games-title-link"
+                          >
+                            {g.title}
+                          </Link>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td>
                         <span
                           className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}

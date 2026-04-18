@@ -202,6 +202,26 @@ describe('Dashboard loading state', () => {
     expect(payload).not.toHaveProperty('gamma')
   })
 
+  // ── FC-R6G: title in training:start payload ──
+  it('training:start payload includes a (possibly empty) title field', () => {
+    // BE T1 (a7351e57) accepts `title: str | None`; empty triggers
+    // BE auto-gen. FE sends verbatim without gating on empty.
+    const send = vi.fn()
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      send,
+    })
+    renderDashboard()
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+    const [, payload] = send.mock.calls[0] as [string, Record<string, unknown>]
+    // Title key present on the outer payload (not nested in hyperparams).
+    expect(payload).toHaveProperty('title')
+    expect(typeof payload.title).toBe('string')
+    // Default form state has no user input → empty string allowed.
+    expect(payload.title).toBe('')
+  })
+
   it('does not show the skeleton when reconnecting mid-session with data present', () => {
     resetMockState({
       connectionState: 'connecting',

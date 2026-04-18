@@ -28,6 +28,7 @@ from backend.app.services.game_service import GameService
 from backend.app.services.indexes import ensure_indexes
 from backend.app.services.metrics_service import MetricsService
 from backend.app.services.replay_service import ReplayService
+from backend.app.services.title_service import TrainingRunsService
 from backend.app.services.training_service import TrainingServiceWrapper
 from backend.app.ws.handlers import (
     env_frames_push_loop,
@@ -68,6 +69,11 @@ async def lifespan(app: FastAPI):
     app.state.metrics_service = MetricsService(db)
     app.state.replay_service = ReplayService(replay_dir=replay_dir, max_count=max_replays)
     app.state.training_service = TrainingServiceWrapper(model_dir=model_dir, replay_dir=replay_dir)
+    # Title-scoped run registry (BE-T1). Attached to the training service
+    # so the WS handler can reach it without another app_state lookup.
+    training_runs_service = TrainingRunsService(db)
+    app.state.training_runs_service = training_runs_service
+    app.state.training_service.runs_service = training_runs_service
     app.state.eval_service = EvalServiceWrapper(db)
     app.state.ws_manager = ConnectionManager()
 

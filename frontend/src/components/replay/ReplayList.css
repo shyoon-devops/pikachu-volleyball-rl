@@ -378,3 +378,19 @@
   color: var(--color-text-muted);
   padding: 2px 4px;
 }
+
+/* FC-R6G Title cell — matches Dashboard's Recent Games treatment. */
+.replay-list-title-cell {
+  min-width: 140px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .replay-list-title-cell {
+    min-width: 100px;
+    max-width: 140px;
+  }
+}

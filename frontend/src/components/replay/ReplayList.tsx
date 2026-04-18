@@ -68,7 +68,34 @@ function parseEnvParam(raw: string | null): string | null {
  * banner only appears for a games-fetch failure, since that's the
  * only data the table can't render around.
  */
-export function ReplayList() {
+export interface ReplayListProps {
+  /**
+   * Scope the page to a single training run (R6H, spec §2). When
+   * set, the component fetches `getGames(page, limit, titleFilter)`
+   * so BE filters server-side. Mostly used by
+   * `TrainingRunDetail` — when omitted the component behaves as
+   * the legacy unified history list.
+   */
+  titleFilter?: string
+  /**
+   * Hide the Title column (R6H, §2b — redundant once the scope is
+   * already a single run). Defaults to false (unfiltered list
+   * keeps the column).
+   */
+  hideTitleColumn?: boolean
+  /**
+   * Override the "no games" empty-state message. Level-2 uses
+   * "이 학습에는 아직 기록된 게임이 없습니다." per §2c; unfiltered
+   * view keeps the generic "No games recorded yet." default.
+   */
+  emptyStateOverride?: string
+}
+
+export function ReplayList({
+  titleFilter,
+  hideTitleColumn = false,
+  emptyStateOverride,
+}: ReplayListProps = {}) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [games, setGames] = useState<GameRecord[]>([])
@@ -106,7 +133,10 @@ export function ReplayList() {
     // `.catch(() => [])` on the replays call lets games still render
     // when the filesystem inventory endpoint hiccups.
     Promise.all([
-      getGames(page, PAGE_LIMIT),
+      // R6H: `titleFilter` forwards to BE `GET /api/games?title=X`
+      // (T5 fc38f3d8). When omitted the endpoint returns the
+      // unified list.
+      getGames(page, PAGE_LIMIT, titleFilter),
       getAvailableReplays().catch(() => [] as ReplayInfo[]),
     ])
       .then(([gamesRes, replaysRes]) => {
@@ -124,7 +154,7 @@ export function ReplayList() {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [page])
+  }, [page, titleFilter])
 
   /**
    * Build a `Map<gameId, ReplayInfo>` once per replays change so the
@@ -150,6 +180,44 @@ export function ReplayList() {
     // BE emits env_id as a string; filter comparison is string===string.
     return games.filter(g => g.envId === envFilter)
   }, [games, envFilter])
+
+  /**
+   * Env id options for the filter dropdown. Combines:
+   *   - The DEFAULT_N_ENVS baseline (ENV 0..7) so the dropdown is
+   *     never emptier than expected on an empty page.
+   *   - Every numeric env_id actually observed in the fetched games
+   *     list, so runs with n_envs > 8 show their upper slots
+   *     (FC-R6E user report, 2026-04-18).
+   * Demo is appended separately — BE's "demo" string sits outside
+   * the numeric range.
+   *
+   * Sorted ascending by numeric value so the dropdown reads
+   * naturally. [BE-WAITING] Adding `n_envs` to
+   * `/api/training/status` would let us pick up the run-configured
+   * count even when zero games have landed yet; until then the
+   * baseline covers that empty-page window.
+   */
+  const envOptions = useMemo(() => {
+    const ids = new Set<number>()
+    for (let i = 0; i < DEFAULT_N_ENVS; i++) ids.add(i)
+    for (const g of games) {
+      if (g.envId === undefined || g.envId === null) continue
+      const n = Number(g.envId)
+      if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) {
+        ids.add(n)
+      }
+    }
+    return Array.from(ids).sort((a, b) => a - b)
+  }, [games])
+
+  /** True when at least one fetched game is tagged `"demo"`. */
+  const demoSeen = useMemo(
+    () => games.some(g => g.envId === 'demo'),
+    [games],
+  )
+
+  /** Column count — shrinks by 1 when the Title column is hidden. */
+  const columnCount = hideTitleColumn ? 11 : 12
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT))
 
@@ -178,12 +246,16 @@ export function ReplayList() {
             aria-label="Filter by parallel env"
           >
             <option value="all">All</option>
-            {Array.from({ length: DEFAULT_N_ENVS }, (_, i) => (
+            {envOptions.map(i => (
               <option key={i} value={String(i)}>ENV {i}</option>
             ))}
-            {/* BE emits "demo" for the standalone LiveFrameCallback game;
-                surface it in the filter so users can slice demo vs parallel. */}
-            <option value="demo">DEMO</option>
+            {/*
+              Demo option — always show it when any game in the
+              current page has env_id === "demo" (so it's discoverable
+              for mixed-mode runs); keep it hidden otherwise so
+              parallel-only runs don't see a dangling option.
+            */}
+            {demoSeen && <option value="demo">DEMO</option>}
           </select>
         </label>
         {envFilter !== null && (
@@ -197,34 +269,42 @@ export function ReplayList() {
         <table className="replay-list-table">
           <thead>
             <tr>
-              {[
-                'Date',
-                'Env',
-                'Episode',
-                'Bot Level',
-                'Score',
-                'Winner',
-                'Frames',
-                'Rallies',
-                'Avg Rally',
-                'Experiment',
-                'Replay',
-              ].map(h => (
-                <th key={h} scope="col">{h}</th>
+              {([
+                ['Date'],
+                // FC-R6G: Title column (Dashboard's Recent Games
+                // mirror). Redundant in level-2 drill-down where
+                // the page is already scoped to one run — hidden
+                // there via the `hideTitleColumn` prop (R6H §2b).
+                ...(hideTitleColumn ? [] : [['Title'] as [string]]),
+                ['Env'],
+                // FC-R6D: em-dash values are BE-WAITING — GameRecord
+                // has no `episode` field yet. Tooltip explains to
+                // avoid "this is broken" confusion.
+                ['Episode', 'Pending BE support — field not yet saved per game'],
+                ['Bot Level'],
+                ['Score'],
+                ['Winner'],
+                ['Frames'],
+                ['Rallies'],
+                ['Avg Rally'],
+                ['Experiment'],
+                ['Replay'],
+              ] as Array<[string, string?]>).map(([h, tip]) => (
+                <th key={h} scope="col" title={tip}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={11} className="replay-list-empty">Loading...</td>
+                <td colSpan={columnCount} className="replay-list-empty">Loading...</td>
               </tr>
             ) : filteredGames.length === 0 ? (
               <tr>
-                <td colSpan={11} className="replay-list-empty empty-state">
-                  {envFilter === null
-                    ? 'No games recorded yet.'
-                    : `No games match env_id=${envFilter} on this page.`}
+                <td colSpan={columnCount} className="replay-list-empty empty-state">
+                  {envFilter !== null
+                    ? `No games match env_id=${envFilter} on this page.`
+                    : emptyStateOverride ?? 'No games recorded yet.'}
                 </td>
               </tr>
             ) : (
@@ -248,6 +328,14 @@ export function ReplayList() {
                     <td>
                       {formatKstDateTime(g.timestamp)}
                     </td>
+                    {hideTitleColumn ? null : (
+                      <td
+                        className="replay-list-title-cell"
+                        title={g.title ?? undefined}
+                      >
+                        {g.title && g.title.trim() !== '' ? g.title : '—'}
+                      </td>
+                    )}
                     <td>
                       <span
                         className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
