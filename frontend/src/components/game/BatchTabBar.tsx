@@ -157,6 +157,38 @@ export function BatchTabBar({
     return () => window.removeEventListener('keydown', onKey)
   }, [activeEnvId, clampedN, onSelect])
 
+  /**
+   * Roving tabindex / follow-focus pattern (FC-R1 user report,
+   * 2026-04-18). Without this, `:focus-visible` stays pinned on the
+   * last-clicked tab while `activeEnvId` moves via arrow keys — both
+   * the clicked tab (focus outline) AND the active tab (bottom bar +
+   * accent-dim fill) render with the same Pikachu-yellow accent, so
+   * the user sees the highlight "stuck" on the click target.
+   *
+   * Fix: whenever `activeEnvId` changes — via ANY path (click,
+   * arrow, digit) — programmatically move focus to the active tab's
+   * button. Focus ring then rides along with the active class, and
+   * only ONE tab wears accent colour at a time.
+   *
+   * `tabIndex={isActive ? 0 : -1}` on each button keeps the tablist
+   * as a single Tab stop (pressing Tab exits the bar; arrows navigate
+   * within), per the WAI-ARIA tablist authoring pattern.
+   *
+   * Guard: skip the focus move when the tablist doesn't contain the
+   * current focus (e.g. the user navigated away / hasn't interacted
+   * yet). Otherwise clicking a score elsewhere on the page would
+   * fight us for focus.
+   */
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
+  useEffect(() => {
+    const el = tabRefs.current[activeEnvId]
+    if (!el) return
+    const container = el.closest('.batch-tab-bar')
+    const active = document.activeElement
+    if (!container?.contains(active)) return
+    el.focus({ preventScroll: false })
+  }, [activeEnvId])
+
   return (
     <div
       className="batch-tab-bar"
@@ -174,12 +206,18 @@ export function BatchTabBar({
         return (
           <button
             key={id}
+            ref={el => { tabRefs.current[id] = el }}
             type="button"
             role="tab"
             aria-selected={isActive}
             aria-label={`Env ${id}, score ${score[0]} to ${score[1]}`}
             className={`batch-tab${isActive ? ' batch-tab--active' : ''}`}
             onClick={() => onSelect(id)}
+            // Roving tabindex: only the active tab is in the tab
+            // order, per the WAI-ARIA tablist pattern. Keeps Tab a
+            // single in/out action for the whole bar while arrows
+            // navigate within.
+            tabIndex={isActive ? 0 : -1}
             data-env-id={id}
           >
             <span className="batch-tab-label">ENV {id}</span>

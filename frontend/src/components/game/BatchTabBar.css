@@ -83,8 +83,20 @@
 }
 
 .batch-tab:focus-visible {
+  /* Roving-tabindex pattern moves focus with activeEnvId, so the
+     focus ring should visually coincide with the active tab. Kept as
+     accent so keyboard users see the same Pikachu-yellow signal on
+     both the bottom bar and the outline. */
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+}
+
+/* Explicit :focus-visible-on-inactive fallback: if focus ever lands
+   on an inactive tab (programmatic edge case), use the chart-purple
+   halo mentioned in the spec §4 as "recently switched-to" so the
+   accent yellow still uniquely reads as "currently active". */
+.batch-tab:not(.batch-tab--active):focus-visible {
+  outline-color: var(--color-text-secondary);
 }
 
 .batch-tab--active {
