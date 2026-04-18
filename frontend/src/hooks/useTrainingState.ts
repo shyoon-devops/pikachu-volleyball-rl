@@ -108,7 +108,7 @@ export function useTrainingStateImpl(): TrainingState {
   // because React diffs by reference.
   const [envFrames, setEnvFrames] = useState<EnvFramesMap>({})
 
-  const handleMetrics = useCallback((msg: WSMessage) => {
+  const handleMetrics = useCallback((msg: WSMessage<'training:metrics'>) => {
     const payload = snakeToCamel<TrainingMetrics>(msg.payload)
     setMetrics(prev => {
       const next = [...prev, payload]
@@ -145,7 +145,7 @@ export function useTrainingStateImpl(): TrainingState {
     }))
   }, [])
 
-  const handleFrame = useCallback((msg: WSMessage) => {
+  const handleFrame = useCallback((msg: WSMessage<'training:frame'>) => {
     setLatestFrame(snakeToCamel<GameState>(msg.payload))
   }, [])
 
@@ -157,13 +157,13 @@ export function useTrainingStateImpl(): TrainingState {
    * others — this is the contract the BE relies on (a slow env can
    * still show its last frame while its siblings tick forward).
    */
-  const handleEnvFrame = useCallback((msg: WSMessage) => {
+  const handleEnvFrame = useCallback((msg: WSMessage<'training:env_frame'>) => {
     const payload = snakeToCamel<EnvFramePayload>(msg.payload)
     if (typeof payload?.envId !== 'number') return
     setEnvFrames(prev => ({ ...prev, [payload.envId]: payload }))
   }, [])
 
-  const handleStatus = useCallback((msg: WSMessage) => {
+  const handleStatus = useCallback((msg: WSMessage<'training:status'>) => {
     const incoming = snakeToCamel<Partial<TrainingStatus>>(msg.payload)
     setStatus(prev => ({
       ...prev,
@@ -172,7 +172,7 @@ export function useTrainingStateImpl(): TrainingState {
     }))
   }, [])
 
-  const handleGameResult = useCallback((msg: WSMessage) => {
+  const handleGameResult = useCallback((msg: WSMessage<'game:result'>) => {
     const record = snakeToCamel<GameRecord>(msg.payload)
     // R1 fallback (2026-04-18): WS `game:result` payloads ship without
     // `timestamp` because BE enqueues a raw result dict in
