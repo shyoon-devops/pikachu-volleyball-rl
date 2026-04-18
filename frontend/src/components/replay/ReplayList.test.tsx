@@ -361,10 +361,67 @@ describe('ReplayList — env filter + chip column (FC-history, Designer §6)', (
     )
 
     await waitFor(() => {
-      expect(screen.getByText('DEMO')).toBeInTheDocument()
+      // After FC-R6E the dropdown only renders a DEMO option when the
+      // page has a game tagged "demo" — and the row's env chip also
+      // reads "DEMO". So there are TWO "DEMO" texts on a matched
+      // page; use `getAllByText` to avoid the ambiguity error.
+      expect(screen.getAllByText('DEMO').length).toBeGreaterThanOrEqual(1)
     })
     // ENV 0 row should be filtered OUT.
     expect(screen.queryByLabelText('Env 0')).toBeNull()
+  })
+})
+
+describe('ReplayList — env filter options dynamic max (FC-R6E, 2026-04-18)', () => {
+  it('extends ENV options past 7 when games reference higher env_ids', async () => {
+    getGames.mockResolvedValue({
+      data: [
+        gameRow({ id: 'm1', gameId: 'u1', envId: '0' }),
+        gameRow({ id: 'm2', gameId: 'u2', envId: '12' }),
+        gameRow({ id: 'm3', gameId: 'u3', envId: '15' }),
+      ],
+      total: 3,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    const select = await screen.findByLabelText('Filter by parallel env')
+    // Baseline ENV 0..7 + observed 12, 15 = 10 options + All.
+    const options = (select as HTMLSelectElement).options
+    const values = Array.from(options).map(o => o.value)
+    expect(values).toContain('0')
+    expect(values).toContain('7')
+    expect(values).toContain('12')
+    expect(values).toContain('15')
+    // No DEMO option because no game has env_id="demo" on this page.
+    expect(values).not.toContain('demo')
+  })
+
+  it('omits the DEMO option when no game on the page is tagged demo', async () => {
+    getGames.mockResolvedValue({
+      data: [gameRow({ id: 'm1', gameId: 'u1', envId: '0' })],
+      total: 1,
+      page: 1,
+      limit: 20,
+    })
+    getAvailableReplays.mockResolvedValue([])
+
+    render(
+      <MemoryRouter>
+        <ReplayList />
+      </MemoryRouter>,
+    )
+
+    const select = await screen.findByLabelText('Filter by parallel env')
+    const values = Array.from((select as HTMLSelectElement).options).map(o => o.value)
+    expect(values).not.toContain('demo')
   })
 })
 

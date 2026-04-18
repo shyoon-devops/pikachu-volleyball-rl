@@ -151,6 +151,41 @@ export function ReplayList() {
     return games.filter(g => g.envId === envFilter)
   }, [games, envFilter])
 
+  /**
+   * Env id options for the filter dropdown. Combines:
+   *   - The DEFAULT_N_ENVS baseline (ENV 0..7) so the dropdown is
+   *     never emptier than expected on an empty page.
+   *   - Every numeric env_id actually observed in the fetched games
+   *     list, so runs with n_envs > 8 show their upper slots
+   *     (FC-R6E user report, 2026-04-18).
+   * Demo is appended separately — BE's "demo" string sits outside
+   * the numeric range.
+   *
+   * Sorted ascending by numeric value so the dropdown reads
+   * naturally. [BE-WAITING] Adding `n_envs` to
+   * `/api/training/status` would let us pick up the run-configured
+   * count even when zero games have landed yet; until then the
+   * baseline covers that empty-page window.
+   */
+  const envOptions = useMemo(() => {
+    const ids = new Set<number>()
+    for (let i = 0; i < DEFAULT_N_ENVS; i++) ids.add(i)
+    for (const g of games) {
+      if (g.envId === undefined || g.envId === null) continue
+      const n = Number(g.envId)
+      if (Number.isFinite(n) && Number.isInteger(n) && n >= 0) {
+        ids.add(n)
+      }
+    }
+    return Array.from(ids).sort((a, b) => a - b)
+  }, [games])
+
+  /** True when at least one fetched game is tagged `"demo"`. */
+  const demoSeen = useMemo(
+    () => games.some(g => g.envId === 'demo'),
+    [games],
+  )
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT))
 
   const changePage = (next: number) => {
@@ -178,12 +213,16 @@ export function ReplayList() {
             aria-label="Filter by parallel env"
           >
             <option value="all">All</option>
-            {Array.from({ length: DEFAULT_N_ENVS }, (_, i) => (
+            {envOptions.map(i => (
               <option key={i} value={String(i)}>ENV {i}</option>
             ))}
-            {/* BE emits "demo" for the standalone LiveFrameCallback game;
-                surface it in the filter so users can slice demo vs parallel. */}
-            <option value="demo">DEMO</option>
+            {/*
+              Demo option — always show it when any game in the
+              current page has env_id === "demo" (so it's discoverable
+              for mixed-mode runs); keep it hidden otherwise so
+              parallel-only runs don't see a dangling option.
+            */}
+            {demoSeen && <option value="demo">DEMO</option>}
           </select>
         </label>
         {envFilter !== null && (
