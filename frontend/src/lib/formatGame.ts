@@ -97,3 +97,19 @@ export function formatExperimentIdShort(id: string | null | undefined): string {
   if (!id) return '—'
   return id.length > 8 ? id.slice(0, 8) : id
 }
+
+/**
+ * Render the History page's env chip. ENV 0..15 map to `ENV N`;
+ * missing env id renders as an em-dash so the column stays tidy for
+ * demo / single-env rows (and for any game saved before BE started
+ * emitting the field).
+ *
+ * Stays a stringly helper (not a React component) so it can sit next
+ * to the other formatGame helpers and reuse the same testing setup.
+ */
+export function formatEnvId(envId: number | null | undefined): string {
+  if (envId === null || envId === undefined || Number.isNaN(envId)) {
+    return '—'
+  }
+  return `ENV ${envId}`
+}

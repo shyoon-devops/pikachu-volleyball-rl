@@ -18,6 +18,7 @@ import type {
   TrainingStatus,
   GameRecord,
   ConnectionState,
+  EnvFramePayload,
   WSClientMessageType,
   WSMessage,
 } from '../lib/types'
@@ -48,6 +49,16 @@ const MAX_RECENT_GAMES = 100
  */
 const SEED_RECENT_GAMES = 20
 
+/**
+ * Per-env snapshot map keyed by `env_id`. Populated from WS
+ * `training:env_frame` broadcasts (BE commit 65dd7336); each parallel
+ * SubprocVecEnv worker contributes one entry, refreshed every
+ * `broadcast_interval` vec steps. The Dashboard's BatchTabBar reads
+ * this map for chip score + state-dot rendering; the GameCanvas
+ * mirrors the entry for the currently-selected `envId`.
+ */
+export type EnvFramesMap = Record<number, EnvFramePayload>
+
 export interface TrainingState {
   connectionState: ConnectionState
   reconnectAttempt: number
@@ -55,6 +66,7 @@ export interface TrainingState {
   metrics: TrainingMetrics[]
   latestFrame: GameState | null
   recentGames: GameRecord[]
+  envFrames: EnvFramesMap
   send: (type: WSClientMessageType, payload?: unknown) => void
 }
 
@@ -80,6 +92,10 @@ export function useTrainingStateImpl(): TrainingState {
   const [metrics, setMetrics] = useState<TrainingMetrics[]>([])
   const [latestFrame, setLatestFrame] = useState<GameState | null>(null)
   const [recentGames, setRecentGames] = useState<GameRecord[]>([])
+  // Per-env live snapshots, keyed on env_id. Replacing the entry is
+  // O(1); the BatchTabBar only re-renders chips whose entries changed
+  // because React diffs by reference.
+  const [envFrames, setEnvFrames] = useState<EnvFramesMap>({})
 
   const handleMetrics = useCallback((msg: WSMessage) => {
     const payload = snakeToCamel<TrainingMetrics>(msg.payload)
@@ -120,6 +136,20 @@ export function useTrainingStateImpl(): TrainingState {
 
   const handleFrame = useCallback((msg: WSMessage) => {
     setLatestFrame(snakeToCamel<GameState>(msg.payload))
+  }, [])
+
+  /**
+   * `training:env_frame` arrives once per parallel env per broadcast
+   * tick (BE commit 65dd7336). We keep the latest snapshot per
+   * `env_id` in a map so the BatchTabBar can render all chips without
+   * subscribing repeatedly. Replacing one entry does NOT reset the
+   * others — this is the contract the BE relies on (a slow env can
+   * still show its last frame while its siblings tick forward).
+   */
+  const handleEnvFrame = useCallback((msg: WSMessage) => {
+    const payload = snakeToCamel<EnvFramePayload>(msg.payload)
+    if (typeof payload?.envId !== 'number') return
+    setEnvFrames(prev => ({ ...prev, [payload.envId]: payload }))
   }, [])
 
   const handleStatus = useCallback((msg: WSMessage) => {
@@ -165,11 +195,12 @@ export function useTrainingStateImpl(): TrainingState {
     const unsubs = [
       subscribe('training:metrics', handleMetrics),
       subscribe('training:frame', handleFrame),
+      subscribe('training:env_frame', handleEnvFrame),
       subscribe('training:status', handleStatus),
       subscribe('game:result', handleGameResult),
     ]
     return () => { unsubs.forEach(u => u()) }
-  }, [subscribe, handleMetrics, handleFrame, handleStatus, handleGameResult])
+  }, [subscribe, handleMetrics, handleFrame, handleEnvFrame, handleStatus, handleGameResult])
 
   // Sync authoritative training state from REST on mount and again whenever
   // the WebSocket reconnects. WS broadcasts `training:status` only when the
@@ -325,8 +356,11 @@ export function useTrainingStateImpl(): TrainingState {
       // Clear the live metrics array so the chart line restarts at
       // step 0 with no carryover, and reset the hydration gate so the
       // /timeseries REST seed re-runs against the new experiment.
+      // Also clear env frames — their scores belong to the prior run
+      // and would mislead the batch tab chips on fresh start.
       lastExperimentIdRef.current = newId
       setMetrics([])
+      setEnvFrames({})
       hydratedExpIdRef.current = null
       return
     }
@@ -419,7 +453,7 @@ export function useTrainingStateImpl(): TrainingState {
     }
   }, [wsSend])
 
-  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send }
+  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, send }
 }
 
 export const TrainingStateContext = createContext<TrainingState | null>(null)

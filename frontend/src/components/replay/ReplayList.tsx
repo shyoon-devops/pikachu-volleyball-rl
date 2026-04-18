@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getGames, getAvailableReplays } from '../../lib/api'
 import type { GameRecord, ReplayInfo } from '../../lib/types'
 import {
@@ -7,11 +7,30 @@ import {
   formatRallyCount,
   formatAvgRallyLength,
   formatExperimentIdShort,
+  formatEnvId,
 } from '../../lib/formatGame'
 import { formatKstDateTime } from '../../lib/formatTime'
 import './ReplayList.css'
 
 const PAGE_LIMIT = 20
+
+/**
+ * Default env count for the filter dropdown. Matches the
+ * `DEFAULT_N_ENVS` on the Dashboard (Designer spec §1). Hardcoded
+ * because `/api/training/status` doesn't currently expose `n_envs`;
+ * if BE adds it later, swap this for a fetched value.
+ */
+const DEFAULT_N_ENVS = 8
+
+/** URL query parameter key for the env filter (spec §6: `?env=N`). */
+const ENV_QUERY_KEY = 'env'
+
+function parseEnvParam(raw: string | null): number | null {
+  if (raw === null) return null
+  const n = Number(raw)
+  if (Number.isNaN(n) || !Number.isInteger(n) || n < 0) return null
+  return n
+}
 
 /**
  * Unified game-history view (B2, 2026-04-18).
@@ -39,12 +58,34 @@ const PAGE_LIMIT = 20
  */
 export function ReplayList() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [games, setGames] = useState<GameRecord[]>([])
   const [replays, setReplays] = useState<ReplayInfo[]>([])
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  /**
+   * Env filter sourced from the URL query (`?env=N`) so the state is
+   * shareable via copy-paste — spec §6. `null` = show all envs.
+   * Writes go back through `setSearchParams` with `replace: true` so
+   * filter toggles don't clutter the browser history.
+   */
+  const envFilter = parseEnvParam(searchParams.get(ENV_QUERY_KEY))
+
+  const setEnvFilter = useCallback(
+    (next: number | null) => {
+      const params = new URLSearchParams(searchParams)
+      if (next === null) {
+        params.delete(ENV_QUERY_KEY)
+      } else {
+        params.set(ENV_QUERY_KEY, String(next))
+      }
+      setSearchParams(params, { replace: true })
+    },
+    [searchParams, setSearchParams],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -84,6 +125,19 @@ export function ReplayList() {
     return m
   }, [replays])
 
+  /**
+   * Client-side env filter. Applied AFTER the REST fetch because the
+   * BE list endpoint doesn't take an env query param today. Games
+   * with an undefined envId NEVER match a concrete filter — they
+   * only appear when the filter is "All". Keeps the pagination total
+   * accurate for the unfiltered view; the filtered-count hint shows
+   * how many rows the current page is actually rendering.
+   */
+  const filteredGames = useMemo(() => {
+    if (envFilter === null) return games
+    return games.filter(g => g.envId === envFilter)
+  }, [games, envFilter])
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT))
 
   const changePage = (next: number) => {
@@ -98,12 +152,38 @@ export function ReplayList() {
         <div className="replay-list-error alert-error">{error}</div>
       )}
 
+      <div className="replay-list-filter-bar" role="group" aria-label="Filter controls">
+        <label className="replay-list-filter-label">
+          Env
+          <select
+            className="replay-list-filter-select"
+            value={envFilter === null ? 'all' : String(envFilter)}
+            onChange={e => {
+              const v = e.target.value
+              setEnvFilter(v === 'all' ? null : Number(v))
+            }}
+            aria-label="Filter by parallel env"
+          >
+            <option value="all">All</option>
+            {Array.from({ length: DEFAULT_N_ENVS }, (_, i) => (
+              <option key={i} value={i}>ENV {i}</option>
+            ))}
+          </select>
+        </label>
+        {envFilter !== null && (
+          <span className="replay-list-filter-hint">
+            Showing {filteredGames.length} row{filteredGames.length === 1 ? '' : 's'} with env_id={envFilter}
+          </span>
+        )}
+      </div>
+
       <div className="replay-list-table-wrapper card table-scroll">
         <table className="replay-list-table">
           <thead>
             <tr>
               {[
                 'Date',
+                'Env',
                 'Bot Level',
                 'Score',
                 'Winner',
@@ -120,14 +200,18 @@ export function ReplayList() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={9} className="replay-list-empty">Loading...</td>
+                <td colSpan={10} className="replay-list-empty">Loading...</td>
               </tr>
-            ) : games.length === 0 ? (
+            ) : filteredGames.length === 0 ? (
               <tr>
-                <td colSpan={9} className="replay-list-empty empty-state">No games recorded yet.</td>
+                <td colSpan={10} className="replay-list-empty empty-state">
+                  {envFilter === null
+                    ? 'No games recorded yet.'
+                    : `No games match env_id=${envFilter} on this page.`}
+                </td>
               </tr>
             ) : (
-              games.map(g => {
+              filteredGames.map(g => {
                 // Join on `gameId` (the UUID4 used as the replay file
                 // stem). `g.id` is the Mongo ObjectId hex — unrelated
                 // to the replay filename. Falls back to `g.id` only
@@ -146,6 +230,15 @@ export function ReplayList() {
                     */}
                     <td>
                       {formatKstDateTime(g.timestamp)}
+                    </td>
+                    <td>
+                      <span
+                        className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
+                        aria-label={g.envId === undefined ? 'No env id recorded' : `Env ${g.envId}`}
+                        data-env-id={g.envId ?? ''}
+                      >
+                        {formatEnvId(g.envId)}
+                      </span>
                     </td>
                     <td>{formatBotLevel(g.botLevel)}</td>
                     <td>

@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
+import { BatchTabBar } from '../game/BatchTabBar'
 import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
@@ -17,8 +18,15 @@ import {
 import { formatKstDateTime } from '../../lib/formatTime'
 import './Dashboard.css'
 
+/** Default env count. BE's training run defaults to 8 parallel envs;
+ *  this value drives the BatchTabBar when `/api/training/status` hasn't
+ *  surfaced a different count yet. Spec §1 supports 1..16. */
+const DEFAULT_N_ENVS = 8
+/** Matches the 180ms canvas crossfade per Designer spec §3. */
+const CANVAS_FADE_MS = 180
+
 export function Dashboard() {
-  const { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, send } = useTrainingState()
+  const { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, send } = useTrainingState()
 
   // Hyperparams live at the Dashboard so the single Start button in
   // <TrainingControls /> can submit them. Do NOT re-introduce a second
@@ -32,9 +40,49 @@ export function Dashboard() {
   // omits ``bot_level`` (schemas.py:92, handlers.py:131-135).
   const [params, setParams] = useState<Hyperparams>(DEFAULT_HYPERPARAMS)
 
-  const score1 = latestFrame?.score1 ?? 0
-  const score2 = latestFrame?.score2 ?? 0
+  /**
+   * Currently-selected env for the batch tab bar + canvas mirror.
+   * Default 0. Selection is ephemeral (not persisted) — the next
+   * Start/refresh lands on ENV 0 again, matching Designer §3 intent.
+   */
+  const [activeEnvId, setActiveEnvId] = useState(0)
+  /** Triggers the 180ms canvas fade after a chip click. */
+  const [canvasFading, setCanvasFading] = useState(false)
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /**
+   * Prefer the live per-env frame when BE is broadcasting them
+   * (`training:env_frame`, commit 65dd7336). Falls back to the legacy
+   * single-frame broadcast (`training:frame`) for the standalone demo
+   * game, so runs without parallel envs still light up the canvas.
+   */
+  const displayFrame = useMemo(() => {
+    const envFrame = envFrames[activeEnvId]
+    if (envFrame?.frame) return envFrame.frame
+    return latestFrame
+  }, [envFrames, activeEnvId, latestFrame])
+
+  const score1 = displayFrame?.score1 ?? 0
+  const score2 = displayFrame?.score2 ?? 0
   const isStopped = status.state === 'stopped'
+
+  /** Kick the 180ms crossfade on active-env change. */
+  const handleEnvSelect = (envId: number) => {
+    if (envId === activeEnvId) return
+    setActiveEnvId(envId)
+    setCanvasFading(true)
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current)
+    fadeTimerRef.current = setTimeout(
+      () => setCanvasFading(false),
+      CANVAS_FADE_MS,
+    )
+  }
+
+  useEffect(() => {
+    return () => {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current)
+    }
+  }, [])
 
   // Show skeleton only on the very first connect attempt while we have no
   // data at all. After anything arrives (frame / metrics / recent games)
@@ -67,15 +115,27 @@ export function Dashboard() {
           onStart={handleStart}
         />
 
-        <div className="dashboard-game-wrapper" role="img" aria-label="Live game canvas — Pikachu Volleyball agent play">
-          <GameCanvas gameState={latestFrame} />
+        <div
+          className={`dashboard-game-wrapper${canvasFading ? ' batch-canvas-fading' : ''}`}
+          role="tabpanel"
+          aria-labelledby={`batch-tab-${activeEnvId}`}
+          aria-label={`Live game canvas — Env ${activeEnvId}`}
+        >
+          <GameCanvas gameState={displayFrame} />
           <GameOverlay score1={score1} score2={score2} />
-          {!latestFrame && status.state === 'running' && (
+          {!displayFrame && status.state === 'running' && (
             <div className="dashboard-game-waiting" role="status" aria-live="polite">
               Waiting for game frames...
             </div>
           )}
         </div>
+
+        <BatchTabBar
+          envFrames={envFrames}
+          nEnvs={DEFAULT_N_ENVS}
+          activeEnvId={activeEnvId}
+          onSelect={handleEnvSelect}
+        />
 
         {isStopped && (
           <HyperparamForm
