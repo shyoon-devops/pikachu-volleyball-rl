@@ -7,7 +7,7 @@ import {
   getEvaluationStatus,
   getEvalResults,
 } from '../../lib/api'
-import { formatKstDateTime } from '../../lib/formatTime'
+import { TimestampText } from '../shared/TimestampText'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import type { EvalResult, ModelInfo } from '../../lib/types'
 import { DeleteCheckpointsModal } from './DeleteCheckpointsModal'
@@ -639,7 +639,7 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
                     </td>
                     <td className="eval-run-detail-cell-step">{formatStep(m.step)}</td>
                     <td className="text-muted">
-                      {m.createdAt ? formatKstDateTime(m.createdAt) : '—'}
+                      <TimestampText ts={m.createdAt} />
                     </td>
                     <td className="text-muted">{formatBytes(m.sizeBytes)}</td>
                     <td
@@ -749,7 +749,7 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
                   return (
                     <tr key={`${r.timestamp ?? 'ts'}-${idx}`}>
                       <td className="text-muted">
-                        {r.timestamp ? formatKstDateTime(r.timestamp) : '—'}
+                        <TimestampText ts={r.timestamp} />
                       </td>
                       <td>L{r.botLevel}</td>
                       <td className="text-muted">{r.nGames}</td>

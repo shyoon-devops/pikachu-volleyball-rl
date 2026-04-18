@@ -1,5 +1,8 @@
 import { memo, useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
+import { EnvChip } from '../shared/EnvChip'
+import { ScoreCell } from '../shared/ScoreCell'
+import { TimestampText } from '../shared/TimestampText'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { BatchTabBar } from '../game/BatchTabBar'
@@ -17,10 +20,8 @@ import {
   formatRallyCount,
   formatAvgRallyLength,
   formatExperimentIdShort,
-  formatEnvId,
   formatEpisode,
 } from '../../lib/formatGame'
-import { formatKstDateTime } from '../../lib/formatTime'
 import {
   HYPERPARAM_SCHEMA,
   HYPERPARAM_WIRE_POSITION,
@@ -420,7 +421,7 @@ export function Dashboard() {
 const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecord }) {
   return (
     <tr>
-      <td>{formatKstDateTime(g.timestamp)}</td>
+      <td><TimestampText ts={g.timestamp} /></td>
       <td className="recent-games-title-cell" title={g.title ?? undefined}>
         {g.title && g.title.trim() !== '' ? (
           <Link
@@ -434,23 +435,11 @@ const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecor
         )}
       </td>
       <td>
-        <span
-          className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
-          aria-label={
-            g.envId === undefined ? 'No env id recorded' : `Env ${g.envId}`
-          }
-          data-env-id={g.envId ?? ''}
-        >
-          {formatEnvId(g.envId)}
-        </span>
+        <EnvChip envId={g.envId} />
       </td>
       <td className="text-muted">{formatEpisode(g.episode)}</td>
       <td>{formatBotLevel(g.botLevel)}</td>
-      <td className="score-cell">
-        <span className="score-p1">{g.score1}</span>
-        {' : '}
-        <span className="score-p2">{g.score2}</span>
-      </td>
+      <ScoreCell s1={g.score1} s2={g.score2} />
       <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
         {g.winner === 1 ? 'RL Agent' : 'Bot'}
       </td>

@@ -48,10 +48,11 @@ import {
   formatRallyCount,
   formatAvgRallyLength,
   formatExperimentIdShort,
-  formatEnvId,
   formatEpisode,
 } from '../../lib/formatGame'
-import { formatKstDateTime } from '../../lib/formatTime'
+import { EnvChip } from '../shared/EnvChip'
+import { ScoreCell } from '../shared/ScoreCell'
+import { TimestampText } from '../shared/TimestampText'
 import './ReplayList.css'
 
 const PAGE_LIMIT = 20
@@ -114,7 +115,7 @@ export interface ReplayListProps {
    * Scope the page to a single training run (R6H, spec §2). When
    * set, the component fetches `getGames(page, limit, titleFilter)`
    * so BE filters server-side. Mostly used by
-   * `TrainingRunDetail` — when omitted the component behaves as
+   * `UnifiedRunDetail` — when omitted the component behaves as
    * the legacy unified history list.
    */
   titleFilter?: string
@@ -437,28 +438,18 @@ const GameRow = memo(
     const joinKey = g.gameId ?? g.id
     return (
       <tr>
-        <td>{formatKstDateTime(g.timestamp)}</td>
+        <td><TimestampText ts={g.timestamp} /></td>
         {hideTitleColumn ? null : (
           <td className="replay-list-title-cell" title={g.title ?? undefined}>
             {g.title && g.title.trim() !== '' ? g.title : '—'}
           </td>
         )}
         <td>
-          <span
-            className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
-            aria-label={g.envId === undefined ? 'No env id recorded' : `Env ${g.envId}`}
-            data-env-id={g.envId ?? ''}
-          >
-            {formatEnvId(g.envId)}
-          </span>
+          <EnvChip envId={g.envId} />
         </td>
         <td className="text-muted">{formatEpisode(g.episode)}</td>
         <td>{formatBotLevel(g.botLevel)}</td>
-        <td className="score-cell">
-          <span className="score-p1">{g.score1}</span>
-          {' : '}
-          <span className="score-p2">{g.score2}</span>
-        </td>
+        <ScoreCell s1={g.score1} s2={g.score2} />
         <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
           {g.winner === 1 ? 'RL Agent' : 'Bot'}
         </td>
