@@ -281,8 +281,31 @@ export type WSServerMessageType =
   | 'training:metrics'
   | 'training:frame'
   | 'training:status'
+  | 'training:env_frame'
   | 'game:result'
   | 'replay:data'
+
+/**
+ * Per-env frame broadcast (BE commit 65dd7336). Emitted every
+ * `broadcast_interval` vec steps while training is running, carrying
+ * one payload per parallel env. The FE's batch tab bar subscribes
+ * and renders only the currently-selected env on the canvas.
+ */
+export interface EnvFramePayload {
+  /** 0-indexed parallel env id (0..n_envs-1). */
+  envId: number
+  /** Full per-env GameState snapshot. Same shape as `training:frame`. */
+  frame: GameState
+  /** Top-level score pair [p1, p2], duplicated from `frame.score{1,2}`
+   *  for cheap chip rendering without reaching into the frame. */
+  score: [number, number]
+  /** Engine state-machine name: 'round' | 'afterEndOfRound' |
+   *  'beforeStartOfNextRound' | 'gameEnd' | 'live' (default). Drives
+   *  the chip's status dot colour (warning / success / danger). */
+  stateName: string
+  /** Training step at broadcast time. Useful for ordering snapshots. */
+  step: number
+}
 
 export type WSMessageType = WSClientMessageType | WSServerMessageType
 

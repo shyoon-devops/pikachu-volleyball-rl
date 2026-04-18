@@ -1,0 +1,215 @@
+/*
+ * ═══════════════════════════════════════════════════════════
+ *  BatchTabBar.css — parallel env viewer spec
+ *  (docs/DESIGN-BATCH-TABS.md, commit 90c8ac79)
+ * ═══════════════════════════════════════════════════════════
+ *  className map:
+ *    .batch-tab-bar
+ *    .batch-tab, .batch-tab--active
+ *    .batch-tab-label, .batch-tab-score
+ *    .batch-tab-dot, .batch-tab-dot--warning/success/danger
+ * ═══════════════════════════════════════════════════════════
+ */
+
+.batch-tab-bar {
+  --batch-strip-height: 56px;
+  --batch-gap: 8px;
+  --batch-padding-x: 12px;
+  --batch-padding-y: 8px;
+
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--batch-strip-height);
+  padding: var(--batch-padding-y) var(--batch-padding-x);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 12px);
+  gap: var(--batch-gap);
+}
+
+/* 1..8 envs: fixed equal-width grid. Grid columns driven by
+   --n-envs so the chip sizing adapts to the actual run. */
+.batch-tab-bar[data-overflow='grid'] {
+  display: grid;
+  grid-template-columns: repeat(var(--n-envs, 8), minmax(0, 1fr));
+}
+
+/* 9..16 envs: snap-scrolling horizontal strip with a right-edge fade
+   mask so the user sees there's more to scroll. Chip min-width set
+   so all 16 fit in the natural scroll surface. */
+.batch-tab-bar[data-overflow='scroll'] {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+  mask-image: linear-gradient(
+    to right,
+    #000 calc(100% - 24px),
+    transparent
+  );
+}
+
+.batch-tab-bar[data-overflow='scroll'] .batch-tab {
+  flex: 0 0 auto;
+  min-width: 80px;
+  scroll-snap-align: start;
+}
+
+.batch-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 6px 10px;
+  min-width: 72px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.batch-tab:hover:not(.batch-tab--active) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-strong);
+}
+
+.batch-tab:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.batch-tab--active {
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent-dim);
+}
+
+/* Pikachu-yellow bottom bar — inside the button footprint so it
+   aligns with the canvas's bottom edge above it. */
+.batch-tab--active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-bottom-left-radius: inherit;
+  border-bottom-right-radius: inherit;
+  background: var(--color-accent);
+}
+
+.batch-tab-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-medium);
+  line-height: 1;
+}
+
+.batch-tab--active .batch-tab-label {
+  color: var(--color-text-primary);
+}
+
+.batch-tab-score {
+  font-size: 14px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  margin-top: 2px;
+  line-height: 1.15;
+}
+
+/* Status dot — pinned to the top-right corner of the chip with a 4px
+   inset. Size is 8x8 per spec; the pulse animation only runs on the
+   warning variant. */
+.batch-tab-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.batch-tab-dot--warning {
+  background: var(--color-warning, #fbbf24);
+  animation: batch-tab-dot-pulse 1.2s ease-in-out infinite;
+}
+
+.batch-tab-dot--success {
+  background: var(--color-success, #22c55e);
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+.batch-tab-dot--danger {
+  background: var(--color-danger, #ef4444);
+}
+
+@keyframes batch-tab-dot-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .batch-tab-dot--warning {
+    animation: none;
+  }
+}
+
+/* Tablet — drop chip min-width, keep the mono ENV label. */
+@media (max-width: 768px) {
+  .batch-tab-bar {
+    --batch-strip-height: 48px;
+  }
+  .batch-tab {
+    min-width: 60px;
+    padding: 4px 8px;
+  }
+  .batch-tab-label {
+    font-size: 10px;
+  }
+  .batch-tab-score {
+    font-size: 13px;
+  }
+}
+
+/* Mobile — force scroll-snap even for ≤8 envs because the chip fit
+   drops below 40px width on very narrow viewports. */
+@media (max-width: 480px) {
+  .batch-tab-bar {
+    --batch-strip-height: 40px;
+    --batch-gap: 6px;
+  }
+  .batch-tab-bar {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+  }
+  .batch-tab {
+    flex: 0 0 auto;
+    min-width: 56px;
+    scroll-snap-align: start;
+  }
+}
+
+/* Canvas crossfade — the parent (Dashboard) toggles this class on the
+   game wrapper for 180ms after a chip click; spec §3. The class is
+   kept in this CSS file so the animation lives next to the trigger. */
+.dashboard-game-wrapper.batch-canvas-fading {
+  opacity: 0.35;
+  transition: opacity 180ms var(--ease-out);
+}
