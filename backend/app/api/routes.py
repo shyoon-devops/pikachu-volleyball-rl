@@ -795,6 +795,147 @@ async def list_models(
     return {"models": rows}
 
 
+class DeleteModelsRequest(BaseModel):
+    """Bulk-delete request body for ``DELETE /api/models`` (BE-T9)."""
+
+    # Capped at 100 so a stray loop on the FE can't issue an arbitrarily
+    # large delete. Empty list is accepted (no-op) so the FE can replay
+    # the last request idempotently after a network blip.
+    paths: list[str] = Field(default_factory=list, max_length=100)
+
+
+@router.delete("/models")
+@endpoint_guard("delete_models")
+async def delete_models(request: Request, body: DeleteModelsRequest):
+    """Bulk-delete checkpoint files under ``MODEL_DIR`` (BE-T9).
+
+    Per-path validation:
+      * Must resolve inside ``MODEL_DIR`` (path-traversal rejection).
+      * Must not be the active training run's experiment directory
+        (returns 409 for the whole request — "fail loud, fail early"
+        so the UI shows the user exactly which run is protected).
+      * File must exist — missing paths appear in ``failed`` as
+        ``reason="not_found"``.
+      * Symlinks resolved, never followed outside ``MODEL_DIR``.
+
+    Response shape:
+      { "deleted": ["a.zip", "b.zip"],
+        "failed":  [{"path": "c.zip", "reason": "..."}] }
+    """
+    model_dir = Path(os.getenv("MODEL_DIR", "./models")).resolve()
+
+    # Active-training protection. If ANY requested path points into
+    # the running experiment's directory, reject the WHOLE batch with
+    # 409 — FE can then re-surface the list minus the protected rows.
+    # Deliberately coarse: protecting individual files inside the
+    # active dir is still racy (the training thread may write a new
+    # checkpoint between our check and the unlink), so the safe
+    # boundary is the directory.
+    training_service = getattr(request.app.state, "training_service", None)
+    active_exp_dir: Path | None = None
+    if training_service is not None:
+        status = training_service.status()
+        if status.get("state") == "running":
+            active_exp_id = status.get("experiment_id") or ""
+            if active_exp_id:
+                active_exp_dir = (model_dir / active_exp_id).resolve()
+
+    # Two-pass: resolve + validate every path first so a protected
+    # entry can abort the batch before any ``unlink`` runs. Partial
+    # deletion before a 409 would be worse than useless — the user
+    # couldn't tell from the response which files are still on disk.
+    resolved: list[tuple[str, Path]] = []
+    failed: list[dict[str, str]] = []
+    protected: list[str] = []
+    seen_traversal_or_invalid = False
+
+    for raw_path in body.paths:
+        rel = (raw_path or "").strip()
+        if not rel:
+            failed.append({"path": raw_path, "reason": "empty_path"})
+            continue
+        # Strip any leading ``models/`` the FE may have supplied so
+        # the UX matches the ``path`` field /api/models returns.
+        if rel.startswith(("models/", "./models/")):
+            rel = rel.split("models/", 1)[1]
+
+        try:
+            target = (model_dir / rel).resolve()
+        except (OSError, ValueError):
+            failed.append({"path": raw_path, "reason": "invalid_path"})
+            seen_traversal_or_invalid = True
+            continue
+
+        # Containment check — rejects ``..``, absolute paths escaping
+        # the model dir, and symlinks pointing elsewhere.
+        try:
+            target.relative_to(model_dir)
+        except ValueError:
+            logger.warning(
+                "delete_models: traversal rejected path=%r resolved=%s",
+                raw_path, target,
+            )
+            failed.append({"path": raw_path, "reason": "outside_model_dir"})
+            seen_traversal_or_invalid = True
+            continue
+
+        if active_exp_dir is not None:
+            try:
+                target.relative_to(active_exp_dir)
+                protected.append(raw_path)
+                continue
+            except ValueError:
+                # Not inside the active dir — allowed to delete.
+                pass
+
+        resolved.append((raw_path, target))
+
+    if protected:
+        logger.info(
+            "delete_models: %d path(s) belonged to active run; rejecting batch",
+            len(protected),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Refusing to delete checkpoints of an active run",
+                "protected": protected,
+            },
+        )
+
+    deleted: list[str] = []
+    for raw_path, target in resolved:
+        if not target.exists():
+            failed.append({"path": raw_path, "reason": "not_found"})
+            continue
+        if not target.is_file():
+            failed.append({"path": raw_path, "reason": "not_a_file"})
+            continue
+
+        try:
+            size = target.stat().st_size
+            target.unlink()
+        except OSError as e:
+            logger.exception("delete_models: unlink failed for %s", target)
+            failed.append({"path": raw_path, "reason": f"unlink_failed: {e}"})
+            continue
+        deleted.append(raw_path)
+        # Audit trail — INFO level so the operator can reconstruct
+        # who deleted what without turning on debug logs.
+        logger.info(
+            "delete_models: removed %s (%d bytes)",
+            target,
+            size,
+        )
+
+    logger.info(
+        "delete_models: deleted=%d failed=%d",
+        len(deleted),
+        len(failed),
+    )
+    return {"deleted": deleted, "failed": failed}
+
+
 class EvalRunRequest(BaseModel):
     model_config = {"protected_namespaces": ()}
 
