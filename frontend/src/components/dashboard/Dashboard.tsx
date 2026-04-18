@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { memo, useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
@@ -11,7 +11,7 @@ import type { TitleValidationState } from './TitleInput'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
-import type { Hyperparams } from '../../lib/types'
+import type { GameRecord, Hyperparams } from '../../lib/types'
 import {
   formatBotLevel,
   formatRallyCount,
@@ -372,57 +372,7 @@ export function Dashboard() {
                 </thead>
                 <tbody>
                   {recentGames.slice(0, 20).map((g) => (
-                    <tr key={g.id}>
-                      <td>{formatKstDateTime(g.timestamp)}</td>
-                      <td
-                        className="recent-games-title-cell"
-                        title={g.title ?? undefined}
-                      >
-                        {g.title && g.title.trim() !== '' ? (
-                          // R6H spec §0: Recent Games rows deep-link
-                          // to the level-2 drill-down for their run.
-                          <Link
-                            to={`/history/${encodeURIComponent(g.title)}`}
-                            className="recent-games-title-link"
-                          >
-                            {g.title}
-                          </Link>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                      <td>
-                        <span
-                          className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
-                          aria-label={
-                            g.envId === undefined
-                              ? 'No env id recorded'
-                              : `Env ${g.envId}`
-                          }
-                          data-env-id={g.envId ?? ''}
-                        >
-                          {formatEnvId(g.envId)}
-                        </span>
-                      </td>
-                      <td className="text-muted">{formatEpisode(g.episode)}</td>
-                      <td>{formatBotLevel(g.botLevel)}</td>
-                      <td className="score-cell">
-                        <span className="score-p1">{g.score1}</span>
-                        {' : '}
-                        <span className="score-p2">{g.score2}</span>
-                      </td>
-                      <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
-                        {g.winner === 1 ? 'RL Agent' : 'Bot'}
-                      </td>
-                      <td className="text-muted">{g.durationFrames}</td>
-                      <td className="text-muted">{formatRallyCount(g.rallyCount)}</td>
-                      <td className="text-muted">
-                        {formatAvgRallyLength(g.durationFrames, g.rallyCount)}
-                      </td>
-                      <td className="text-muted text-mono" title={g.experimentId ?? undefined}>
-                        {formatExperimentIdShort(g.experimentId)}
-                      </td>
-                    </tr>
+                    <RecentGameRow key={g.id} game={g} />
                   ))}
                 </tbody>
               </table>
@@ -433,3 +383,63 @@ export function Dashboard() {
     </div>
   )
 }
+
+/**
+ * FC-R7H: memoized Recent Games row.
+ *
+ * Dashboard's `recentGames` state is prepend-only (the hook inserts a
+ * new element at index 0 and keeps old references for the rest), so a
+ * shallow comparison against the `game` object reference is enough:
+ * only the freshly-landed row fails memo and re-renders. Previously
+ * the inline JSX re-ran for every row on every parent render — cheap
+ * per row but visibly jittery at the ~1 Hz game-end cadence under a
+ * heavy parallel-env training config.
+ */
+const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecord }) {
+  return (
+    <tr>
+      <td>{formatKstDateTime(g.timestamp)}</td>
+      <td className="recent-games-title-cell" title={g.title ?? undefined}>
+        {g.title && g.title.trim() !== '' ? (
+          <Link
+            to={`/history/${encodeURIComponent(g.title)}`}
+            className="recent-games-title-link"
+          >
+            {g.title}
+          </Link>
+        ) : (
+          '—'
+        )}
+      </td>
+      <td>
+        <span
+          className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
+          aria-label={
+            g.envId === undefined ? 'No env id recorded' : `Env ${g.envId}`
+          }
+          data-env-id={g.envId ?? ''}
+        >
+          {formatEnvId(g.envId)}
+        </span>
+      </td>
+      <td className="text-muted">{formatEpisode(g.episode)}</td>
+      <td>{formatBotLevel(g.botLevel)}</td>
+      <td className="score-cell">
+        <span className="score-p1">{g.score1}</span>
+        {' : '}
+        <span className="score-p2">{g.score2}</span>
+      </td>
+      <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
+        {g.winner === 1 ? 'RL Agent' : 'Bot'}
+      </td>
+      <td className="text-muted">{g.durationFrames}</td>
+      <td className="text-muted">{formatRallyCount(g.rallyCount)}</td>
+      <td className="text-muted">
+        {formatAvgRallyLength(g.durationFrames, g.rallyCount)}
+      </td>
+      <td className="text-muted text-mono" title={g.experimentId ?? undefined}>
+        {formatExperimentIdShort(g.experimentId)}
+      </td>
+    </tr>
+  )
+})

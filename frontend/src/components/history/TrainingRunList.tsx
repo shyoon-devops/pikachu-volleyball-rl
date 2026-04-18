@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { getTrainingRuns, getModels, slugifyTitle } from '../../lib/api'
 import type { TrainingRun } from '../../lib/types'
@@ -27,6 +27,42 @@ import './TrainingRunList.css'
 const SEARCH_DEBOUNCE_MS = 200
 const SEARCH_QUERY_KEY = 'q'
 const PAGE_LIMIT = 50
+
+/**
+ * Merge a fresh runs snapshot with the previously rendered list,
+ * preserving the OLD object reference for any title whose scalar
+ * fields are unchanged. This is load-bearing for FC-R7H: every
+ * live refetch otherwise returns brand-new object references and
+ * React.memo on the row component would see different props and
+ * re-render every row — the exact churn we're trying to avoid.
+ *
+ * Equality here is shallow over the six aggregate fields. If BE
+ * starts shipping nested objects the check needs to deepen.
+ */
+function runsShallowEqual(a: TrainingRun, b: TrainingRun): boolean {
+  return (
+    a.title === b.title &&
+    a.experimentId === b.experimentId &&
+    a.startedAt === b.startedAt &&
+    a.endedAt === b.endedAt &&
+    a.totalGames === b.totalGames &&
+    a.winRate === b.winRate &&
+    a.avgRallyLength === b.avgRallyLength &&
+    a.status === b.status
+  )
+}
+
+function mergeRuns(prev: TrainingRun[], next: TrainingRun[]): TrainingRun[] {
+  const prevByTitle = new Map(prev.map(r => [r.title, r] as const))
+  let anyChanged = prev.length !== next.length
+  const merged = next.map(n => {
+    const old = prevByTitle.get(n.title)
+    if (old && runsShallowEqual(old, n)) return old
+    anyChanged = true
+    return n
+  })
+  return anyChanged ? merged : prev
+}
 
 /**
  * Route the per-row link to. Defaults to the history drill-down
@@ -100,14 +136,23 @@ export function TrainingRunList({
   // reflect the in-progress training run without a manual refresh. The
   // hook bumps `gameResultSeq` on every ws `game:result` message; adding
   // it to the dep array re-runs this effect.
+  //
+  // FC-R7H: never flip `loading` back to true on a live refetch — that
+  // blanks the whole table with the "Loading…" placeholder for ~100ms,
+  // producing a visible flicker with every game end. Only show the
+  // placeholder until the first fetch lands; after that we swap data
+  // in place and let `mergeRuns` reuse old object refs so React.memo
+  // on RunRow/RunCard can skip unchanged rows.
+  const initialLoadedRef = useRef(false)
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    if (!initialLoadedRef.current) setLoading(true)
     getTrainingRuns(1, PAGE_LIMIT)
       .then(res => {
         if (cancelled) return
-        setRuns(res.data)
+        setRuns(prev => mergeRuns(prev, res.data))
         setError(null)
+        initialLoadedRef.current = true
       })
       .catch(err => {
         if (cancelled) return
@@ -269,7 +314,7 @@ interface RunRowProps {
   checkpointCount?: number | null
 }
 
-function RunRow({ run, query, linkBase, evalMode = false, checkpointCount = null }: RunRowProps) {
+const RunRow = memo(function RunRow({ run, query, linkBase, evalMode = false, checkpointCount = null }: RunRowProps) {
   // FC-R7A null-safety: every scalar falls back to a safe value
   // before any method access. BE sends `null` for untitled legacy
   // records + empty aggregates; a null `title.toLowerCase()` or
@@ -321,7 +366,7 @@ function RunRow({ run, query, linkBase, evalMode = false, checkpointCount = null
       </td>
     </tr>
   )
-}
+})
 
 function CheckpointCountBadge({ count }: { count: number | null }) {
   if (count === null) {
@@ -339,7 +384,7 @@ function CheckpointCountBadge({ count }: { count: number | null }) {
   )
 }
 
-function RunCard({ run, query, linkBase, evalMode = false, checkpointCount = null }: RunRowProps) {
+const RunCard = memo(function RunCard({ run, query, linkBase, evalMode = false, checkpointCount = null }: RunRowProps) {
   // Same null-safety as RunRow — mobile card stack reuses the
   // same fallback rules.
   const safeTitle = run.title && run.title.trim() !== '' ? run.title : 'untitled'
@@ -388,7 +433,7 @@ function RunCard({ run, query, linkBase, evalMode = false, checkpointCount = nul
       {cardInner}
     </Link>
   )
-}
+})
 
 function StatusChip({ status }: { status: string }) {
   const normalized: 'running' | 'done' | 'stopped' =
