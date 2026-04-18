@@ -161,6 +161,75 @@ class CheckpointCallback(BaseCallback):
         return True
 
 
+class EnvFrameCallback(BaseCallback):
+    """Broadcast each training VecEnv's live state to FE subscribers.
+
+    The training loop runs ``n_envs`` parallel environments for gradient
+    collection; historically only the standalone demo game was visible
+    on the dashboard. This callback samples every env's game state via
+    ``VecEnv.env_method("get_frame_snapshot")`` once every
+    ``broadcast_interval`` vec steps and enqueues per-env payloads onto
+    ``env_frames_queue``. The WS handler (env_frames_push_loop) wraps
+    each into ``{"type": "training:env_frame", "payload": ...}``.
+
+    Backpressure: reuses ``_enqueue_with_drop`` so a slow subscriber
+    (or a closed loop) can never stall the training thread. Payload
+    size is bounded — per-env ~200-300 bytes, so at n_envs=8 and
+    broadcast_interval=4 (~6.25 broadcasts/s at the typical 25 fps
+    training tick) the wire cost is ~10-15 KB/s, well within any
+    WS / nginx budget.
+    """
+
+    def __init__(
+        self,
+        env_frames_queue: asyncio.Queue[dict[str, Any]],
+        loop: asyncio.AbstractEventLoop,
+        broadcast_interval: int = 4,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.env_frames_queue = env_frames_queue
+        self.loop = loop
+        # Cap the broadcast rate. 1 emits every vec step (~25/s per env,
+        # 200/s total at n_envs=8) — too chatty. 4 lands at ~6 emits/s
+        # per env, which matches the FE's typical 60fps interpolation
+        # cadence after network smoothing.
+        self.broadcast_interval = max(1, int(broadcast_interval))
+
+    def _on_step(self) -> bool:
+        # Guard: skip unless this vec step is on the broadcast cadence.
+        # num_timesteps increments by n_envs per vec step, so modulo on
+        # the self-local ``n_calls`` gives a per-step cadence.
+        if self.n_calls % self.broadcast_interval != 0:
+            return True
+
+        env = self.training_env
+        if env is None:
+            return True
+        try:
+            # SubprocVecEnv dispatches to each worker; returns list[dict].
+            snapshots: list[dict[str, Any]] = env.env_method("get_frame_snapshot")
+        except Exception:  # noqa: BLE001 — observability hook, never stop training
+            logger.exception("env_method(get_frame_snapshot) failed")
+            return True
+
+        for env_id, snap in enumerate(snapshots):
+            if not isinstance(snap, dict):
+                continue
+            payload = {
+                "env_id": env_id,
+                "frame": snap,
+                # Convenience surfacing of the fields FE renders as a row
+                # header — duplicated into the top level so simple
+                # subscribers don't have to know the inner frame schema.
+                "score": snap.get("score", [0, 0]),
+                "state_name": snap.get("state_name", "live"),
+                "step": int(self.num_timesteps),
+            }
+            _safe_enqueue(self.loop, self.env_frames_queue, payload)
+        return True
+
+
 class LiveFrameCallback(BaseCallback):
     """Runs a demo game every M steps and pushes frames + result to queues.
 

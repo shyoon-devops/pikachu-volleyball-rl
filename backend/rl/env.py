@@ -19,7 +19,25 @@ from backend.game.constants import (
     NET_PILLAR_X,
     PLAYER_HALF_LENGTH,
 )
-from backend.game.engine import PikachuVolleyball, PlayerInput
+from backend.game.engine import GameState, PikachuVolleyball, PlayerInput
+
+
+def _match_state_name(state: GameState) -> str:
+    """Short label for the match-level state consumers render as a tag.
+
+    Distinguishes the three user-visible macro-states:
+      * "ended"   — match is over (a side reached MAX_SCORE)
+      * "scoring" — grounded-ball / freeze frame between rallies
+      * "live"    — rally in progress
+
+    We avoid leaking the per-player ``state`` field (0-6) because those
+    are render-only animation frames; FE doesn't need them.
+    """
+    if getattr(state, "is_game_ended", False):
+        return "ended"
+    if getattr(state, "is_round_over", False):
+        return "scoring"
+    return "live"
 
 # Action mapping: 12 actions covering (x_dir, y_dir, power_hit) combos
 # 0=noop, 1=left, 2=right, 3=jump, 4=left+jump, 5=right+jump,
@@ -170,6 +188,32 @@ class PikachuVolleyballEnv(gymnasium.Env):
         }
 
         return obs, reward, terminated, truncated, info
+
+    def get_frame_snapshot(self) -> dict[str, Any]:
+        """Return a serialized picture of this env's current game state.
+
+        Called from the training thread's callback via ``VecEnv.env_method``
+        so a SubprocVecEnv can fan the snapshot out across process
+        boundaries — the return value must therefore be a plain dict of
+        primitives (no engine objects, no numpy arrays). Reuses the
+        ``_serialize_state`` helper that already powers the demo game's
+        WS frames so both channels produce the same schema.
+
+        Returns the same dict the demo callback emits, plus a
+        ``state_name`` and ``score`` convenience pair so consumers don't
+        have to re-derive them.
+        """
+        # Lazy import — avoids an import cycle (rl.callbacks imports
+        # backend.game.engine which imports backend.game.constants, and
+        # rl.env is pulled from several test paths that shouldn't need
+        # SB3 on the path).
+        from backend.rl.callbacks import _serialize_state
+
+        state = self._game._state
+        payload = _serialize_state(state)
+        payload["score"] = [int(state.score1), int(state.score2)]
+        payload["state_name"] = _match_state_name(state)
+        return payload
 
     def _get_obs(self, state: Any) -> np.ndarray:
         """Normalize game state to [-1, 1] observation vector (18 floats).

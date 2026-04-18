@@ -20,6 +20,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 
 from backend.rl.callbacks import (
     CheckpointCallback,
+    EnvFrameCallback,
     LiveFrameCallback,
     MetricsCallback,
 )
@@ -69,6 +70,11 @@ class TrainingManager:
         self.metrics_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.frames_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.results_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        # Per-env frames from the EnvFrameCallback — rate-limited by the
+        # callback's broadcast_interval, but bounded here too so a slow
+        # WS subscriber can never accumulate more than ``maxsize`` queued
+        # snapshots. Drop-oldest is handled by _enqueue_with_drop.
+        self.env_frames_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)
 
         self._model: PPO | None = None
         self._thread: threading.Thread | None = None
@@ -399,6 +405,11 @@ class TrainingManager:
                     play_interval=hp.get("live_frame_interval", 5000),
                     replay_dir=self.replay_dir,
                     manager=self,
+                ),
+                EnvFrameCallback(
+                    env_frames_queue=self.env_frames_queue,
+                    loop=loop,
+                    broadcast_interval=hp.get("env_frame_interval", 4),
                 ),
                 _StopEventCallback(self._stop_event, self._pause_event, self),
             ])
