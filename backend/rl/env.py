@@ -19,7 +19,25 @@ from backend.game.constants import (
     NET_PILLAR_X,
     PLAYER_HALF_LENGTH,
 )
-from backend.game.engine import PikachuVolleyball, PlayerInput
+from backend.game.engine import GameState, PikachuVolleyball, PlayerInput
+
+
+def _match_state_name(state: GameState) -> str:
+    """Short label for the match-level state consumers render as a tag.
+
+    Distinguishes the three user-visible macro-states:
+      * "ended"   — match is over (a side reached MAX_SCORE)
+      * "scoring" — grounded-ball / freeze frame between rallies
+      * "live"    — rally in progress
+
+    We avoid leaking the per-player ``state`` field (0-6) because those
+    are render-only animation frames; FE doesn't need them.
+    """
+    if getattr(state, "is_game_ended", False):
+        return "ended"
+    if getattr(state, "is_round_over", False):
+        return "scoring"
+    return "live"
 
 # Action mapping: 12 actions covering (x_dir, y_dir, power_hit) combos
 # 0=noop, 1=left, 2=right, 3=jump, 4=left+jump, 5=right+jump,
@@ -77,6 +95,18 @@ class PikachuVolleyballEnv(gymnasium.Env):
         self._prev_p1_x = 0.0
         self._consecutive_touches = 0
         self._frames_since_crossing = 0
+        # Per-match net-crossing counter (rally_count in the GameRecord).
+        # Increments on any net crossing (either direction) and resets on
+        # reset() — matches the definition the offline evaluator uses
+        # (rl/evaluator.py:82-85) so /api/games and avg_rally_length are
+        # comparable. The BE-A2 drain_pending_results hook reads it at
+        # game-end and ships the total in the result dict.
+        self._rally_count: int = 0
+        self._prev_ball_side_right: bool = False
+        # Finished matches queued for the trainer-thread drain hook
+        # (BE-A2). Each entry is a plain dict matching the producer
+        # contract expected by handlers.results_push_loop.
+        self._pending_results: list[dict[str, Any]] = []
 
     def reset(
         self,
@@ -103,6 +133,12 @@ class PikachuVolleyballEnv(gymnasium.Env):
         self._prev_p1_x = float(state.player1.x)
         self._consecutive_touches = 0
         self._frames_since_crossing = 0
+        # rally_count and ball-side tracker reset together; pending
+        # results intentionally survive reset so the trainer-side drain
+        # can still collect a game that ended on the last step of the
+        # prior episode (VecEnv auto-reset races with env_method).
+        self._rally_count = 0
+        self._prev_ball_side_right = state.ball.x > NET_PILLAR_X
         return self._get_obs(state), {}
 
     def step(
@@ -153,6 +189,27 @@ class PikachuVolleyballEnv(gymnasium.Env):
             reward += self._RALLY_TIMEOUT_PENALTY
             truncated = True
 
+        # Net-crossing rally counter — both directions count (matches the
+        # offline evaluator so /api/games rally_count matches eval avg).
+        ball_side_right = new_state.ball.x > NET_PILLAR_X
+        if ball_side_right != self._prev_ball_side_right:
+            self._rally_count += 1
+        self._prev_ball_side_right = ball_side_right
+
+        # BE-A2: terminal game result snapshot. Only on natural ``terminated``
+        # (a side reached MAX_SCORE). Truncation (max_steps, stall penalty)
+        # is NOT a completed match and must not be saved — otherwise the
+        # Recent Games list would fill with abandoned episodes. The drain
+        # hook on the trainer thread picks these up.
+        if terminated and not truncated:
+            self._pending_results.append({
+                "score1": int(new_state.score1),
+                "score2": int(new_state.score2),
+                "winner": 1 if new_state.score1 >= MAX_SCORE else 2,
+                "duration_frames": int(new_state.frame),
+                "rally_count": int(self._rally_count),
+            })
+
         self._prev_score1 = new_state.score1
         self._prev_score2 = new_state.score2
         self._prev_ball_x = float(new_state.ball.x)
@@ -170,6 +227,45 @@ class PikachuVolleyballEnv(gymnasium.Env):
         }
 
         return obs, reward, terminated, truncated, info
+
+    def drain_pending_results(self) -> list[dict[str, Any]]:
+        """Pop completed-match dicts queued by ``step`` (BE-A2).
+
+        Called via ``VecEnv.env_method`` from the EnvResultCallback so
+        each parallel env's terminated matches can be flushed to Mongo.
+        Returns a shallow copy of the internal list and clears it in one
+        step so a concurrent callback tick on the same env cannot
+        double-save.
+        """
+        results = list(self._pending_results)
+        self._pending_results.clear()
+        return results
+
+    def get_frame_snapshot(self) -> dict[str, Any]:
+        """Return a serialized picture of this env's current game state.
+
+        Called from the training thread's callback via ``VecEnv.env_method``
+        so a SubprocVecEnv can fan the snapshot out across process
+        boundaries — the return value must therefore be a plain dict of
+        primitives (no engine objects, no numpy arrays). Reuses the
+        ``_serialize_state`` helper that already powers the demo game's
+        WS frames so both channels produce the same schema.
+
+        Returns the same dict the demo callback emits, plus a
+        ``state_name`` and ``score`` convenience pair so consumers don't
+        have to re-derive them.
+        """
+        # Lazy import — avoids an import cycle (rl.callbacks imports
+        # backend.game.engine which imports backend.game.constants, and
+        # rl.env is pulled from several test paths that shouldn't need
+        # SB3 on the path).
+        from backend.rl.callbacks import _serialize_state
+
+        state = self._game._state
+        payload = _serialize_state(state)
+        payload["score"] = [int(state.score1), int(state.score2)]
+        payload["state_name"] = _match_state_name(state)
+        return payload
 
     def _get_obs(self, state: Any) -> np.ndarray:
         """Normalize game state to [-1, 1] observation vector (18 floats).
