@@ -185,6 +185,16 @@ async def _dispatch(
         # Persist the run record (BE-T1) so future uniqueness checks
         # see this title. Best-effort — failure logs but doesn't fail
         # the start; the in-memory manager already knows the title.
+        # Hyperparams snapshot (BE-T10): merge the client's top-level +
+        # hyperparams blob plus the top-level training dials so the
+        # /api/training/runs join has a complete picture without a
+        # separate fetch. ``None``-valued entries (caller didn't
+        # specify, defaults applied) are preserved so FE can tell
+        # "defaulted" from "explicit".
+        hp_snapshot: dict[str, Any] = dict(hp)
+        hp_snapshot["total_timesteps"] = params.total_timesteps
+        if params.n_envs is not None:
+            hp_snapshot["n_envs"] = params.n_envs
         try:
             from datetime import datetime, timezone
 
@@ -194,6 +204,7 @@ async def _dispatch(
                 slug=final_slug,
                 bot_level=effective_bot_level,
                 started_at=datetime.now(timezone.utc),
+                hyperparams=hp_snapshot,
             )
         except Exception:  # noqa: BLE001
             logger.exception("training_runs register failed for %s", experiment_id)

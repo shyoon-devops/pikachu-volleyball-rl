@@ -124,8 +124,15 @@ class TrainingRunsService:
         slug: str,
         bot_level: int,
         started_at,
+        hyperparams: dict[str, Any] | None = None,
     ) -> None:
         """Insert a run doc; tolerates a dead Mongo (best-effort).
+
+        ``hyperparams`` is a snapshot of what the run was started with
+        (BE-T10) — learning rate, n_envs, total_timesteps, etc. Stored
+        here rather than on every ``GameRecord`` because the values
+        don't change over the run; ``/api/training/runs`` joins on
+        ``experiment_id`` at query time.
 
         The in-memory manager remains the source of truth for the live
         run — Mongo is the persistence layer for the history + title
@@ -136,15 +143,39 @@ class TrainingRunsService:
         if self._col is None:
             return
         try:
-            await self._col.insert_one({
+            doc: dict[str, Any] = {
                 "experiment_id": experiment_id,
                 "title": title,
                 "slug": slug,
                 "bot_level": int(bot_level),
                 "started_at": started_at,
-            })
+            }
+            if hyperparams:
+                # Pass through as-is so a new field the caller adds
+                # (e.g. policy_kwargs) doesn't require a service change.
+                doc["hyperparams"] = dict(hyperparams)
+            await self._col.insert_one(doc)
         except Exception:  # noqa: BLE001 — non-fatal; log and move on
             logger.exception("training_runs insert failed for %s", experiment_id)
+
+    async def get_by_experiment_ids(
+        self, experiment_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Bulk-lookup for the runs aggregation join (BE-T10).
+
+        Returns ``{experiment_id: run_doc}`` so the caller can decorate
+        each aggregation row without a separate round-trip per run.
+        Missing experiments resolve to an absent key — callers should
+        use ``dict.get`` with a default.
+        """
+        if self._col is None or not experiment_ids:
+            return {}
+        cursor = self._col.find(
+            {"experiment_id": {"$in": list(experiment_ids)}},
+            {"_id": 0},
+        )
+        docs = await cursor.to_list(length=len(experiment_ids))
+        return {d["experiment_id"]: d for d in docs if d.get("experiment_id")}
 
     async def list_titles(
         self, *, q: str | None = None, limit: int = 100
