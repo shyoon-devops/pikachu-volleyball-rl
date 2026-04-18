@@ -1,6 +1,11 @@
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ReplayList } from '../replay/ReplayList'
 import { ErrorBoundary } from '../ErrorBoundary'
+import { HyperparamsSummary } from './HyperparamsSummary'
+import { getTrainingRuns } from '../../lib/api'
+import { useTrainingState } from '../../hooks/useTrainingState'
+import type { TrainingRun } from '../../lib/types'
 import './TrainingRunDetail.css'
 
 /**
@@ -20,6 +25,24 @@ import './TrainingRunDetail.css'
 export function TrainingRunDetail() {
   const { title = '' } = useParams<{ title: string }>()
   const decoded = decodeURIComponent(title)
+  const { gameResultSeq } = useTrainingState()
+  // FC-R8b: find the run's summary row on /api/training/runs to
+  // extract the persisted hyperparams. BE page limit is 100 and
+  // the FE list surface caps at 50 — we pull the full first page
+  // and match by title client-side. Refreshes on every game:result
+  // so totals + eventual hyperparams patches don't need a refresh.
+  const [run, setRun] = useState<TrainingRun | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    getTrainingRuns(1, 100)
+      .then(res => {
+        if (cancelled) return
+        const match = res.data.find(r => (r.title ?? '') === decoded) ?? null
+        setRun(match)
+      })
+      .catch(() => { /* hyperparams section degrades to empty placeholder */ })
+    return () => { cancelled = true }
+  }, [decoded, gameResultSeq])
 
   return (
     <div className="training-run-detail">
@@ -35,6 +58,14 @@ export function TrainingRunDetail() {
         </span>
       </nav>
       <h1 className="training-run-detail-title">{decoded || 'untitled'}</h1>
+      {/*
+        FC-R8b: hyperparameter summary sourced from the matching
+        TrainingRun. Renders an explanatory placeholder while
+        BE-T10 (persist hyperparams on training_runs.register) is
+        pending, so users see "information coming" rather than a
+        silent absence.
+      */}
+      <HyperparamsSummary hyperparams={run?.hyperparams} />
       {/*
         Local ErrorBoundary (FC-R7A, 2026-04-18): qa stopped-state
         hits a rendering crash when the underlying games/replays
