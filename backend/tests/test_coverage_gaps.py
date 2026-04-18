@@ -36,51 +36,11 @@ NOOP = PlayerInput(x_dir=0, y_dir=0, power_hit=False)
 
 
 # ─── game/engine.py gaps ───
-
-
-class TestEngineDiving:
-    """Cover the diving/lying_down code paths (lines 113-116, 148-149)."""
-
-    def test_player_lying_down_decrements(self) -> None:
-        game = PikachuVolleyball()
-        game.reset()
-        # Force player into lying_down state
-        game._state.player1.lying_down_duration = 5
-        game._state.player1.is_diving = False
-        game._state.player1.is_jumping = False
-
-        state = game.step(NOOP, NOOP)
-        assert state.player1.lying_down_duration < 5
-
-    def test_lying_down_eventually_clears(self) -> None:
-        game = PikachuVolleyball()
-        game.reset()
-        game._state.player1.lying_down_duration = 2
-
-        for _ in range(5):
-            state = game.step(NOOP, NOOP)
-            if state.is_round_over:
-                break
-        assert state.player1.lying_down_duration == 0
-
-    def test_diving_landing_sets_lying_down(self) -> None:
-        game = PikachuVolleyball()
-        game.reset()
-        # Force player1 into diving state at ground level. state=3 is
-        # "diving" per the port; sync_derived_flags propagates to
-        # is_diving/is_jumping compat views.
-        game._state.player1.state = 3
-        game._state.player1.diving_direction = 0
-        game._state.player1.sync_derived_flags()
-        game._state.player1.y = PLAYER_GROUND_Y - 5
-        game._state.player1.vy = 10  # will reach ground
-
-        state = game.step(NOOP, NOOP)
-        # After landing from dive, lying_down_duration should be set
-        # to LYING_DOWN_DURATION (3 frames per original physics.js).
-        from backend.game.constants import LYING_DOWN_DURATION
-
-        assert state.player1.lying_down_duration == LYING_DOWN_DURATION or state.is_round_over
+# TestEngineDiving removed (A3): diving/lying-down coverage now owned by
+# test_physics.py::TestJumpAndDive::test_dive_landing_starts_lying_down
+# and test_lying_down_blocks_movement, which exercise the same state=3
+# → state=4 transition with stronger unconditional assertions (no
+# ``or state.is_round_over`` escape hatch).
 
 
 class TestEngineNetCollisionZeroVx:
@@ -299,34 +259,14 @@ class TestCheckpointCallback:
 
 
 class TestMetricsCallback:
-    """Cover MetricsCallback metric publishing."""
+    """Cover MetricsCallback metric publishing.
 
-    def test_metrics_callback_logs_at_interval(self) -> None:
-        loop = asyncio.new_event_loop()
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-
-        cb = MetricsCallback(queue=queue, loop=loop, log_interval=10)
-        cb.model = MagicMock()
-        cb.model.logger = None
-        cb.num_timesteps = 10
-        cb.locals = {"infos": []}
-
-        result = cb._on_step()
-        assert result is True
-        loop.close()
-
-    def test_metrics_callback_skips_non_interval(self) -> None:
-        loop = asyncio.new_event_loop()
-        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-
-        cb = MetricsCallback(queue=queue, loop=loop, log_interval=10)
-        cb.model = MagicMock()
-        cb.num_timesteps = 7
-        cb.locals = {"infos": []}
-
-        result = cb._on_step()
-        assert result is True
-        loop.close()
+    The "returns True at interval" and "returns True off interval"
+    cases were removed (A3): they asserted only ``_on_step is True``,
+    which is satisfied by the SB3 base-class contract regardless of
+    the callback's own logic. End-to-end coverage lives in
+    test_trainer.py::TestMetricsCallback::test_metrics_pushed_to_queue.
+    """
 
     def test_metrics_tracks_wins(self) -> None:
         loop = asyncio.new_event_loop()
@@ -418,60 +358,11 @@ class TestTrainingManagerInit:
 # ─── rl/evaluator.py ───
 
 
-class TestModelEvaluator:
-    """Cover ModelEvaluator with a quickly trained model."""
-
-    def test_evaluate_returns_eval_result(self) -> None:
-        try:
-            from stable_baselines3 import PPO
-        except ImportError:
-            pytest.skip("stable-baselines3 not installed")
-
-        from backend.rl.evaluator import EvalResult, ModelEvaluator
-
-        # Train a minimal model
-        env = PikachuVolleyballEnv(bot_level=1, max_steps=500)
-        model = PPO("MlpPolicy", env, n_steps=64, batch_size=32, n_epochs=2, verbose=0)
-        model.learn(total_timesteps=128)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = str(Path(tmpdir) / "eval_model")
-            model.save(path)
-
-            evaluator = ModelEvaluator()
-            result = evaluator.evaluate(path, bot_level=1, n_games=3)
-
-        assert isinstance(result, EvalResult)
-        assert result.n_games == 3
-        assert 0.0 <= result.win_rate <= 1.0
-        assert result.avg_score >= 0
-        assert result.avg_rally_length >= 0
-        assert result.bot_level == 1
-        env.close()
-
-    def test_compare_checkpoints(self) -> None:
-        try:
-            from stable_baselines3 import PPO
-        except ImportError:
-            pytest.skip("stable-baselines3 not installed")
-
-        from backend.rl.evaluator import ModelEvaluator
-
-        env = PikachuVolleyballEnv(bot_level=1, max_steps=500)
-        model = PPO("MlpPolicy", env, n_steps=64, batch_size=32, n_epochs=2, verbose=0)
-        model.learn(total_timesteps=128)
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            p1 = str(Path(tmpdir) / "ckpt1")
-            p2 = str(Path(tmpdir) / "ckpt2")
-            model.save(p1)
-            model.save(p2)
-
-            evaluator = ModelEvaluator()
-            results = evaluator.compare_checkpoints([p1, p2], bot_level=1, n_games=2)
-
-        assert len(results) == 2
-        env.close()
+# TestModelEvaluator removed (A3): evaluator.evaluate + compare_checkpoints
+# are now owned by test_evaluator.py::TestEvalResult (7 assertions on the
+# returned EvalResult shape) and TestCompareCheckpoints (count + per-path
+# identity). The gap-fill tests here re-trained a fresh PPO each time —
+# slow and strictly weaker than the dedicated file.
 
 
 # ─── rl/env.py extra coverage ───
