@@ -134,9 +134,9 @@ describe('UnifiedRunDetail (FC-R8A)', () => {
     renderAt('/runs/my-run?tab=eval')
     const evalTab = screen.getByRole('tab', { name: 'Evaluation' })
     expect(evalTab).toHaveAttribute('aria-selected', 'true')
-    // Evaluation panel renders 평가 실행 button (embedded, no breadcrumb).
+    // Evaluation panel renders Run Evaluation button (embedded, no breadcrumb).
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /평가 실행/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /Run Evaluation/ })).toBeInTheDocument()
     })
     // Embedded mode hides the evaluation-specific breadcrumb so the
     // unified header isn't duplicated inside the tab panel.

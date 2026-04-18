@@ -97,7 +97,7 @@ describe('EvaluationRunDetail (FC-R7C level-2)', () => {
     await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(2))
 
     // Run button disabled until a selection is made.
-    const runBtn = screen.getByRole('button', { name: /평가 실행/ })
+    const runBtn = screen.getByRole('button', { name: /Run Evaluation/ })
     expect(runBtn).toBeDisabled()
     fireEvent.click(screen.getByLabelText('Select checkpoint step 200'))
     expect(runBtn).not.toBeDisabled()
@@ -127,7 +127,7 @@ describe('EvaluationRunDetail (FC-R7C level-2)', () => {
     getModels.mockResolvedValueOnce([])
     renderAt('/evaluation/live-run')
     await waitFor(() => {
-      expect(screen.getByText(/체크포인트가 아직 없습니다/)).toBeInTheDocument()
+      expect(screen.getByText(/No checkpoints saved yet/)).toBeInTheDocument()
     })
   })
 
@@ -150,7 +150,7 @@ describe('EvaluationRunDetail (FC-R7C level-2)', () => {
     await waitFor(() => expect(screen.getByLabelText('Select checkpoint step 500')).toBeInTheDocument())
     fireEvent.click(screen.getByLabelText('Select checkpoint step 500'))
     // Bot level picked up from URL (3), default n_games = 20.
-    fireEvent.click(screen.getByRole('button', { name: /평가 실행/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Run Evaluation/ }))
 
     await waitFor(() => {
       expect(runEvaluation).toHaveBeenCalledWith('exp/a__slug__500.zip', 3, 20)
@@ -259,7 +259,7 @@ describe('EvaluationRunDetail — bulk delete (FC-R7D)', () => {
 
     // Pre-mode: no checkboxes.
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
-    fireEvent.click(screen.getByRole('button', { name: /선택 삭제/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
     // Post-mode: 1 header + N rows = N+1 checkboxes. Radio buttons
     // still render but are disabled.
     const checkboxes = screen.getAllByRole('checkbox')
@@ -276,9 +276,9 @@ describe('EvaluationRunDetail — bulk delete (FC-R7D)', () => {
     getModels.mockResolvedValueOnce([model({ path: 'p/live__e__100.zip', step: 100 })])
     renderAt('/evaluation/live-run')
     await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(1))
-    const enterBtn = screen.getByRole('button', { name: /선택 삭제/ })
+    const enterBtn = screen.getByRole('button', { name: /Delete selected/ })
     expect(enterBtn).toBeDisabled()
-    expect(enterBtn).toHaveAttribute('title', expect.stringMatching(/진행 중인 학습/))
+    expect(enterBtn).toHaveAttribute('title', expect.stringMatching(/active training run/i))
   })
 
   it('toggles selected checkboxes and updates the count', async () => {
@@ -289,13 +289,13 @@ describe('EvaluationRunDetail — bulk delete (FC-R7D)', () => {
     ])
     renderAt('/evaluation/my-run')
     await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(3))
-    fireEvent.click(screen.getByRole('button', { name: /선택 삭제/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
 
     fireEvent.click(screen.getByLabelText(/Select checkpoint step 100 for delete/))
     fireEvent.click(screen.getByLabelText(/Select checkpoint step 200 for delete/))
-    expect(screen.getByText(/선택됨: 2 \/ 3/)).toBeInTheDocument()
+    expect(screen.getByText(/Selected: 2 \/ 3/)).toBeInTheDocument()
     // Commit button label reflects the selection count.
-    expect(screen.getByRole('button', { name: /선택한 2개 삭제/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /Delete 2 selected/ })).toBeEnabled()
   })
 
   it('opens the confirmation modal and calls deleteModels with selected paths', async () => {
@@ -310,21 +310,21 @@ describe('EvaluationRunDetail — bulk delete (FC-R7D)', () => {
     renderAt('/evaluation/my-run')
     await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(2))
 
-    fireEvent.click(screen.getByRole('button', { name: /선택 삭제/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
     fireEvent.click(screen.getByLabelText(/Select checkpoint step 100 for delete/))
-    fireEvent.click(screen.getByRole('button', { name: /선택한 1개 삭제/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Delete 1 selected/ }))
 
-    // Modal opens with the file in its list + 삭제 commit button.
+    // Modal opens with the file in its list + Delete commit button.
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
-    expect(screen.getByText(/1개 파일을 영구 삭제합니다/)).toBeInTheDocument()
+    expect(screen.getByText(/Permanently delete 1 file/)).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /^삭제$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Delete$/ }))
     await waitFor(() => {
       expect(deleteModels).toHaveBeenCalledWith(['exp/a__e__100.zip'])
     })
     // Toast surfaces + mode exits.
     await waitFor(() => {
-      expect(screen.getByText(/1개 삭제 완료/)).toBeInTheDocument()
+      expect(screen.getByText(/1 file deleted/)).toBeInTheDocument()
     })
   })
 
@@ -335,11 +335,11 @@ describe('EvaluationRunDetail — bulk delete (FC-R7D)', () => {
     ])
     renderAt('/evaluation/my-run')
     await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(2))
-    fireEvent.click(screen.getByRole('button', { name: /선택 삭제/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
     fireEvent.click(screen.getByLabelText(/Select checkpoint step 200 for delete/))
-    fireEvent.click(screen.getByRole('button', { name: /선택한 1개 삭제/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Delete 1 selected/ }))
     await waitFor(() => {
-      expect(screen.getByText(/최신 체크포인트가 포함되어 있습니다/)).toBeInTheDocument()
+      expect(screen.getByText(/Selection includes the latest checkpoint/)).toBeInTheDocument()
     })
   })
 
@@ -351,14 +351,14 @@ describe('EvaluationRunDetail — bulk delete (FC-R7D)', () => {
     renderAt('/evaluation/my-run')
     await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(1))
 
-    fireEvent.click(screen.getByRole('button', { name: /선택 삭제/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
     fireEvent.click(screen.getByLabelText(/Select checkpoint step 100 for delete/))
-    fireEvent.click(screen.getByRole('button', { name: /선택한 1개 삭제/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Delete 1 selected/ }))
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /^삭제$/ }))
+    fireEvent.click(screen.getByRole('button', { name: /^Delete$/ }))
 
     await waitFor(() => {
-      expect(screen.getByText(/진행 중인 학습의 체크포인트는 삭제할 수 없습니다/)).toBeInTheDocument()
+      expect(screen.getByText(/Cannot delete checkpoints of an active training run/)).toBeInTheDocument()
     })
     // Row restored after rollback — radio for step 100 still present.
     expect(screen.getByLabelText(/Select checkpoint step 100$/)).toBeInTheDocument()

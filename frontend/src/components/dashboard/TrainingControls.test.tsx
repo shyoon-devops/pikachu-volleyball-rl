@@ -223,7 +223,7 @@ describe('TrainingControls', () => {
     }
   })
 
-  // ── Bot level active-state indicator (CRITICAL: "현재 선택 표시") ──
+  // ── Bot level active-state indicator (CRITICAL: "highlight current selection") ──
   it('marks the active bot level via data-active + .active class', () => {
     renderControls({ status: { botLevel: 3 } })
 

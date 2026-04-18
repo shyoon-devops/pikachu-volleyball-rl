@@ -133,7 +133,7 @@ export function UnifiedRunDetail() {
           <div className="unified-run-overview">
             {overviewEmpty ? (
               <p className="unified-run-overview-empty text-muted">
-                지표 수집 중…
+                Collecting metrics…
               </p>
             ) : (
               <dl className="unified-run-overview-meta" aria-label="Run metadata">
@@ -180,7 +180,7 @@ export function UnifiedRunDetail() {
             <ReplayList
               titleFilter={decoded}
               hideTitleColumn
-              emptyStateOverride="이 학습에는 아직 기록된 게임이 없습니다."
+              emptyStateOverride="No games recorded for this training run yet."
             />
           </ErrorBoundary>
         )}

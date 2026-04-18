@@ -36,8 +36,8 @@ describe('TitleInput (FC-R6G)', () => {
   it('renders the label, placeholder, and optional-hint', () => {
     renderInput()
     expect(screen.getByLabelText('Title')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('예: my-run-baseline')).toBeInTheDocument()
-    expect(screen.getByText(/비워두면 자동으로 이름이 생성됩니다/)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('e.g. my-run-baseline')).toBeInTheDocument()
+    expect(screen.getByText(/Leave blank for an auto-generated name/)).toBeInTheDocument()
   })
 
   it('treats empty + whitespace-only as the auto-gen path (validation ok)', async () => {
@@ -71,7 +71,7 @@ describe('TitleInput (FC-R6G)', () => {
     await waitFor(() => {
       expect(onValidationChange).toHaveBeenLastCalledWith({ kind: 'tooLong' })
     })
-    expect(screen.getByText('최대 60자')).toBeInTheDocument()
+    expect(screen.getByText('Max 60 characters')).toBeInTheDocument()
     // 61/60 counter turned danger — locked in via `--over` class.
     const counter = screen.getByText(/61 \/ 60/)
     expect(counter.className).toContain('title-input-counter--over')
@@ -92,7 +92,7 @@ describe('TitleInput (FC-R6G)', () => {
       ),
       { timeout: 1500 },
     )
-    expect(screen.getByText(/이미 존재하는 제목/)).toBeInTheDocument()
+    expect(screen.getByText(/Title already in use/)).toBeInTheDocument()
   })
 
   it('degrades to ok when the titles endpoint rejects (submit allowed)', async () => {
