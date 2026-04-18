@@ -48,9 +48,9 @@ import {
   formatRallyCount,
   formatAvgRallyLength,
   formatExperimentIdShort,
-  formatEnvId,
   formatEpisode,
 } from '../../lib/formatGame'
+import { EnvChip } from '../shared/EnvChip'
 import { ScoreCell } from '../shared/ScoreCell'
 import { TimestampText } from '../shared/TimestampText'
 import './ReplayList.css'
@@ -445,13 +445,7 @@ const GameRow = memo(
           </td>
         )}
         <td>
-          <span
-            className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
-            aria-label={g.envId === undefined ? 'No env id recorded' : `Env ${g.envId}`}
-            data-env-id={g.envId ?? ''}
-          >
-            {formatEnvId(g.envId)}
-          </span>
+          <EnvChip envId={g.envId} />
         </td>
         <td className="text-muted">{formatEpisode(g.episode)}</td>
         <td>{formatBotLevel(g.botLevel)}</td>

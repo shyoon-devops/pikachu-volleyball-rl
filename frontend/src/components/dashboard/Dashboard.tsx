@@ -1,5 +1,6 @@
 import { memo, useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
+import { EnvChip } from '../shared/EnvChip'
 import { ScoreCell } from '../shared/ScoreCell'
 import { TimestampText } from '../shared/TimestampText'
 import { GameCanvas } from '../game/GameCanvas'
@@ -19,7 +20,6 @@ import {
   formatRallyCount,
   formatAvgRallyLength,
   formatExperimentIdShort,
-  formatEnvId,
   formatEpisode,
 } from '../../lib/formatGame'
 import {
@@ -435,15 +435,7 @@ const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecor
         )}
       </td>
       <td>
-        <span
-          className={`env-chip${g.envId === undefined ? ' env-chip--empty' : ''}`}
-          aria-label={
-            g.envId === undefined ? 'No env id recorded' : `Env ${g.envId}`
-          }
-          data-env-id={g.envId ?? ''}
-        >
-          {formatEnvId(g.envId)}
-        </span>
+        <EnvChip envId={g.envId} />
       </td>
       <td className="text-muted">{formatEpisode(g.episode)}</td>
       <td>{formatBotLevel(g.botLevel)}</td>
