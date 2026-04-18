@@ -25,12 +25,70 @@ class FakeGameService:
         self._games.append(doc)
         return doc["_id"]
 
-    async def get_games(self, page: int = 1, limit: int = 20):
+    async def get_games(self, page: int = 1, limit: int = 20, *, title=None):
         from backend.app.models.schemas import PaginatedResponse
 
+        if title == "untitled":
+            filtered = [g for g in self._games if not g.get("title")]
+        elif title is not None:
+            filtered = [g for g in self._games if g.get("title") == title]
+        else:
+            filtered = list(self._games)
         start = (page - 1) * limit
-        sliced = self._games[start : start + limit]
-        return PaginatedResponse(data=sliced, total=len(self._games), page=page, limit=limit)
+        sliced = filtered[start : start + limit]
+        return PaginatedResponse(
+            data=sliced, total=len(filtered), page=page, limit=limit
+        )
+
+    async def aggregate_by_title(self, page: int = 1, limit: int = 20):
+        """In-memory mirror of ``GameService.aggregate_by_title``.
+
+        Good enough for route-level tests — groups by title, computes
+        win_rate + avg_rally_length, sorts by earliest timestamp desc.
+        """
+        from backend.app.models.schemas import PaginatedResponse
+
+        groups: dict[str, list[dict]] = {}
+        for g in self._games:
+            key = g.get("title") or "untitled"
+            groups.setdefault(key, []).append(g)
+
+        entries = []
+        for key, members in groups.items():
+            total_games = len(members)
+            wins = sum(1 for m in members if m.get("winner") == 1)
+            win_rate = wins / total_games if total_games else 0.0
+            started = min(m.get("timestamp") for m in members)
+            ended = max(m.get("timestamp") for m in members)
+            avg_rally = (
+                sum(int(m.get("rally_count", 0)) for m in members) / total_games
+                if total_games
+                else 0.0
+            )
+            entries.append({
+                "title": key,
+                "experiment_id": members[-1].get("experiment_id"),
+                "started_at": (
+                    started.isoformat()
+                    if started is not None and hasattr(started, "isoformat")
+                    else started
+                ),
+                "ended_at": (
+                    ended.isoformat()
+                    if ended is not None and hasattr(ended, "isoformat")
+                    else ended
+                ),
+                "total_games": total_games,
+                "win_rate": win_rate,
+                "avg_rally_length": avg_rally,
+                "status": "done",
+            })
+        entries.sort(key=lambda e: e["started_at"] or "", reverse=True)
+        start = (page - 1) * limit
+        sliced = entries[start : start + limit]
+        return PaginatedResponse(
+            data=sliced, total=len(entries), page=page, limit=limit
+        )
 
     async def get_game(self, game_id: str):
         for g in self._games:
@@ -72,6 +130,7 @@ class FakeEvalService:
         n_games: int = 50,
         *,
         progress_callback=None,
+        training_title=None,
     ):
         if ".." in model_path or model_path.startswith("/"):
             raise FileNotFoundError(f"Invalid model path: {model_path}")

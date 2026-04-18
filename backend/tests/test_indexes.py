@@ -53,9 +53,15 @@ async def test_ensure_indexes_touches_every_declared_collection():
     db = _FakeDB()
     result = await ensure_indexes(db)  # type: ignore[arg-type]
 
-    # The three known collections from the declaration must all appear.
-    assert set(result.keys()) == {"games", "evaluations", "metrics"}
-    for name in ("games", "evaluations", "metrics"):
+    # Every declared collection must appear. ``training_runs`` joined
+    # the list with BE-T3 (title uniqueness + recency + exp_id lookup).
+    assert set(result.keys()) == {
+        "games",
+        "evaluations",
+        "metrics",
+        "training_runs",
+    }
+    for name in ("games", "evaluations", "metrics", "training_runs"):
         assert db[name].create_indexes.await_count == 1
 
 
