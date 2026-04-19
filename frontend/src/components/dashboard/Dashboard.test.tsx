@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import type { ConnectionState, GameRecord, GameState, TrainingMetrics, TrainingStatus } from '../../lib/types'
+import type { ConnectionState, GameRecord, GameState, LeagueUpdatePayload, TrainingMetrics, TrainingStatus } from '../../lib/types'
 import type { EnvFramesMap } from '../../hooks/useTrainingState'
 
 // Partial shape returned by useTrainingState — easy to swap per-test.
@@ -14,6 +14,7 @@ interface MockState {
   recentGames: GameRecord[]
   envFrames: EnvFramesMap
   gameResultSeq: number
+  leagueUpdate: LeagueUpdatePayload | null
   send: () => void
 }
 
@@ -26,6 +27,7 @@ const mockState: MockState = {
   recentGames: [],
   envFrames: {},
   gameResultSeq: 0,
+  leagueUpdate: null,
   send: vi.fn(),
 }
 
@@ -63,6 +65,7 @@ function resetMockState(overrides: Partial<MockState> = {}) {
     recentGames: [],
     envFrames: {},
     gameResultSeq: 0,
+    leagueUpdate: null,
     send: vi.fn(),
     ...overrides,
   })

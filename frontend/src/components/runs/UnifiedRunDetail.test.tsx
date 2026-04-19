@@ -13,6 +13,7 @@ const deleteModels = vi.fn<(paths: string[]) => Promise<{ deleted: string[]; fai
 const getGames = vi.fn<(page?: number, limit?: number, title?: string) => Promise<PaginatedResponse<GameRecord>>>()
 const getAvailableReplays = vi.fn<() => Promise<ReplayInfo[]>>()
 const getEvalResults = vi.fn<() => Promise<EvalResult[]>>()
+const getLeagueStandings = vi.fn<() => Promise<import('../../lib/types').LeagueStandings>>()
 
 vi.mock('../../lib/api', async () => {
   const actual = await vi.importActual<typeof import('../../lib/api')>('../../lib/api')
@@ -27,12 +28,18 @@ vi.mock('../../lib/api', async () => {
     getGames: (page?: number, limit?: number, title?: string) => getGames(page, limit, title),
     getAvailableReplays: () => getAvailableReplays(),
     getEvalResults: () => getEvalResults(),
+    getLeagueStandings: () => getLeagueStandings(),
   }
 })
 
-const mockTrainingState: { gameResultSeq: number; status: TrainingStatus } = {
+const mockTrainingState: {
+  gameResultSeq: number
+  status: TrainingStatus
+  leagueUpdate: null
+} = {
   gameResultSeq: 0,
   status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+  leagueUpdate: null,
 }
 vi.mock('../../hooks/useTrainingState', () => ({
   useTrainingState: () => mockTrainingState,
@@ -91,9 +98,13 @@ beforeEach(() => {
   getGames.mockResolvedValue({ data: [], total: 0, page: 1, limit: 20 })
   getAvailableReplays.mockResolvedValue([])
   getEvalResults.mockResolvedValue([])
+  getLeagueStandings.mockResolvedValue({
+    top: [], championId: null, generation: 0, poolSize: 32, totalCheckpoints: 0,
+  })
   try { sessionStorage.clear() } catch { /* ignore */ }
   mockTrainingState.gameResultSeq = 0
   mockTrainingState.status = { state: 'stopped', currentStep: 0, currentEpisode: 0 }
+  mockTrainingState.leagueUpdate = null
 })
 
 afterEach(() => {
@@ -141,6 +152,17 @@ describe('UnifiedRunDetail (FC-R8A)', () => {
     // Embedded mode hides the evaluation-specific breadcrumb so the
     // unified header isn't duplicated inside the tab panel.
     expect(screen.queryByRole('link', { name: 'Evaluation' })).toBeNull()
+  })
+
+  it('honours ?tab=league — League panel renders pool status + leaderboard', async () => {
+    renderAt('/runs/my-run?tab=league')
+    const leagueTab = screen.getByRole('tab', { name: 'League' })
+    expect(leagueTab).toHaveAttribute('aria-selected', 'true')
+    // Pool status bar is always visible; leaderboard falls back to
+    // empty-state copy when top-N is empty.
+    await waitFor(() => {
+      expect(screen.getByText(/Pool empty/i)).toBeInTheDocument()
+    })
   })
 
   it('clicking tabs updates ?tab= in the URL (no full route change)', async () => {
