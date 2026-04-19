@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -75,6 +76,12 @@ async def lifespan(app: FastAPI):
     app.state.training_runs_service = training_runs_service
     app.state.training_service.runs_service = training_runs_service
     app.state.eval_service = EvalServiceWrapper(db)
+    # League repository (v2 Sprint-1 B-impl-2). Wire early so the read
+    # endpoints work even before a training run kicks off.
+    from backend.app.services.league_repository import LeagueRepository
+    app.state.league_repository = LeagueRepository(
+        db, league_dir=os.getenv("LEAGUE_DIR", str(Path(model_dir) / "league")),
+    )
     app.state.ws_manager = ConnectionManager()
 
     push_tasks = [
