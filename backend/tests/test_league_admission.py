@@ -228,6 +228,64 @@ class TestProviderFallbacks:
         assert items[0]["provisional_rating"] == 1000.0
         loop.close()
 
+    def test_rating_provider_raise_falls_back_to_1000(
+        self, tmp_path: Path
+    ) -> None:
+        # Provider raising must not propagate — training continues,
+        # gate falls back to 1000 (seed value). Covers the defensive
+        # except branch in _read_provisional_rating.
+        def _angry() -> float:
+            raise RuntimeError("rating store down")
+
+        loop = asyncio.new_event_loop()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=8)
+        cb = LeagueAdmissionCallback(
+            experiment_id="e0123456789abc",
+            admission_queue=queue,
+            loop=loop,
+            model_dir=str(tmp_path),
+            save_interval=10,
+            slug="run",
+            provisional_rating_provider=_angry,
+            pool_median_provider=lambda: 500.0,
+        )
+        cb.model = _FakeModel()
+        _tick(cb, 10)  # must not raise
+        items = _drain(loop, queue)
+        assert len(items) == 1
+        assert items[0]["provisional_rating"] == 1000.0
+        # 1000 > 500 + 25 → admit.
+        assert items[0]["admitted"] is True
+        loop.close()
+
+    def test_pool_median_provider_raise_falls_back_to_none(
+        self, tmp_path: Path
+    ) -> None:
+        # Same shape — missing/broken pool signal treats as empty
+        # pool (auto-admit). Covers the except branch in
+        # _read_pool_median.
+        def _angry() -> float | None:
+            raise RuntimeError("mongo timeout")
+
+        loop = asyncio.new_event_loop()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=8)
+        cb = LeagueAdmissionCallback(
+            experiment_id="e0123456789abc",
+            admission_queue=queue,
+            loop=loop,
+            model_dir=str(tmp_path),
+            save_interval=10,
+            slug="run",
+            provisional_rating_provider=lambda: 100.0,  # low
+            pool_median_provider=_angry,
+        )
+        cb.model = _FakeModel()
+        _tick(cb, 10)
+        items = _drain(loop, queue)
+        # Low rating but None pool → auto-admit per ADR §5.
+        assert items[0]["admitted"] is True
+        loop.close()
+
     def test_missing_pool_median_provider_auto_admits(
         self, tmp_path: Path
     ) -> None:

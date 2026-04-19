@@ -50,6 +50,14 @@ def should_admit(
     first few checkpoints of a fresh run need to seed the pool
     regardless of their absolute rating. ADR §5 allows bot-ladder
     anchors to be present but the league pool itself starts empty.
+
+    Threshold semantics: strict ``>`` (NOT ``>=``). At exactly
+    ``median + delta`` the checkpoint is rejected. The ADR wording
+    "풀 미디언 +25 Elo 이상" is Korean-ambiguous between ≥ and > in
+    a strictly-numeric reading; strict > was chosen so a wall of
+    equal-rated saves doesn't flood the pool on a noisy run. The
+    test suite pins this explicitly; flag for PM if the intent was
+    inclusive.
     """
     if pool_median_rating is None:
         return True
@@ -121,11 +129,18 @@ class LeagueAdmissionCallback(CheckpointCallback):
             return True
         # Guard against double-fires on the same timestep (happens with
         # n_envs > 1 when the VecEnv steps arrive at the same aggregated
-        # timestep count).
+        # timestep count). Assumes ``num_timesteps`` only monotonically
+        # increases within a run — correct for fresh starts and normal
+        # SB3 resumes; a manual resume that loads a step less-than-equal
+        # to the last saved step could skip a legitimate save.
         if self.num_timesteps == self._last_admission_step:
             return True
         self._last_admission_step = self.num_timesteps
 
+        # NOTE: intentionally does NOT call super()._on_step() —
+        # CheckpointCallback._on_step re-saves via its own branch, so
+        # delegating would produce a double save and break the
+        # _last_admission_step guard below.
         name = f"{self.slug}__{self._exp8}__{self.num_timesteps}"
         path = self._checkpoint_dir / name
         self.model.save(str(path))
@@ -160,11 +175,16 @@ class LeagueAdmissionCallback(CheckpointCallback):
             return 1000.0
         try:
             return float(self.provisional_rating_provider())
-        except Exception as exc:  # pragma: no cover — defensive
+        except Exception:
+            # exc_info=True preserves the full traceback so a
+            # misconfigured provider is debuggable in training logs.
+            # Broad except is intentional — the admission callback must
+            # never wedge a training run because a rating source is
+            # momentarily unhealthy.
             logger.warning(
-                "provisional_rating_provider raised %s; "
+                "provisional_rating_provider raised; "
                 "falling back to 1000.0",
-                exc,
+                exc_info=True,
             )
             return 1000.0
 
@@ -173,10 +193,10 @@ class LeagueAdmissionCallback(CheckpointCallback):
             return None
         try:
             return self.pool_median_provider()
-        except Exception as exc:  # pragma: no cover — defensive
+        except Exception:
             logger.warning(
-                "pool_median_provider raised %s; treating as empty pool",
-                exc,
+                "pool_median_provider raised; treating as empty pool",
+                exc_info=True,
             )
             return None
 
