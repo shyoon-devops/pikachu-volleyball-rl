@@ -423,17 +423,27 @@ class TrainingManager:
                 # singleton across all env workers. Sub-env index is
                 # passed to env_kwargs so the provider's mirror / PFSP
                 # sampling can stagger deterministically across workers.
+                #
+                # NB: ``make_vec_env`` auto-wraps each env in SB3's
+                # Monitor, which is what populates ``info["episode"]``
+                # on natural terminations — the key ``_PausePoke`` (and
+                # MetricsCallback) read to drive current_episode. We
+                # must apply the same wrap manually here; dropping
+                # Monitor was the root cause of self-play runs showing
+                # ``step`` incrementing while ``episode`` stayed at 0.
                 # noqa kept on the import line itself so ruff actually
                 # sees the PLC0415 suppression.
+                from stable_baselines3.common.monitor import Monitor  # noqa: PLC0415
                 from stable_baselines3.common.vec_env import DummyVecEnv  # noqa: PLC0415
 
                 def _make_one(i: int) -> Any:
-                    def _f() -> PikachuVolleyballEnv:
-                        return PikachuVolleyballEnv(
+                    def _f() -> Any:
+                        base_env = PikachuVolleyballEnv(
                             bot_level=bot_level,
                             opponent_provider=provider,
                             env_index=i,
                         )
+                        return Monitor(base_env)
                     return _f
 
                 env = DummyVecEnv([_make_one(i) for i in range(n_envs)])
