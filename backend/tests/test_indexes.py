@@ -54,14 +54,18 @@ async def test_ensure_indexes_touches_every_declared_collection():
     result = await ensure_indexes(db)  # type: ignore[arg-type]
 
     # Every declared collection must appear. ``training_runs`` joined
-    # the list with BE-T3 (title uniqueness + recency + exp_id lookup).
+    # with BE-T3 (title uniqueness + recency + exp_id lookup);
+    # ``league_standings`` joined with v2 Sprint-1 B-impl-2.
     assert set(result.keys()) == {
         "games",
         "evaluations",
         "metrics",
         "training_runs",
+        "league_standings",
     }
-    for name in ("games", "evaluations", "metrics", "training_runs"):
+    for name in (
+        "games", "evaluations", "metrics", "training_runs", "league_standings"
+    ):
         assert db[name].create_indexes.await_count == 1
 
 

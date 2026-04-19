@@ -4,6 +4,7 @@ import { ErrorBoundary } from '../ErrorBoundary'
 import { ReplayList } from '../replay/ReplayList'
 import { EvaluationRunDetail } from '../evaluation/EvaluationRunDetail'
 import { HyperparamsSummary } from '../history/HyperparamsSummary'
+import { LeaguePanel } from './LeaguePanel'
 import { getTrainingRuns } from '../../lib/api'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import { TimestampText } from '../shared/TimestampText'
@@ -22,16 +23,17 @@ import './UnifiedRunDetail.css'
  * sub-tab from App.tsx.
  */
 
-type SubTab = 'overview' | 'games' | 'eval'
+type SubTab = 'overview' | 'games' | 'eval' | 'league'
 
 const TABS: Array<{ key: SubTab; label: string }> = [
   { key: 'overview', label: 'Overview' },
   { key: 'games', label: 'Games' },
   { key: 'eval', label: 'Evaluation' },
+  { key: 'league', label: 'League' },
 ]
 
 function parseTab(raw: string | null): SubTab {
-  if (raw === 'games' || raw === 'eval' || raw === 'overview') return raw
+  if (raw === 'games' || raw === 'eval' || raw === 'overview' || raw === 'league') return raw
   return 'overview'
 }
 
@@ -188,6 +190,12 @@ export function UnifiedRunDetail() {
         {activeTab === 'eval' && (
           <ErrorBoundary>
             <EvaluationRunDetail embedded />
+          </ErrorBoundary>
+        )}
+
+        {activeTab === 'league' && (
+          <ErrorBoundary>
+            <LeaguePanel />
           </ErrorBoundary>
         )}
       </div>

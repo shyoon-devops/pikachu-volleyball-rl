@@ -514,3 +514,32 @@
 .dashboard-batch-tab-placeholder--idle {
   font-style: italic;
 }
+
+/* v2.x Sprint 1 — current-run league line (§3).
+   Small mono line rendered under TrainingControls when the live
+   run has an admitted league entry. Hidden entirely otherwise. */
+.dashboard-current-run-league {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px 10px;
+  margin-top: var(--space-2);
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.1));
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-current-run-league-elo {
+  font-weight: var(--weight-semibold);
+}
+
+.dashboard-current-run-league-sep {
+  color: var(--color-text-muted);
+}
+
+.dashboard-current-run-league-rank {
+  color: var(--color-text-secondary);
+}

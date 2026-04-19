@@ -9,7 +9,7 @@ import numpy as np
 import gymnasium
 from gymnasium import spaces
 
-from backend.game.bot import RuleBasedBot
+from backend.rl.opponent import FixedBotProvider, OpponentProvider
 from backend.game.constants import (
     BALL_RADIUS,
     GROUND_HEIGHT,
@@ -67,10 +67,31 @@ class PikachuVolleyballEnv(gymnasium.Env):
 
     metadata: dict[str, Any] = {"render_modes": []}
 
-    def __init__(self, bot_level: int = 1, max_steps: int = 3000) -> None:
+    def __init__(
+        self,
+        bot_level: int = 1,
+        max_steps: int = 3000,
+        *,
+        opponent_provider: OpponentProvider | None = None,
+        env_index: int = 0,
+    ) -> None:
         super().__init__()
         self.bot_level = bot_level
         self.max_steps = max_steps
+        self.env_index = int(env_index)
+
+        # Opponent provider wiring (v2.x Sprint-1 self-play league).
+        # When a provider is passed in explicitly, it takes precedence —
+        # typical for the self-play-league trainer path where the trainer
+        # owns a shared PFSPProvider. When left None (the legacy and
+        # bot_ladder path), we fall back to a FixedBotProvider built from
+        # ``bot_level`` so existing callers keep working unchanged. See
+        # docs/adr/0014-self-play-league.md §3.
+        self._opponent_provider: OpponentProvider = (
+            opponent_provider
+            if opponent_provider is not None
+            else FixedBotProvider(level=bot_level)
+        )
 
         self.observation_space = spaces.Box(
             low=-1.0, high=1.0, shape=(18,), dtype=np.float32
@@ -85,7 +106,10 @@ class PikachuVolleyballEnv(gymnasium.Env):
         # before that window is entered so the RL agent never sees no-op
         # game-end frames.
         self._game = PikachuVolleyball()
-        self._bot = RuleBasedBot(level=bot_level)
+        # Bot reference is rebound on every reset() so provider sampling
+        # runs once per match (matching the pre-league per-episode
+        # RuleBasedBot construction pattern).
+        self._bot = self._opponent_provider.get_opponent(self.env_index)
         self._steps = 0
         self._prev_score1 = 0
         self._prev_score2 = 0
@@ -122,7 +146,11 @@ class PikachuVolleyballEnv(gymnasium.Env):
         # enters a 211-frame gameEnd window at MAX_SCORE, but the env
         # terminates on MAX_SCORE before that window is entered.
         self._game = PikachuVolleyball()
-        self._bot = RuleBasedBot(level=self.bot_level)
+        # Pull a fresh opponent for the new match. The FixedBotProvider
+        # path returns a new RuleBasedBot(level=bot_level) — same
+        # behavior as the pre-league direct construction. The PFSP
+        # path samples from the league pool.
+        self._bot = self._opponent_provider.get_opponent(self.env_index)
         state = self._game.reset()
         self._steps = 0
         self._prev_score1 = 0
@@ -202,13 +230,25 @@ class PikachuVolleyballEnv(gymnasium.Env):
         # Recent Games list would fill with abandoned episodes. The drain
         # hook on the trainer thread picks these up.
         if terminated and not truncated:
+            winner = 1 if new_state.score1 >= MAX_SCORE else 2
             self._pending_results.append({
                 "score1": int(new_state.score1),
                 "score2": int(new_state.score2),
-                "winner": 1 if new_state.score1 >= MAX_SCORE else 2,
+                "winner": winner,
                 "duration_frames": int(new_state.frame),
                 "rally_count": int(self._rally_count),
             })
+            # League provider sees the match outcome so it can update
+            # Elo against the sampled opponent. FixedBotProvider's
+            # default on_match_end is a no-op — zero cost for the
+            # legacy path. PFSPProvider forwards to its rating_store.
+            self._opponent_provider.on_match_end(
+                env_index=self.env_index,
+                opponent=self._bot,
+                winner=winner,
+                score1=int(new_state.score1),
+                score2=int(new_state.score2),
+            )
 
         self._prev_score1 = new_state.score1
         self._prev_score2 = new_state.score2

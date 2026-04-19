@@ -181,6 +181,32 @@ async def _dispatch(
         }
         if params.n_envs is not None:
             start_kwargs["n_envs"] = params.n_envs
+
+        # Self-play league wiring (v2 Sprint-1 B-impl-7). The handler
+        # materialises a PFSPProvider here so the training thread
+        # doesn't do disk/mongo I/O at startup. Fallback to
+        # bot_ladder when: FE requested self_play but no pool is
+        # seeded yet, or the LeagueRepository / OpponentProvider
+        # modules aren't wired (legacy / test).
+        effective_mode = params.mode
+        if params.mode == "self_play":
+            provider = _build_league_opponent_provider(
+                request_app=getattr(ws, "app", None)
+                or getattr(manager, "_app", None),
+                sampling=params.sampling,
+            )
+            if provider is None:
+                logger.info(
+                    "training:start mode=self_play fell back to bot_ladder "
+                    "(pool empty or services unwired)"
+                )
+                effective_mode = "bot_ladder"
+            else:
+                start_kwargs["training_mode"] = "self_play"
+                start_kwargs["opponent_provider"] = provider
+        # When the caller explicitly asked for bot_ladder we leave
+        # start_kwargs untouched — the manager default is bot_ladder.
+
         experiment_id = await training_service.start(**start_kwargs)
         # Persist the run record (BE-T1) so future uniqueness checks
         # see this title. Best-effort — failure logs but doesn't fail
@@ -209,8 +235,8 @@ async def _dispatch(
         except Exception:  # noqa: BLE001
             logger.exception("training_runs register failed for %s", experiment_id)
         logger.info(
-            "Training started: experiment=%s bot_level=%d title=%s",
-            experiment_id, effective_bot_level, final_title,
+            "Training started: experiment=%s bot_level=%d title=%s mode=%s",
+            experiment_id, effective_bot_level, final_title, effective_mode,
         )
         await _emit_status(ws, manager, {
             "type": "training:status",
@@ -218,6 +244,13 @@ async def _dispatch(
                 "state": "running",
                 "experiment_id": experiment_id,
                 "title": final_title,
+                # FE needs the POST-fallback mode so the dashboard
+                # header renders the correct opponent source even
+                # when self_play downgraded to bot_ladder on an
+                # empty pool. Matches the ADR §7 contract ("Training
+                # start modal: toggle ... if league, show current
+                # pool size + top Elo") — FE reads this field.
+                "mode": effective_mode,
             },
         })
 
@@ -333,6 +366,47 @@ async def frames_push_loop(
         await manager.broadcast({"type": "training:frame", "payload": data})
 
 
+def _build_league_opponent_provider(
+    request_app: Any, sampling: str
+) -> Any | None:
+    """Build a ``PFSPProvider`` from the current league pool.
+
+    Returns ``None`` when the caller should fall back to bot_ladder —
+    pool is empty, opponent module not importable (tests), or the
+    repository isn't wired. Called from the WS ``training:start``
+    handler so the training thread doesn't pay for manifest I/O.
+    """
+    try:
+        from backend.app.services.league_elo import is_anchor
+        from backend.rl.opponent import PFSPProvider
+    except Exception:  # noqa: BLE001 — older deployments without v2 modules
+        return None
+    repo = getattr(request_app, "state", None) if request_app is not None else None
+    repo = getattr(repo, "league_repository", None) if repo is not None else None
+    if repo is None:
+        return None
+    try:
+        manifest = repo.load_manifest()
+    except Exception:  # noqa: BLE001 — broken manifest → fall back
+        logger.exception("league provider build: manifest load failed")
+        return None
+    # Drop anchor rows — the league provider samples TRAINED opponents.
+    # Anchor rows are for scoring the baseline corridor, not for
+    # producing Opponent instances (there's no .zip to load).
+    pool = [c for c in manifest.checkpoints if not is_anchor(c.id)]
+    if not pool:
+        return None
+    try:
+        # rating_store=None is supported — the provider degrades to
+        # 0.5 win-rate fallback on every pool entry, which makes PFSP
+        # equivalent to uniform weighting for Sprint-1. A proper
+        # head-to-head store is reserved for Sprint-2 per ADR §4.
+        return PFSPProvider(pool=pool, rating_store=None, strategy=sampling)
+    except Exception:  # noqa: BLE001
+        logger.exception("league provider build: PFSPProvider init failed")
+        return None
+
+
 async def env_frames_push_loop(
     manager: ConnectionManager,
     training_service: TrainingServiceWrapper,
@@ -352,6 +426,70 @@ async def env_frames_push_loop(
     while True:
         data = await queue.get()
         await manager.broadcast({"type": "training:env_frame", "payload": data})
+
+
+async def league_push_loop(
+    manager: ConnectionManager,
+    training_service: TrainingServiceWrapper,
+    league_repository: Any,
+) -> None:
+    """Drain LeagueCallback's broadcast queue → ``training:league_update``.
+
+    AI's ``LeagueCallback`` (backend/rl/league_callback.py) pushes one
+    record every ``LEAGUE_BROADCAST_INTERVAL`` (64 matches) into
+    ``manager.league_queue``. This loop enriches each record with the
+    current standings top-N snapshot from ``LeagueRepository`` and
+    broadcasts per ADR §8:
+
+        {type: "training:league_update",
+         payload: {top_n: [...], pool_size, champion_id, generation,
+                   total_matches, since_last_broadcast, recent: [...]}}
+
+    The top-N snapshot is taken at emit time (not at queue push)
+    because:
+      * match outcomes that updated ratings have already flushed via
+        ``LeagueRepository.update_elo_batch`` — the repo already
+        reflects the new state.
+      * taking the snapshot here keeps the callback side (training
+        thread) free of async-mongo I/O.
+
+    Graceful degradation: missing ``league_queue`` attribute or
+    missing ``league_repository`` → loop parks idle so tests can run
+    without a full training manager.
+    """
+    queue = getattr(training_service.manager, "league_queue", None)
+    if queue is None:
+        logger.info(
+            "league_push_loop: no league_queue on manager; idle"
+        )
+        return
+    if league_repository is None:
+        logger.info("league_push_loop: no league_repository; idle")
+        return
+    while True:
+        record = await queue.get()
+        try:
+            standings = await league_repository.standings_envelope(limit=10)
+            payload: dict[str, Any] = {
+                "top_n": [c.model_dump(mode="json") for c in standings.top],
+                "pool_size": standings.pool_size,
+                "champion_id": standings.champion_id,
+                "generation": standings.generation,
+                "total_matches": int(record.get("total_matches", 0) or 0),
+                "since_last_broadcast": int(
+                    record.get("since_last_broadcast", 0) or 0
+                ),
+                "recent": list(record.get("recent", []) or []),
+            }
+        except Exception:  # noqa: BLE001 — broadcast failures must not kill the loop
+            logger.exception(
+                "league_push_loop: failed to build payload; record=%r", record
+            )
+            continue
+        await manager.broadcast({
+            "type": "training:league_update",
+            "payload": payload,
+        })
 
 
 SAVE_RETRY_ATTEMPTS = 3

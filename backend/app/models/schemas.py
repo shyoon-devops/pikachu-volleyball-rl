@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -150,6 +151,18 @@ class WsTrainingStartPayload(BaseModel):
     # GAE lambda — advantage-estimator bias/variance knob. 0.9 is the
     # aggressively-biased end; 1.0 is plain discounted returns.
     gae_lambda: float | None = Field(default=None, ge=0.9, le=1.0)
+    # Opponent source — v2 Sprint-1 self-play league (ADR §5).
+    #   * ``"bot_ladder"`` (default) — FixedBotProvider(level=bot_level).
+    #     100% v1-compatible; no league wiring required.
+    #   * ``"self_play"`` — PFSPProvider over the league pool. Falls
+    #     back to bot_ladder at the handler layer if the pool is empty
+    #     or the required service isn't wired.
+    mode: Literal["bot_ladder", "self_play"] = "bot_ladder"
+    # Sampling strategy for ``mode="self_play"`` (ADR §2). The
+    # handler maps this onto ``PFSPProvider(..., strategy=sampling)``.
+    # ``"pfsp"`` default matches the ADR default. Ignored when
+    # mode="bot_ladder".
+    sampling: Literal["uniform", "elo_proximity", "pfsp"] = "pfsp"
 
 
 class WsSetLevelPayload(BaseModel):

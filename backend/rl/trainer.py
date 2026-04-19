@@ -26,6 +26,7 @@ from backend.rl.callbacks import (
     MetricsCallback,
 )
 from backend.rl.env import PikachuVolleyballEnv
+from backend.rl.league_callback import LeagueCallback
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,12 @@ class TrainingManager:
         # WS subscriber can never accumulate more than ``maxsize`` queued
         # snapshots. Drop-oldest is handled by _enqueue_with_drop.
         self.env_frames_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)
+        # League-update broadcast queue (v2 Sprint-1). The LeagueCallback
+        # (backend/rl/league_callback.py) pushes one record every 64
+        # matches; the WS side drains via league_push_loop and rebroadcasts
+        # as training:league_update. Bounded so a stalled FE subscriber
+        # can't blow memory — one flush-window of records at a time.
+        self.league_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=32)
 
         self._model: PPO | None = None
         self._thread: threading.Thread | None = None
@@ -88,6 +95,13 @@ class TrainingManager:
         self._experiment_id: str = ""
         self._bot_level: int = 1
         self._hyperparams: dict[str, Any] = {}
+        # Self-play league wiring: set in start(). Initialized here so
+        # direct _train_loop attribute reads (after the ``getattr`` →
+        # direct-access cleanup in the review follow-up) always find
+        # them even if the class is constructed but start() was never
+        # called (test isolation / introspection paths).
+        self._training_mode: str = "bot_ladder"
+        self._opponent_provider: Any = None
         # Human title + its filesystem slug for this run. Both are set
         # by start() before the thread kicks off; callbacks that tag
         # result/frame payloads read them off this object at emit time.
@@ -109,6 +123,8 @@ class TrainingManager:
         n_envs: int = 8,
         title: str = "",
         slug: str = "",
+        training_mode: str = "bot_ladder",
+        opponent_provider: Any = None,
     ) -> str:
         """Start a new training experiment. Returns experiment_id.
 
@@ -117,12 +133,38 @@ class TrainingManager:
         is handed in and stores it for downstream tagging. An empty
         title is permitted at this layer (legacy / test callers); the
         slug falls back to ``"run"`` via the title service.
+
+        ``training_mode`` selects the opponent source (v2.x Sprint-1):
+          * ``"bot_ladder"`` (default, v1.0.0-compatible) — each env gets
+            a ``FixedBotProvider(level=bot_level)`` built in-process.
+            Uses the same SubprocVecEnv path we shipped at v1.0.0 so
+            throughput is unchanged.
+          * ``"self_play"`` — the caller is expected to pass a shared
+            ``opponent_provider`` (typically ``PFSPProvider``) that
+            samples from the league pool. Runs on ``DummyVecEnv``
+            (in-process) so the provider's rating store and checkpoint
+            cache aren't duplicated across subprocesses. Trades a small
+            amount of throughput for correct shared-state semantics.
+
+        See docs/adr/0014-self-play-league.md §3 for the design.
         """
         if self.status == "running":
             raise RuntimeError("Training is already running")
+        if training_mode not in ("bot_ladder", "self_play"):
+            raise ValueError(
+                f"training_mode must be 'bot_ladder' or 'self_play', "
+                f"got {training_mode!r}"
+            )
+        if training_mode == "self_play" and opponent_provider is None:
+            raise ValueError(
+                "training_mode='self_play' requires an opponent_provider "
+                "(typically a PFSPProvider built over the league pool)"
+            )
 
         self._experiment_id = str(uuid.uuid4())
         self._bot_level = bot_level
+        self._training_mode = training_mode
+        self._opponent_provider = opponent_provider
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         # Title + slug set BEFORE the thread starts so the first demo-
         # tick + result-drain both see them. Slug defaults keep legacy
@@ -373,12 +415,35 @@ class TrainingManager:
         """Run SB3 PPO training (called from a background thread)."""
         try:
             bot_level = self._bot_level
-            env = make_vec_env(
-                PikachuVolleyballEnv,
-                n_envs=n_envs,
-                env_kwargs={"bot_level": bot_level},
-                vec_env_cls=SubprocVecEnv,
-            )
+            training_mode = self._training_mode
+            provider = self._opponent_provider
+            if training_mode == "self_play" and provider is not None:
+                # Shared in-process PFSP provider: DummyVecEnv keeps the
+                # rating store, checkpoint cache, and pool manifest
+                # singleton across all env workers. Sub-env index is
+                # passed to env_kwargs so the provider's mirror / PFSP
+                # sampling can stagger deterministically across workers.
+                # noqa kept on the import line itself so ruff actually
+                # sees the PLC0415 suppression.
+                from stable_baselines3.common.vec_env import DummyVecEnv  # noqa: PLC0415
+
+                def _make_one(i: int) -> Any:
+                    def _f() -> PikachuVolleyballEnv:
+                        return PikachuVolleyballEnv(
+                            bot_level=bot_level,
+                            opponent_provider=provider,
+                            env_index=i,
+                        )
+                    return _f
+
+                env = DummyVecEnv([_make_one(i) for i in range(n_envs)])
+            else:
+                env = make_vec_env(
+                    PikachuVolleyballEnv,
+                    n_envs=n_envs,
+                    env_kwargs={"bot_level": bot_level},
+                    vec_env_cls=SubprocVecEnv,
+                )
 
             hp = self._hyperparams
             if checkpoint_path:
@@ -437,6 +502,15 @@ class TrainingManager:
                     loop=loop,
                     manager=self,
                     drain_interval=hp.get("env_result_drain_interval", 4),
+                ),
+                # League aggregation — queues a broadcast record every
+                # LEAGUE_BROADCAST_INTERVAL (64) completed matches for
+                # the WS layer to drain + fan out as training:league_update.
+                # See backend/rl/league_callback.py and
+                # docs/adr/0014-self-play-league.md §4.
+                LeagueCallback(
+                    broadcast_queue=self.league_queue,
+                    loop=loop,
                 ),
                 _StopEventCallback(self._stop_event, self._pause_event, self),
             ])

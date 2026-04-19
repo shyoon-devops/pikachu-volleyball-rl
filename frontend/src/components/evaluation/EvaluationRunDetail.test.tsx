@@ -97,7 +97,7 @@ describe('EvaluationRunDetail (FC-R7C level-2)', () => {
     await waitFor(() => expect(screen.getAllByRole('radio').length).toBe(2))
 
     // Run button disabled until a selection is made.
-    const runBtn = screen.getByRole('button', { name: /Run Evaluation/ })
+    const runBtn = screen.getByRole('button', { name: /Run Evaluation \(vs L1/ })
     expect(runBtn).toBeDisabled()
     fireEvent.click(screen.getByLabelText('Select checkpoint step 200'))
     expect(runBtn).not.toBeDisabled()
@@ -150,7 +150,7 @@ describe('EvaluationRunDetail (FC-R7C level-2)', () => {
     await waitFor(() => expect(screen.getByLabelText('Select checkpoint step 500')).toBeInTheDocument())
     fireEvent.click(screen.getByLabelText('Select checkpoint step 500'))
     // Bot level picked up from URL (3), default n_games = 20.
-    fireEvent.click(screen.getByRole('button', { name: /Run Evaluation/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Run Evaluation \(vs L1/ }))
 
     await waitFor(() => {
       expect(runEvaluation).toHaveBeenCalledWith('exp/a__slug__500.zip', 3, 20)
@@ -362,5 +362,50 @@ describe('EvaluationRunDetail — bulk delete (FC-R7D)', () => {
     })
     // Row restored after rollback — radio for step 100 still present.
     expect(screen.getByLabelText(/Select checkpoint step 100$/)).toBeInTheDocument()
+  })
+})
+
+// v2.x Sprint 1 — F-impl-4 Card B (vs Top-N league)
+describe('EvaluationRunDetail — LeagueEvalCard (v2.x S1)', () => {
+  it('renders the Top-N select alongside the rule ladder card', async () => {
+    getModels.mockResolvedValueOnce([])
+    renderAt('/evaluation/my-run')
+    // Both card titles present (vs Rule ladder, vs Top-N league).
+    await waitFor(() => {
+      expect(screen.getByText('vs Rule ladder')).toBeInTheDocument()
+      expect(screen.getByText('vs Top-N league')).toBeInTheDocument()
+    })
+    // Top-N select defaults to 10.
+    const select = screen.getByLabelText('Top-N') as HTMLSelectElement
+    expect(select.value).toBe('10')
+  })
+
+  it('Run button for Top-N league is disabled with a BE-WAITING hint', async () => {
+    getModels.mockResolvedValueOnce([])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => expect(screen.getByText('vs Top-N league')).toBeInTheDocument())
+    const btn = screen.getByRole('button', { name: /Run Evaluation \(vs Top-10\)/ })
+    expect(btn).toBeDisabled()
+    expect(screen.getByText(/BE-WAITING/)).toBeInTheDocument()
+  })
+
+  it('Top-N select updates the button label to match', async () => {
+    getModels.mockResolvedValueOnce([])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => expect(screen.getByText('vs Top-N league')).toBeInTheDocument())
+    const select = screen.getByLabelText('Top-N') as HTMLSelectElement
+    fireEvent.change(select, { target: { value: '20' } })
+    expect(screen.getByRole('button', { name: /Run Evaluation \(vs Top-20\)/ })).toBeInTheDocument()
+  })
+
+  it('Elo threshold slider updates its displayed label', async () => {
+    getModels.mockResolvedValueOnce([])
+    renderAt('/evaluation/my-run')
+    await waitFor(() => expect(screen.getByText('vs Top-N league')).toBeInTheDocument())
+    // Default threshold is 1000.
+    expect(screen.getByText(/Elo threshold ≥ 1000/)).toBeInTheDocument()
+    const slider = screen.getByLabelText(/Elo threshold/) as HTMLInputElement
+    fireEvent.change(slider, { target: { value: '1250' } })
+    expect(screen.getByText(/Elo threshold ≥ 1250/)).toBeInTheDocument()
   })
 })

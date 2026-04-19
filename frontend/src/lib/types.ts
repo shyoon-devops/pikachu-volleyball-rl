@@ -271,6 +271,20 @@ export interface GameRecord {
    * `env_id` so the FE column can light up per row.
    */
   episode?: number
+  /**
+   * Opponent identifier for this match (v2.x Sprint 1).
+   *
+   * `null` / undefined means this game was fought against the rule
+   * bot at `botLevel` — the Recent Games Opponent column renders
+   * `Rule L{botLevel}` in that case (today's normal path).
+   *
+   * When BE-impl ships the self-play broadcast, this carries the
+   * opponent checkpoint id (the league pool slug, e.g.
+   * `run-baseline__abc12345__200000`) so the FE can render the
+   * `policy_<exp8>_<step>` chip variant. [BE-WAITING] for the
+   * `game:result` payload to carry this field.
+   */
+  opponentCheckpointId?: string | null
 }
 
 /**
@@ -405,6 +419,7 @@ export type WSServerMessageType =
   | 'training:frame'
   | 'training:status'
   | 'training:env_frame'
+  | 'training:league_update'
   | 'game:result'
   | 'replay:data'
 
@@ -451,3 +466,63 @@ export type WSMessage<T extends WSMessageType = WSMessageType> = {
 }
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected'
+
+// ── Self-play league (v2.x Sprint 1) ─────────────────────────────
+// Contracts tracked with ADR-0014 + docs/design/SELF-PLAY-UX.md.
+
+/** Training-mode toggle (wire value). ADR-0014 §1. */
+export type TrainingMode = 'bot_ladder' | 'self_play'
+
+/**
+ * Self-play sampling strategies (ADR-0014 §2). Only consumed when
+ * `training_mode === 'self_play'`. `pfsp` is the default (weights
+ * opponents by `(1 − winrate)^2`); `elo_proximity` matches by
+ * nearby Elo; `uniform` draws unbiased.
+ */
+export type LeagueSampling = 'uniform' | 'elo_proximity' | 'pfsp'
+
+/** Source label for a pool entry (ADR-0014 §1). `anchor` rows are
+ *  the fixed-Elo L1/L3/L5 rule baselines that never update. */
+export type LeagueCheckpointSource = 'training' | 'v1_legacy' | 'anchor'
+
+/** One row of the league pool. Wire shape from BE-T4 league API is
+ *  snake_case; `snakeToCamel` produces these camelCase keys. */
+export interface LeagueCheckpoint {
+  id: string
+  elo: number
+  wins: number
+  losses: number
+  games: number
+  /** ISO-8601 UTC admission timestamp. */
+  admittedAt: string
+  step?: number | null
+  experimentId?: string | null
+  source: LeagueCheckpointSource
+}
+
+/** Envelope shape for `GET /api/league/standings`. */
+export interface LeagueStandings {
+  top: LeagueCheckpoint[]
+  championId: string | null
+  generation: number
+  poolSize: number
+  totalCheckpoints: number
+}
+
+/** Payload for the `training:league_update` WS broadcast
+ *  (every LEAGUE_BROADCAST_INTERVAL matches, BE handlers.py). */
+export interface LeagueUpdatePayload {
+  topN: LeagueCheckpoint[]
+  poolSize: number
+  championId: string | null
+  generation: number
+  totalMatches: number
+  sinceLastBroadcast: number
+  /** Recent match summaries for the Recent Matches panel. */
+  recent?: Array<{
+    opponentId: string
+    winner: string | null
+    duration: number
+    deltaElo: number
+  }>
+}
