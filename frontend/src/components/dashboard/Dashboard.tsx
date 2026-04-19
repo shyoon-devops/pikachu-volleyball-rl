@@ -343,7 +343,12 @@ export function Dashboard() {
                 Waiting for game frames...
               </div>
             )}
-            <UpdatingOverlay show={updatingPolicy.active} longGap={updatingPolicy.longGap} />
+            <UpdatingOverlay
+              show={updatingPolicy.active}
+              longGap={updatingPolicy.longGap}
+              source={updatingPolicy.source}
+              step={updatingPolicy.step}
+            />
           </div>
 
           {effectiveNEnvs > 0 ? (
