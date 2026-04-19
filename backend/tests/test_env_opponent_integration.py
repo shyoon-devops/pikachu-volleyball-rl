@@ -149,10 +149,15 @@ class TestOnMatchEndForwarded:
             obs, reward, terminated, truncated, info = env.step(0)
             if terminated or truncated:
                 break
-        # If the episode ended by truncation (time limit) rather than
-        # terminated (score hit), no match-end call should have fired.
-        if truncated and not terminated:
-            assert provider.match_end_calls == []
+        # Static opponent + 3-step budget → truncation is practically
+        # guaranteed. Assert the premise (no natural termination) first
+        # so a future change that accidentally scores inside 3 steps
+        # fails loudly, then assert the invariant (no match-end call).
+        assert truncated and not terminated, (
+            "test precondition broken — episode terminated naturally "
+            "within 3 steps; pick a different scenario"
+        )
+        assert provider.match_end_calls == []
 
 
 class TestObservationShapeUnchanged:

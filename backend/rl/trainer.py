@@ -88,6 +88,13 @@ class TrainingManager:
         self._experiment_id: str = ""
         self._bot_level: int = 1
         self._hyperparams: dict[str, Any] = {}
+        # Self-play league wiring: set in start(). Initialized here so
+        # direct _train_loop attribute reads (after the ``getattr`` →
+        # direct-access cleanup in the review follow-up) always find
+        # them even if the class is constructed but start() was never
+        # called (test isolation / introspection paths).
+        self._training_mode: str = "bot_ladder"
+        self._opponent_provider: Any = None
         # Human title + its filesystem slug for this run. Both are set
         # by start() before the thread kicks off; callbacks that tag
         # result/frame payloads read them off this object at emit time.
@@ -401,18 +408,17 @@ class TrainingManager:
         """Run SB3 PPO training (called from a background thread)."""
         try:
             bot_level = self._bot_level
-            training_mode = getattr(self, "_training_mode", "bot_ladder")
-            provider = getattr(self, "_opponent_provider", None)
+            training_mode = self._training_mode
+            provider = self._opponent_provider
             if training_mode == "self_play" and provider is not None:
                 # Shared in-process PFSP provider: DummyVecEnv keeps the
                 # rating store, checkpoint cache, and pool manifest
                 # singleton across all env workers. Sub-env index is
                 # passed to env_kwargs so the provider's mirror / PFSP
                 # sampling can stagger deterministically across workers.
-                from stable_baselines3.common.vec_env import DummyVecEnv
-                # noqa: PLC0415 — keep the import local so the legacy
-                # bot_ladder path still loads with the classic
-                # make_vec_env + SubprocVecEnv imports at the top.
+                # noqa kept on the import line itself so ruff actually
+                # sees the PLC0415 suppression.
+                from stable_baselines3.common.vec_env import DummyVecEnv  # noqa: PLC0415
 
                 def _make_one(i: int) -> Any:
                     def _f() -> PikachuVolleyballEnv:

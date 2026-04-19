@@ -9,7 +9,6 @@ import numpy as np
 import gymnasium
 from gymnasium import spaces
 
-from backend.game.bot import RuleBasedBot
 from backend.rl.opponent import FixedBotProvider, OpponentProvider
 from backend.game.constants import (
     BALL_RADIUS,
