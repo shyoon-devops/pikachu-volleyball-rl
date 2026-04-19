@@ -11,10 +11,11 @@ import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
 import type { TitleValidationState } from './TitleInput'
+import { getLeagueStandings } from '../../lib/api'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
-import type { GameRecord, Hyperparams } from '../../lib/types'
+import type { GameRecord, Hyperparams, LeagueSampling, TrainingMode } from '../../lib/types'
 import {
   formatBotLevel,
   formatRallyCount,
@@ -67,6 +68,30 @@ export function Dashboard() {
    */
   const [title, setTitle] = useState('')
   const [titleValidation, setTitleValidation] = useState<TitleValidationState>({ kind: 'ok' })
+
+  // v2.x Sprint 1 — opponent selection. `bot_ladder` is the BE
+  // default; `pfsp` matches the ADR-0014 default sampler. State lives
+  // here so `handleStart` can include mode + sampling on the
+  // `training:start` payload (BE-impl-7 WsTrainingStartPayload).
+  const [opponentMode, setOpponentMode] = useState<TrainingMode>('bot_ladder')
+  const [samplingStrategy, setSamplingStrategy] = useState<LeagueSampling>('pfsp')
+  const [leaguePoolSize, setLeaguePoolSize] = useState<number | null>(null)
+
+  /**
+   * Fetch the current league standings once on mount + after every
+   * training:start (pool entries admit on save). Only needed to
+   * populate the opponent-section pool chip; null-on-failure keeps
+   * the chip in "— / 32" until the standings endpoint responds.
+   */
+  useEffect(() => {
+    let cancelled = false
+    getLeagueStandings(1)
+      .then(s => {
+        if (!cancelled) setLeaguePoolSize(s.totalCheckpoints)
+      })
+      .catch(() => { /* best-effort — chip renders placeholder */ })
+    return () => { cancelled = true }
+  }, [])
 
   /**
    * Track the prior status.title so we can toast when BE echoes a
@@ -212,6 +237,12 @@ export function Dashboard() {
       ...topLevel,
       hyperparams: hyperparamsBlob,
       title: wireTitle,
+      // v2.x Sprint 1: opponent selection flows to BE-impl-7's
+      // WsTrainingStartPayload. `sampling` is ignored by BE when
+      // mode=bot_ladder but we still send it so the payload shape
+      // is stable and a mid-session switch doesn't churn keys.
+      mode: opponentMode,
+      sampling: samplingStrategy,
     })
   }
 
@@ -331,6 +362,11 @@ export function Dashboard() {
             title={title}
             onTitleChange={setTitle}
             onTitleValidationChange={setTitleValidation}
+            opponentMode={opponentMode}
+            onOpponentModeChange={setOpponentMode}
+            samplingStrategy={samplingStrategy}
+            onSamplingStrategyChange={setSamplingStrategy}
+            leaguePoolSize={leaguePoolSize}
           />
         )}
       </section>

@@ -205,6 +205,23 @@ describe('Dashboard loading state', () => {
     expect(payload).not.toHaveProperty('gamma')
   })
 
+  // ── v2.x Sprint 1: opponent mode + sampling in training:start ──
+  it('training:start payload includes mode + sampling (default bot_ladder + pfsp)', () => {
+    const send = vi.fn()
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      send,
+    })
+    renderDashboard()
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+    const [, payload] = send.mock.calls[0] as [string, Record<string, unknown>]
+    expect(payload.mode).toBe('bot_ladder')
+    // Default sampling is always sent for payload-shape stability, BE
+    // ignores it when mode=bot_ladder per handlers.py:_build_league_*.
+    expect(payload.sampling).toBe('pfsp')
+  })
+
   // ── FC-R6G: title in training:start payload ──
   it('training:start payload includes a (possibly empty) title field', () => {
     // BE T1 (a7351e57) accepts `title: str | None`; empty triggers

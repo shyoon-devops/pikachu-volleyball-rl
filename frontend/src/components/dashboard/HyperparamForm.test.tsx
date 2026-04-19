@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { HyperparamForm } from './HyperparamForm'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
+import type { LeagueSampling, TrainingMode } from '../../lib/types'
 
 // getTrainingTitles is mocked so TitleInput's debounced dup-check
 // doesn't fire real network during tests (jsdom's fetch is a stub).
@@ -9,10 +10,18 @@ vi.mock('../../lib/api', () => ({
   getTrainingTitles: vi.fn().mockResolvedValue([]),
 }))
 
-function renderForm(overrides: { disabled?: boolean; title?: string } = {}) {
+function renderForm(overrides: {
+  disabled?: boolean
+  title?: string
+  opponentMode?: TrainingMode
+  samplingStrategy?: LeagueSampling
+  leaguePoolSize?: number | null
+} = {}) {
   const onParamsChange = vi.fn()
   const onTitleChange = vi.fn()
   const onTitleValidationChange = vi.fn()
+  const onOpponentModeChange = vi.fn()
+  const onSamplingStrategyChange = vi.fn()
 
   render(
     <HyperparamForm
@@ -22,10 +31,21 @@ function renderForm(overrides: { disabled?: boolean; title?: string } = {}) {
       title={overrides.title ?? ''}
       onTitleChange={onTitleChange}
       onTitleValidationChange={onTitleValidationChange}
+      opponentMode={overrides.opponentMode ?? 'bot_ladder'}
+      onOpponentModeChange={onOpponentModeChange}
+      samplingStrategy={overrides.samplingStrategy ?? 'pfsp'}
+      onSamplingStrategyChange={onSamplingStrategyChange}
+      leaguePoolSize={overrides.leaguePoolSize ?? null}
     />,
   )
 
-  return { onParamsChange, onTitleChange, onTitleValidationChange }
+  return {
+    onParamsChange,
+    onTitleChange,
+    onTitleValidationChange,
+    onOpponentModeChange,
+    onSamplingStrategyChange,
+  }
 }
 
 function expandAdvanced() {
@@ -114,7 +134,9 @@ describe('HyperparamForm', () => {
 
   it('tells the user where bot level is picked (single source of truth)', () => {
     renderForm()
-    expect(screen.getByText(/L1.?L5/)).toBeInTheDocument()
+    // Narrow to the hint paragraph — "L1–L5" now also appears in the
+    // Opponent section's "Rule-based (L1–L5)" segmented option.
+    expect(screen.getByText(/Bot level is picked/)).toBeInTheDocument()
   })
 
   // FC-R5 additions.
@@ -148,6 +170,11 @@ describe('HyperparamForm', () => {
         title=""
         onTitleChange={vi.fn()}
         onTitleValidationChange={vi.fn()}
+        opponentMode="bot_ladder"
+        onOpponentModeChange={vi.fn()}
+        samplingStrategy="pfsp"
+        onSamplingStrategyChange={vi.fn()}
+        leaguePoolSize={null}
       />,
     )
     const input = byLabelPrefix('n_envs')
@@ -166,6 +193,11 @@ describe('HyperparamForm', () => {
         title=""
         onTitleChange={vi.fn()}
         onTitleValidationChange={vi.fn()}
+        opponentMode="bot_ladder"
+        onOpponentModeChange={vi.fn()}
+        samplingStrategy="pfsp"
+        onSamplingStrategyChange={vi.fn()}
+        leaguePoolSize={null}
       />,
     )
     // Basic reset button lives alongside its "BASIC" heading.
@@ -178,5 +210,54 @@ describe('HyperparamForm', () => {
         n_epochs: 25, // unchanged
       }),
     )
+  })
+})
+
+// v2.x Sprint 1 — Opponent section (docs/design/SELF-PLAY-UX.md §1)
+describe('HyperparamForm — Opponent section (v2.x)', () => {
+  it('renders the segmented Rule-based vs Self-play control', () => {
+    renderForm()
+    expect(screen.getByRole('radio', { name: /Rule-based/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Self-play league/ })).toBeInTheDocument()
+  })
+
+  it('hides the sampling radios + pool chip when mode is bot_ladder', () => {
+    renderForm({ opponentMode: 'bot_ladder' })
+    expect(screen.queryByRole('radio', { name: /PFSP/ })).toBeNull()
+    expect(screen.queryByLabelText(/Pool size/)).toBeNull()
+  })
+
+  it('reveals sampling radios + pool chip when mode is self_play', () => {
+    renderForm({ opponentMode: 'self_play', leaguePoolSize: 12 })
+    expect(screen.getByRole('radio', { name: /PFSP/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Elo proximity/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Uniform/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('Pool size: 12 of 32')).toBeInTheDocument()
+  })
+
+  it('pool chip reads "— / 32" until the standings fetch lands', () => {
+    renderForm({ opponentMode: 'self_play', leaguePoolSize: null })
+    expect(screen.getByLabelText('Pool size: unknown of 32')).toBeInTheDocument()
+  })
+
+  it('clicking the Self-play segment fires onOpponentModeChange("self_play")', () => {
+    const { onOpponentModeChange } = renderForm({ opponentMode: 'bot_ladder' })
+    fireEvent.click(screen.getByRole('radio', { name: /Self-play league/ }))
+    expect(onOpponentModeChange).toHaveBeenCalledWith('self_play')
+  })
+
+  it('selecting a sampling radio fires onSamplingStrategyChange', () => {
+    const { onSamplingStrategyChange } = renderForm({
+      opponentMode: 'self_play',
+      samplingStrategy: 'pfsp',
+      leaguePoolSize: 0,
+    })
+    fireEvent.click(screen.getByRole('radio', { name: /Uniform/ }))
+    expect(onSamplingStrategyChange).toHaveBeenCalledWith('uniform')
+  })
+
+  it('fallback hint is surfaced in self-play branch so users know empty pools degrade cleanly', () => {
+    renderForm({ opponentMode: 'self_play', leaguePoolSize: 0 })
+    expect(screen.getByText(/auto-falls back to rule ladder/i)).toBeInTheDocument()
   })
 })
