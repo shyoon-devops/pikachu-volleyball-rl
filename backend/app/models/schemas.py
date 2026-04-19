@@ -163,6 +163,22 @@ class WsTrainingStartPayload(BaseModel):
     # ``"pfsp"`` default matches the ADR default. Ignored when
     # mode="bot_ladder".
     sampling: Literal["uniform", "elo_proximity", "pfsp"] = "pfsp"
+    # Reward function selector (ADR 0015 — reward simplification). The
+    # three enum members represent the staged transition away from
+    # hand-tuned shaping:
+    #   * ``"shaped_v1"`` (default) — v1.0.0 nine-term shaped reward.
+    #     Every existing caller without the field sees this branch.
+    #   * ``"sparse_v1"`` — terminal-only ±1 / ±0.1. Higher sample cost,
+    #     no farming paths (ADR §1).
+    #   * ``"learned_shaped_v1"`` — terminal + potential-based IRL
+    #     shaping (ADR §4). Policy-invariant per Ng-Harada-Russell.
+    # ``Literal`` rejects unknown values via Pydantic validation → the
+    # WS layer returns a 400 and the handler never runs. The AI-side
+    # env.py change consumes the field in ``_compute_reward``; the BE
+    # contract is just to thread the selector through start → runs.
+    reward_model: Literal["shaped_v1", "sparse_v1", "learned_shaped_v1"] = (
+        "shaped_v1"
+    )
 
 
 class WsSetLevelPayload(BaseModel):
