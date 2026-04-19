@@ -25,6 +25,7 @@ import type {
   ConnectionState,
   EnvFramePayload,
   LeagueUpdatePayload,
+  TrainingMode,
   WSClientMessageType,
   WSMessage,
 } from '../lib/types'
@@ -90,6 +91,16 @@ export interface TrainingState {
    * REST `/api/league/standings` covers the cold-mount path.
    */
   leagueUpdate: LeagueUpdatePayload | null
+  /**
+   * Active training mode (v2.x Sprint 1). Tracked FE-side by
+   * observing the `mode` field on outgoing `training:start` payloads
+   * and resetting to `'bot_ladder'` on stop. BE `/api/training/status`
+   * does NOT yet expose the mode, so this is optimistic FE state —
+   * consumer components (nav badge, current-run Elo line) check this
+   * flag to gate self-play-only surfaces. [BE-WAITING] once status
+   * carries `training_mode`, prefer BE truth on reconnect.
+   */
+  trainingMode: TrainingMode
   send: (type: WSClientMessageType, payload?: unknown) => void
 }
 
@@ -123,6 +134,9 @@ export function useTrainingStateImpl(): TrainingState {
   const [envFrames, setEnvFrames] = useState<EnvFramesMap>({})
   // v2.x Sprint 1 — latest league-update snapshot (ADR-0014 §8).
   const [leagueUpdate, setLeagueUpdate] = useState<LeagueUpdatePayload | null>(null)
+  // v2.x Sprint 1 — FE-mirrored active training mode. See the
+  // TrainingState.trainingMode comment for the BE-WAITING path.
+  const [trainingMode, setTrainingMode] = useState<TrainingMode>('bot_ladder')
 
   const handleMetrics = useCallback((msg: WSMessage<'training:metrics'>) => {
     // A6: zod parse + transform replaces the unchecked snakeToCamel
@@ -510,11 +524,20 @@ export function useTrainingStateImpl(): TrainingState {
   const send = useCallback((type: WSClientMessageType, payload?: unknown) => {
     wsSend(type, payload)
     switch (type) {
-      case 'training:start':
+      case 'training:start': {
         setStatus(prev => ({ ...prev, state: 'running' }))
+        // v2.x Sprint 1: remember the submitted mode so downstream
+        // surfaces (nav badge, current-run Elo line) can render the
+        // self-play-only indicators without BE echoing the field.
+        const mode = (payload as { mode?: unknown } | undefined)?.mode
+        if (mode === 'self_play' || mode === 'bot_ladder') {
+          setTrainingMode(mode)
+        }
         break
+      }
       case 'training:stop':
         setStatus(prev => ({ ...prev, state: 'stopped' }))
+        setTrainingMode('bot_ladder')
         stopTraining().catch(() => { /* REST not deployed → WS fallback */ })
         break
       case 'training:pause':
@@ -539,7 +562,7 @@ export function useTrainingStateImpl(): TrainingState {
     }
   }, [wsSend])
 
-  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, gameResultSeq, leagueUpdate, send }
+  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, gameResultSeq, leagueUpdate, trainingMode, send }
 }
 
 export const TrainingStateContext = createContext<TrainingState | null>(null)

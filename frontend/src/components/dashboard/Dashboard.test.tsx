@@ -15,6 +15,7 @@ interface MockState {
   envFrames: EnvFramesMap
   gameResultSeq: number
   leagueUpdate: LeagueUpdatePayload | null
+  trainingMode: 'bot_ladder' | 'self_play'
   send: () => void
 }
 
@@ -66,6 +67,7 @@ function resetMockState(overrides: Partial<MockState> = {}) {
     envFrames: {},
     gameResultSeq: 0,
     leagueUpdate: null,
+    trainingMode: 'bot_ladder' as const,
     send: vi.fn(),
     ...overrides,
   })
@@ -206,6 +208,110 @@ describe('Dashboard loading state', () => {
     // And the inverse — no top-level PPO-ctor leakage.
     expect(payload).not.toHaveProperty('learning_rate')
     expect(payload).not.toHaveProperty('gamma')
+  })
+
+  // ── v2.x Sprint 1: Opponent column + current-run league line + nav badge ──
+  it('Recent Games table adds the Opponent column with a Rule L{n} fallback chip', () => {
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'running', currentStep: 100, currentEpisode: 1 },
+      recentGames: [
+        {
+          id: 'g1',
+          gameId: 'uuid-1',
+          timestamp: '2026-04-18T10:00:00Z',
+          botLevel: 3,
+          score1: 15,
+          score2: 10,
+          winner: 1,
+          durationFrames: 4200,
+          rallyCount: 8,
+        } as GameRecord,
+      ],
+    })
+    renderDashboard()
+    expect(screen.getByRole('columnheader', { name: 'Opponent' })).toBeInTheDocument()
+    // Row renders the rule fallback since opponentCheckpointId is absent.
+    expect(screen.getByLabelText('Opponent: Rule L3')).toBeInTheDocument()
+  })
+
+  it('hides CurrentRunLeagueLine when trainingMode is bot_ladder', () => {
+    resetMockState({
+      connectionState: 'connected',
+      status: {
+        state: 'running',
+        currentStep: 100,
+        currentEpisode: 1,
+        experimentId: 'exp-live',
+      } as TrainingStatus,
+      trainingMode: 'bot_ladder',
+      leagueUpdate: {
+        topN: [
+          {
+            id: 'x',
+            elo: 1500,
+            wins: 30,
+            losses: 10,
+            games: 40,
+            admittedAt: '2026-04-18T00:00:00Z',
+            source: 'training',
+            experimentId: 'exp-live',
+          },
+        ],
+        poolSize: 12,
+        championId: 'x',
+        generation: 2,
+        totalMatches: 100,
+        sinceLastBroadcast: 64,
+      },
+    })
+    renderDashboard()
+    expect(screen.queryByText(/Elo 1500/)).toBeNull()
+  })
+
+  it('renders CurrentRunLeagueLine when self_play + experiment is in topN', () => {
+    resetMockState({
+      connectionState: 'connected',
+      status: {
+        state: 'running',
+        currentStep: 500,
+        currentEpisode: 2,
+        experimentId: 'exp-live',
+      } as TrainingStatus,
+      trainingMode: 'self_play',
+      leagueUpdate: {
+        topN: [
+          {
+            id: 'foo',
+            elo: 1800,
+            wins: 20,
+            losses: 5,
+            games: 25,
+            admittedAt: '2026-04-18T00:00:00Z',
+            source: 'training',
+            experimentId: 'other',
+          },
+          {
+            id: 'bar',
+            elo: 1500,
+            wins: 30,
+            losses: 10,
+            games: 40,
+            admittedAt: '2026-04-18T00:00:00Z',
+            source: 'training',
+            experimentId: 'exp-live',
+          },
+        ],
+        poolSize: 14,
+        championId: 'foo',
+        generation: 3,
+        totalMatches: 200,
+        sinceLastBroadcast: 64,
+      },
+    })
+    renderDashboard()
+    expect(screen.getByText(/Elo 1500/)).toBeInTheDocument()
+    expect(screen.getByText(/#2 of 14/)).toBeInTheDocument()
   })
 
   // ── v2.x Sprint 1: opponent mode + sampling in training:start ──

@@ -271,6 +271,20 @@ export interface GameRecord {
    * `env_id` so the FE column can light up per row.
    */
   episode?: number
+  /**
+   * Opponent identifier for this match (v2.x Sprint 1).
+   *
+   * `null` / undefined means this game was fought against the rule
+   * bot at `botLevel` — the Recent Games Opponent column renders
+   * `Rule L{botLevel}` in that case (today's normal path).
+   *
+   * When BE-impl ships the self-play broadcast, this carries the
+   * opponent checkpoint id (the league pool slug, e.g.
+   * `run-baseline__abc12345__200000`) so the FE can render the
+   * `policy_<exp8>_<step>` chip variant. [BE-WAITING] for the
+   * `game:result` payload to carry this field.
+   */
+  opponentCheckpointId?: string | null
 }
 
 /**
