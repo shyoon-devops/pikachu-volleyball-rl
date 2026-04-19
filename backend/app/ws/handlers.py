@@ -354,6 +354,70 @@ async def env_frames_push_loop(
         await manager.broadcast({"type": "training:env_frame", "payload": data})
 
 
+async def league_push_loop(
+    manager: ConnectionManager,
+    training_service: TrainingServiceWrapper,
+    league_repository: Any,
+) -> None:
+    """Drain LeagueCallback's broadcast queue → ``training:league_update``.
+
+    AI's ``LeagueCallback`` (backend/rl/league_callback.py) pushes one
+    record every ``LEAGUE_BROADCAST_INTERVAL`` (64 matches) into
+    ``manager.league_queue``. This loop enriches each record with the
+    current standings top-N snapshot from ``LeagueRepository`` and
+    broadcasts per ADR §8:
+
+        {type: "training:league_update",
+         payload: {top_n: [...], pool_size, champion_id, generation,
+                   total_matches, since_last_broadcast, recent: [...]}}
+
+    The top-N snapshot is taken at emit time (not at queue push)
+    because:
+      * match outcomes that updated ratings have already flushed via
+        ``LeagueRepository.update_elo_batch`` — the repo already
+        reflects the new state.
+      * taking the snapshot here keeps the callback side (training
+        thread) free of async-mongo I/O.
+
+    Graceful degradation: missing ``league_queue`` attribute or
+    missing ``league_repository`` → loop parks idle so tests can run
+    without a full training manager.
+    """
+    queue = getattr(training_service.manager, "league_queue", None)
+    if queue is None:
+        logger.info(
+            "league_push_loop: no league_queue on manager; idle"
+        )
+        return
+    if league_repository is None:
+        logger.info("league_push_loop: no league_repository; idle")
+        return
+    while True:
+        record = await queue.get()
+        try:
+            standings = await league_repository.standings_envelope(limit=10)
+            payload: dict[str, Any] = {
+                "top_n": [c.model_dump(mode="json") for c in standings.top],
+                "pool_size": standings.pool_size,
+                "champion_id": standings.champion_id,
+                "generation": standings.generation,
+                "total_matches": int(record.get("total_matches", 0) or 0),
+                "since_last_broadcast": int(
+                    record.get("since_last_broadcast", 0) or 0
+                ),
+                "recent": list(record.get("recent", []) or []),
+            }
+        except Exception:  # noqa: BLE001 — broadcast failures must not kill the loop
+            logger.exception(
+                "league_push_loop: failed to build payload; record=%r", record
+            )
+            continue
+        await manager.broadcast({
+            "type": "training:league_update",
+            "payload": payload,
+        })
+
+
 SAVE_RETRY_ATTEMPTS = 3
 SAVE_RETRY_BASE_DELAY = 0.5  # seconds; doubled each attempt (0.5, 1.0, 2.0)
 DEAD_LETTER_PATH = Path(os.getenv("FAILED_RESULTS_PATH", "data/failed_results.jsonl"))

@@ -26,6 +26,7 @@ from backend.rl.callbacks import (
     MetricsCallback,
 )
 from backend.rl.env import PikachuVolleyballEnv
+from backend.rl.league_callback import LeagueCallback
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,12 @@ class TrainingManager:
         # WS subscriber can never accumulate more than ``maxsize`` queued
         # snapshots. Drop-oldest is handled by _enqueue_with_drop.
         self.env_frames_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)
+        # League-update broadcast queue (v2 Sprint-1). The LeagueCallback
+        # (backend/rl/league_callback.py) pushes one record every 64
+        # matches; the WS side drains via league_push_loop and rebroadcasts
+        # as training:league_update. Bounded so a stalled FE subscriber
+        # can't blow memory — one flush-window of records at a time.
+        self.league_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=32)
 
         self._model: PPO | None = None
         self._thread: threading.Thread | None = None
@@ -495,6 +502,15 @@ class TrainingManager:
                     loop=loop,
                     manager=self,
                     drain_interval=hp.get("env_result_drain_interval", 4),
+                ),
+                # League aggregation — queues a broadcast record every
+                # LEAGUE_BROADCAST_INTERVAL (64) completed matches for
+                # the WS layer to drain + fan out as training:league_update.
+                # See backend/rl/league_callback.py and
+                # docs/adr/0014-self-play-league.md §4.
+                LeagueCallback(
+                    broadcast_queue=self.league_queue,
+                    loop=loop,
                 ),
                 _StopEventCallback(self._stop_event, self._pause_event, self),
             ])

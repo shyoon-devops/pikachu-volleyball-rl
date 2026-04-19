@@ -34,6 +34,7 @@ from backend.app.services.training_service import TrainingServiceWrapper
 from backend.app.ws.handlers import (
     env_frames_push_loop,
     frames_push_loop,
+    league_push_loop,
     metrics_push_loop,
     results_push_loop,
     ws_endpoint,
@@ -99,6 +100,13 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(
             results_push_loop(
                 app.state.ws_manager, app.state.training_service, app.state.game_service
+            )
+        ),
+        asyncio.create_task(
+            league_push_loop(
+                app.state.ws_manager,
+                app.state.training_service,
+                app.state.league_repository,
             )
         ),
     ]
