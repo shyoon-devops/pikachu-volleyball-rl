@@ -21,7 +21,10 @@ describe('UpdatingOverlay (spec f02a9785)', () => {
     const overlay = screen.getByRole('status', { name: /Updating training policy/i })
     expect(overlay).toBeInTheDocument()
     expect(screen.getByText('Updating policy')).toBeInTheDocument()
-    expect(screen.getByText('PPO gradient update in progress')).toBeInTheDocument()
+    // Fix-A FE: default subtitle dropped the "PPO " prefix — the
+    // event path renders "Gradient update in progress [(step N)]",
+    // the heuristic path has its own wording.
+    expect(screen.getByText('Gradient update in progress')).toBeInTheDocument()
   })
 
   it('shows the long-gap subtitle when longGap prop is true', () => {
@@ -72,5 +75,33 @@ describe('UpdatingOverlay (spec f02a9785)', () => {
     rerender(<UpdatingOverlay show={true} />)
     act(() => { vi.advanceTimersByTime(500) })
     expect(container.querySelector('.updating-overlay--visible')).not.toBeNull()
+  })
+})
+
+// Fix-A FE: subtitle copy matrix for the event / heuristic split.
+describe('UpdatingOverlay — subtitle source matrix (Fix-A)', () => {
+  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: false }) })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('event source with a step renders "Gradient update in progress (step N)"', () => {
+    render(<UpdatingOverlay show={true} source="event" step={200000} />)
+    expect(screen.getByText('Gradient update in progress (step 200,000)')).toBeInTheDocument()
+  })
+
+  it('event source without a step renders the generic variant', () => {
+    render(<UpdatingOverlay show={true} source="event" step={null} />)
+    expect(screen.getByText('Gradient update in progress')).toBeInTheDocument()
+  })
+
+  it('heuristic source renders "Awaiting frames (server busy)"', () => {
+    render(<UpdatingOverlay show={true} source="heuristic" step={null} />)
+    expect(screen.getByText('Awaiting frames (server busy)')).toBeInTheDocument()
+  })
+
+  it('longGap wins regardless of source', () => {
+    render(<UpdatingOverlay show={true} source="event" step={42} longGap={true} />)
+    expect(screen.getByText('This is taking longer than usual…')).toBeInTheDocument()
+    // Event-source step label is superseded.
+    expect(screen.queryByText(/step 42/)).toBeNull()
   })
 })

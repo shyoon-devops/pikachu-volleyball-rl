@@ -407,6 +407,32 @@ def _build_league_opponent_provider(
         return None
 
 
+async def update_events_push_loop(
+    manager: ConnectionManager,
+    training_service: TrainingServiceWrapper,
+) -> None:
+    """Drain the gradient-update-window queue and broadcast to all clients.
+
+    Records on this queue already carry their own ``type`` field
+    (``training:update_start`` / ``training:update_end``) — unlike
+    frames/metrics/league queues whose handler wraps them. We just
+    forward the record directly. Each WS event is a dict with at
+    minimum ``type`` + ``experiment_id``.
+
+    Lifetime: expected to run for the process lifetime under the
+    ``lifespan`` gather. A raised exception (e.g., from ``broadcast``)
+    would kill this task silently; the gather in ``main.py`` catches
+    the cancellation on shutdown and logs any exception there.
+    """
+    queue = training_service.manager.update_events_queue
+    while True:
+        data = await queue.get()
+        try:
+            await manager.broadcast(data)
+        except Exception:  # noqa: BLE001 — never wedge peers on one bad broadcast
+            logger.exception("update_events broadcast failed; dropping event")
+
+
 async def env_frames_push_loop(
     manager: ConnectionManager,
     training_service: TrainingServiceWrapper,

@@ -75,25 +75,38 @@ export interface TrainingState {
   recentGames: GameRecord[]
   envFrames: EnvFramesMap
   /**
-   * Driver state for the UpdatingOverlay (Designer spec f02a9785).
+   * Driver state for the UpdatingOverlay (Designer spec f02a9785
+   * + Fix-A FE for BE explicit events).
    *
-   * `active` flips true when training is `running` AND no frame has
-   * arrived for > UPDATING_GAP_MS (1.5 s) — the FE heuristic for
-   * the PPO gradient-update freeze. Flips back to false the instant
-   * a new frame lands OR the WS disconnects OR status leaves
-   * running. The consuming overlay still owns the 400 ms minimum-
-   * visible + 200/300 ms fade-in/out timing; this field is the raw
-   * on/off signal.
+   * `active` flips true when either:
+   *   - `training:update_start` arrives (event-driven, preferred) OR
+   *   - `status.state === 'running'` AND no frame has arrived for
+   *     > UPDATING_HEURISTIC_GAP_MS (3 s) — kept as a safety net so
+   *     older BE builds / dropped-event edges still show the
+   *     overlay.
+   * Flips back to false on `training:update_end`, on a fresh frame
+   * (only when the current source was heuristic), on WS
+   * disconnect, or when status leaves running.
    *
-   * `longGap` becomes true after UPDATING_LONG_GAP_MS (8 s) of
-   * silence while `active` is already true; drives the alternate
-   * subtitle "This is taking longer than usual…" per spec §5.
+   * `longGap` becomes true after UPDATING_LONG_GAP_MS (8 s) of a
+   * still-active state; drives the alternate subtitle "This is
+   * taking longer than usual…" per spec §5.
    *
-   * Purely FE-derived — no BE contract today. When BE ships an
-   * explicit `training:gradient_update` signal this field can be
-   * sourced from that broadcast instead of the gap heuristic.
+   * `source` lets the overlay choose its subtitle: `'event'` →
+   * "Gradient update in progress (step X)" when the BE signal is
+   * authoritative; `'heuristic'` → "Awaiting frames (server
+   * busy)" when we inferred the freeze from frame silence.
+   *
+   * `step` carries the BE-provided training step for the event
+   * path so the overlay can render the step number; null when the
+   * current source is heuristic.
    */
-  updatingPolicy: { active: boolean; longGap: boolean }
+  updatingPolicy: {
+    active: boolean
+    longGap: boolean
+    source: 'event' | 'heuristic' | null
+    step: number | null
+  }
   /**
    * Monotonic counter bumped every time a `game:result` WS payload
    * lands. Pages that render server-fetched lists (TrainingRunList,
@@ -143,7 +156,15 @@ function getWsUrl(): string {
  * off-to-on transition; the on-to-off transition is instant
  * (frame arrival triggers a React re-render).
  */
-const UPDATING_GAP_MS = 1500
+/**
+ * Heuristic safety-net threshold. Raised from the original 1.5 s
+ * (pre-Fix-A) to 3 s so the heuristic rarely triggers when the
+ * explicit `training:update_start/end` events are firing — those
+ * end-to-end arrive within a few ms of the freeze, well under this
+ * window. If an event is ever dropped (BE restart mid-update, WS
+ * hiccup), this still catches the freeze with a slight delay.
+ */
+const UPDATING_HEURISTIC_GAP_MS = 3000
 const UPDATING_POLL_MS = 500
 /** Spec §5: swap subtitle to the "taking longer" variant after 8 s. */
 const UPDATING_LONG_GAP_MS = 8000
@@ -236,16 +257,35 @@ export function useTrainingStateImpl(): TrainingState {
    * transition so a restart doesn't inherit a stale timestamp.
    */
   const lastFrameAtRef = useRef<number>(0)
-  const [updatingPolicy, setUpdatingPolicy] = useState<{ active: boolean; longGap: boolean }>({
+  type UpdatingPolicyState = {
+    active: boolean
+    longGap: boolean
+    source: 'event' | 'heuristic' | null
+    step: number | null
+  }
+  const [updatingPolicy, setUpdatingPolicy] = useState<UpdatingPolicyState>({
     active: false,
     longGap: false,
+    source: null,
+    step: null,
   })
+  // Monotonic timestamp of the most recent event-path activation.
+  // Consumed by the long-gap poll to escalate the subtitle after
+  // UPDATING_LONG_GAP_MS of a still-active event-driven overlay.
+  const eventActivatedAtRef = useRef<number>(0)
 
   const markFrameArrival = useCallback(() => {
     lastFrameAtRef.current = Date.now()
-    // Instant hide the moment a frame lands — only the poll tick
-    // flips the flag on, only a frame flips it off.
-    setUpdatingPolicy({ active: false, longGap: false })
+    // Frames flip the heuristic branch off instantly. Event-driven
+    // overlays stay up until `training:update_end` arrives: the BE
+    // sometimes pushes a stale / queued frame mid-gradient-update,
+    // and honouring that would flicker the overlay closed.
+    setUpdatingPolicy(prev => (prev.source === 'event' ? prev : {
+      active: false,
+      longGap: false,
+      source: null,
+      step: null,
+    }))
   }, [])
 
   const handleFrame = useCallback((msg: WSMessage<'training:frame'>) => {
@@ -355,6 +395,45 @@ export function useTrainingStateImpl(): TrainingState {
     setLeagueUpdate(next)
   }, [])
 
+  /**
+   * Fix-A FE: explicit gradient-update events (BE contract).
+   *
+   * `training:update_start` — BE fires this the moment PPO.learn()
+   * begins. Flip the overlay on immediately so the user sees the
+   * freeze explained without waiting for the 3 s heuristic.
+   *
+   * `training:update_end` — fires when the first post-update frame
+   * is ready. Flip the overlay off; the React overlay layer honours
+   * the 400 ms minimum-visible floor so there's no flicker even
+   * when a gradient update finishes in <100 ms.
+   *
+   * The optional `experiment_id` field lets consumers ignore stale
+   * events from a previous session after a quick stop/restart.
+   * `step` (if present) flows into the overlay subtitle as
+   * "Gradient update in progress (step X)".
+   */
+  const handleUpdateStart = useCallback((msg: WSMessage<'training:update_start'>) => {
+    const payload = snakeToCamel<{
+      experimentId?: string
+      step?: number | null
+    }>(msg.payload)
+    eventActivatedAtRef.current = Date.now()
+    setUpdatingPolicy({
+      active: true,
+      longGap: false,
+      source: 'event',
+      step: typeof payload.step === 'number' ? payload.step : null,
+    })
+  }, [])
+
+  const handleUpdateEnd = useCallback(() => {
+    // The wire payload is unused — an `update_end` event is a pure
+    // trigger, the BE-side step snapshot already landed via the
+    // matching `update_start`.
+    eventActivatedAtRef.current = 0
+    setUpdatingPolicy({ active: false, longGap: false, source: null, step: null })
+  }, [])
+
   useEffect(() => {
     const unsubs = [
       subscribe('training:metrics', handleMetrics),
@@ -363,59 +442,84 @@ export function useTrainingStateImpl(): TrainingState {
       subscribe('training:status', handleStatus),
       subscribe('game:result', handleGameResult),
       subscribe('training:league_update', handleLeagueUpdate),
+      subscribe('training:update_start', handleUpdateStart),
+      subscribe('training:update_end', handleUpdateEnd),
     ]
     return () => { unsubs.forEach(u => u()) }
-  }, [subscribe, handleMetrics, handleFrame, handleEnvFrame, handleStatus, handleGameResult, handleLeagueUpdate])
+  }, [
+    subscribe,
+    handleMetrics,
+    handleFrame,
+    handleEnvFrame,
+    handleStatus,
+    handleGameResult,
+    handleLeagueUpdate,
+    handleUpdateStart,
+    handleUpdateEnd,
+  ])
 
   /**
-   * Updating-policy gap heuristic (Designer spec f02a9785).
+   * Updating-policy poll (Fix-A FE).
    *
-   * Flips `updatingPolicy.active` to true when a running session
-   * hasn't streamed a frame for UPDATING_GAP_MS; escalates to
-   * `longGap` when silence exceeds UPDATING_LONG_GAP_MS (§5 "taking
-   * longer than usual" subtitle). The opposite transition
-   * (active → false) is handled by `markFrameArrival` so the
-   * overlay snaps off the instant the rollout resumes.
+   * Two responsibilities under the event-first contract:
    *
-   * Teardown conditions (spec §5):
+   *   (a) **Safety-net heuristic** — if no `training:update_start`
+   *       arrives but frames stop for UPDATING_HEURISTIC_GAP_MS
+   *       (3 s), flip the overlay on with `source='heuristic'`.
+   *       Raised from the original 1.5 s so the heuristic only
+   *       catches dropped-event edges; healthy sessions never hit
+   *       this path.
+   *
+   *   (b) **Long-gap escalation** — regardless of source, if the
+   *       overlay has been active for > UPDATING_LONG_GAP_MS
+   *       (8 s), set `longGap=true` so the overlay can swap the
+   *       subtitle to "This is taking longer than usual…".
+   *
+   * Teardown conditions unchanged from the pre-Fix-A version:
    *   * status leaves `running` — paused / stopped / etc.
    *   * WS disconnect — the existing connection-lost banner owns
    *     the state; we don't stack blockers.
    *
-   * Reset ref only on the stopped→running transition so a fresh
-   * start doesn't inherit a frame timestamp from the previous
-   * session. Inside a running session the ref advances only when
-   * `markFrameArrival` fires — the poll never touches it.
+   * Reset `lastFrameAtRef` only on the stopped→running transition
+   * so a fresh start doesn't inherit a frame timestamp from the
+   * previous session.
    */
   const prevRunningRef = useRef(false)
   useEffect(() => {
     const isRunning = status.state === 'running'
     const isConnected = connectionState === 'connected'
     if (!isRunning || !isConnected) {
-      setUpdatingPolicy({ active: false, longGap: false })
+      setUpdatingPolicy({ active: false, longGap: false, source: null, step: null })
       prevRunningRef.current = false
+      eventActivatedAtRef.current = 0
       return
     }
-    // stopped/paused → running transition: clear the stale frame
-    // timestamp so first-tick-after-resume doesn't immediately
-    // declare the gap exceeded.
     if (!prevRunningRef.current) {
       lastFrameAtRef.current = 0
     }
     prevRunningRef.current = true
     const tick = () => {
-      // No frame yet for this session — warmup, not a gradient phase.
-      if (lastFrameAtRef.current === 0) return
-      const gap = Date.now() - lastFrameAtRef.current
-      if (gap > UPDATING_GAP_MS) {
-        setUpdatingPolicy(prev => {
-          const long = gap > UPDATING_LONG_GAP_MS
-          // Skip the set when nothing changed so consumers don't
-          // thrash-render the overlay every 500 ms.
-          if (prev.active && prev.longGap === long) return prev
-          return { active: true, longGap: long }
-        })
-      }
+      const now = Date.now()
+      setUpdatingPolicy(prev => {
+        // Event-driven path: only reason to update inside the tick
+        // is the long-gap escalation. Source stays 'event' and
+        // `step` is preserved; `markFrameArrival` won't clear it,
+        // only `training:update_end` does.
+        if (prev.source === 'event' && prev.active) {
+          const long = eventActivatedAtRef.current > 0
+            && now - eventActivatedAtRef.current > UPDATING_LONG_GAP_MS
+          return prev.longGap === long ? prev : { ...prev, longGap: long }
+        }
+        // Heuristic path: need a seen frame to compute the gap.
+        if (lastFrameAtRef.current === 0) return prev
+        const gap = now - lastFrameAtRef.current
+        if (gap <= UPDATING_HEURISTIC_GAP_MS) return prev
+        const long = gap > UPDATING_LONG_GAP_MS
+        if (prev.active && prev.source === 'heuristic' && prev.longGap === long) {
+          return prev
+        }
+        return { active: true, longGap: long, source: 'heuristic', step: null }
+      })
     }
     const id = setInterval(tick, UPDATING_POLL_MS)
     return () => clearInterval(id)

@@ -26,12 +26,27 @@ import './UpdatingOverlay.css'
 const FADE_OUT_MS = 300
 const MIN_VISIBLE_MS = 400
 
+/**
+ * `source` steers the subtitle copy (Fix-A FE):
+ *   - `'event'` → "Gradient update in progress (step N)" when the
+ *     BE `training:update_start` broadcast is authoritative. `step`
+ *     is rendered when provided; omitted when null.
+ *   - `'heuristic'` → "Awaiting frames (server busy)" when the FE
+ *     inferred the freeze from 3 s of frame silence.
+ *   - `null` → only valid when `show=false`; copy reverts to the
+ *     event wording (the subtitle text doesn't render while
+ *     hidden).
+ */
 export function UpdatingOverlay({
   show,
   longGap,
+  source,
+  step,
 }: {
   show: boolean
   longGap?: boolean
+  source?: 'event' | 'heuristic' | null
+  step?: number | null
 }) {
   const [mounted, setMounted] = useState(show)
   const [visible, setVisible] = useState(show)
@@ -114,11 +129,36 @@ export function UpdatingOverlay({
           <p className="updating-overlay-title">Updating policy</p>
         </div>
         <p className="updating-overlay-subtitle">
-          {longGap
-            ? 'This is taking longer than usual…'
-            : 'PPO gradient update in progress'}
+          {resolveSubtitle({ longGap, source, step })}
         </p>
       </div>
     </div>
   )
+}
+
+/**
+ * Picks the subtitle string for the current overlay state (Fix-A
+ * FE). Separate function so the tests can pin the copy matrix
+ * without re-walking the render tree for each case.
+ *
+ * Priority:
+ *   1. long-gap escalation (spec §5) wins regardless of source
+ *   2. BE event path emits the step number when one is provided
+ *   3. heuristic fallback wording otherwise
+ */
+function resolveSubtitle({
+  longGap,
+  source,
+  step,
+}: {
+  longGap?: boolean
+  source?: 'event' | 'heuristic' | null
+  step?: number | null
+}): string {
+  if (longGap) return 'This is taking longer than usual…'
+  if (source === 'heuristic') return 'Awaiting frames (server busy)'
+  if (typeof step === 'number') {
+    return `Gradient update in progress (step ${step.toLocaleString()})`
+  }
+  return 'Gradient update in progress'
 }
