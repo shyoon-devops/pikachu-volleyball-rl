@@ -46,7 +46,7 @@ class _PolicyLike(Protocol):
         self,
         observation: np.ndarray,
         *,
-        deterministic: bool = ...,
+        deterministic: bool = True,
     ) -> tuple[np.ndarray, Any]: ...
 
 
@@ -132,6 +132,12 @@ class LoadedPolicyBot:
         # the learner sees player2 as its own player and the current
         # player1 as the opponent — all x coords flipped around the net
         # so the policy's trained "left side is me" assumption holds.
+        # y and vy are NEVER mirrored — the net is only a horizontal
+        # symmetry axis. prev_ball_y gets the same treatment as
+        # prev_ball_x (own local variable) to keep the field layout
+        # symmetric and prevent a future refactor from accidentally
+        # mirroring it by analogy.
+        prev_ball_y = self._prev_ball_y
         if mirror:
             me = state.player2
             opp = state.player1
@@ -169,6 +175,9 @@ class LoadedPolicyBot:
                 np.clip(me_vx / max_v, -1, 1),
                 np.clip(me.vy / max_v, -1, 1),
                 me_air,
+                # Opponent view is (x, y, vy) — opp.vx intentionally
+                # omitted to match the env obs layout docstring at
+                # PikachuVolleyballEnv._get_obs (docstring line 275).
                 opp_x / w * 2 - 1,
                 opp.y / h * 2 - 1,
                 np.clip(opp.vy / max_v, -1, 1),
@@ -178,7 +187,7 @@ class LoadedPolicyBot:
                 np.clip(state.ball.vy / max_v, -1, 1),
                 np.clip((ball_x - prev_ball_x) / max_v, -1, 1),
                 np.clip(
-                    (float(state.ball.y) - self._prev_ball_y) / max_v, -1, 1
+                    (float(state.ball.y) - prev_ball_y) / max_v, -1, 1
                 ),
                 np.clip((ball_x - me_x) / w, -1, 1),
                 # ball_side: 1.0 if ball is on "my" half (i.e. left half

@@ -179,22 +179,32 @@ class TestGetActionAsPlayer2:
         assert mirrored[5] == pytest.approx((w - 80) / w * 2 - 1)
 
     def test_obs_mirror_flips_ball_vx_sign(self) -> None:
-        stub = _StubPolicy(action=0)
-        bot = LoadedPolicyBot(
-            model_path="/tmp/_.zip",
-            checkpoint_id="ck_vx",
-            policy_loader=lambda path: stub,
-        )
+        # Use fresh bot instances for each path so the ball-history is
+        # identical on both sides — keeps trajectory-delta indices
+        # (12, 13) comparable if a future assertion wants to use them.
         state = GameState(
             player1=PlayerState(x=80, y=244),
             player2=PlayerState(x=360, y=244),
             ball=BallState(x=200, y=100, vx=8, vy=0),
         )
-        bot.get_action(state, is_player2=False)
-        raw_ball_vx = stub.last_obs[10]
-        bot.reset_history()
-        bot.get_action(state, is_player2=True)
-        mirrored_ball_vx = stub.last_obs[10]
+        stub_p1 = _StubPolicy(action=0)
+        bot_p1 = LoadedPolicyBot(
+            model_path="/tmp/_.zip",
+            checkpoint_id="ck_vx_p1",
+            policy_loader=lambda path: stub_p1,
+        )
+        bot_p1.get_action(state, is_player2=False)
+        raw_ball_vx = stub_p1.last_obs[10]
+
+        stub_p2 = _StubPolicy(action=0)
+        bot_p2 = LoadedPolicyBot(
+            model_path="/tmp/_.zip",
+            checkpoint_id="ck_vx_p2",
+            policy_loader=lambda path: stub_p2,
+        )
+        bot_p2.get_action(state, is_player2=True)
+        mirrored_ball_vx = stub_p2.last_obs[10]
+
         # ball.vx=8 → raw positive; mirrored should be negative.
         assert raw_ball_vx > 0
         assert mirrored_ball_vx < 0
