@@ -109,6 +109,8 @@ class TrainingManager:
         n_envs: int = 8,
         title: str = "",
         slug: str = "",
+        training_mode: str = "bot_ladder",
+        opponent_provider: Any = None,
     ) -> str:
         """Start a new training experiment. Returns experiment_id.
 
@@ -117,12 +119,38 @@ class TrainingManager:
         is handed in and stores it for downstream tagging. An empty
         title is permitted at this layer (legacy / test callers); the
         slug falls back to ``"run"`` via the title service.
+
+        ``training_mode`` selects the opponent source (v2.x Sprint-1):
+          * ``"bot_ladder"`` (default, v1.0.0-compatible) — each env gets
+            a ``FixedBotProvider(level=bot_level)`` built in-process.
+            Uses the same SubprocVecEnv path we shipped at v1.0.0 so
+            throughput is unchanged.
+          * ``"self_play"`` — the caller is expected to pass a shared
+            ``opponent_provider`` (typically ``PFSPProvider``) that
+            samples from the league pool. Runs on ``DummyVecEnv``
+            (in-process) so the provider's rating store and checkpoint
+            cache aren't duplicated across subprocesses. Trades a small
+            amount of throughput for correct shared-state semantics.
+
+        See docs/adr/0014-self-play-league.md §3 for the design.
         """
         if self.status == "running":
             raise RuntimeError("Training is already running")
+        if training_mode not in ("bot_ladder", "self_play"):
+            raise ValueError(
+                f"training_mode must be 'bot_ladder' or 'self_play', "
+                f"got {training_mode!r}"
+            )
+        if training_mode == "self_play" and opponent_provider is None:
+            raise ValueError(
+                "training_mode='self_play' requires an opponent_provider "
+                "(typically a PFSPProvider built over the league pool)"
+            )
 
         self._experiment_id = str(uuid.uuid4())
         self._bot_level = bot_level
+        self._training_mode = training_mode
+        self._opponent_provider = opponent_provider
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         # Title + slug set BEFORE the thread starts so the first demo-
         # tick + result-drain both see them. Slug defaults keep legacy
@@ -373,12 +401,36 @@ class TrainingManager:
         """Run SB3 PPO training (called from a background thread)."""
         try:
             bot_level = self._bot_level
-            env = make_vec_env(
-                PikachuVolleyballEnv,
-                n_envs=n_envs,
-                env_kwargs={"bot_level": bot_level},
-                vec_env_cls=SubprocVecEnv,
-            )
+            training_mode = getattr(self, "_training_mode", "bot_ladder")
+            provider = getattr(self, "_opponent_provider", None)
+            if training_mode == "self_play" and provider is not None:
+                # Shared in-process PFSP provider: DummyVecEnv keeps the
+                # rating store, checkpoint cache, and pool manifest
+                # singleton across all env workers. Sub-env index is
+                # passed to env_kwargs so the provider's mirror / PFSP
+                # sampling can stagger deterministically across workers.
+                from stable_baselines3.common.vec_env import DummyVecEnv
+                # noqa: PLC0415 — keep the import local so the legacy
+                # bot_ladder path still loads with the classic
+                # make_vec_env + SubprocVecEnv imports at the top.
+
+                def _make_one(i: int) -> Any:
+                    def _f() -> PikachuVolleyballEnv:
+                        return PikachuVolleyballEnv(
+                            bot_level=bot_level,
+                            opponent_provider=provider,
+                            env_index=i,
+                        )
+                    return _f
+
+                env = DummyVecEnv([_make_one(i) for i in range(n_envs)])
+            else:
+                env = make_vec_env(
+                    PikachuVolleyballEnv,
+                    n_envs=n_envs,
+                    env_kwargs={"bot_level": bot_level},
+                    vec_env_cls=SubprocVecEnv,
+                )
 
             hp = self._hyperparams
             if checkpoint_path:
