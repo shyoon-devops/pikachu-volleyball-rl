@@ -24,6 +24,7 @@ from backend.rl.callbacks import (
     EnvResultCallback,
     LiveFrameCallback,
     MetricsCallback,
+    UpdateWindowCallback,
 )
 from backend.rl.env import PikachuVolleyballEnv
 from backend.rl.league_callback import LeagueCallback
@@ -83,6 +84,16 @@ class TrainingManager:
         # as training:league_update. Bounded so a stalled FE subscriber
         # can't blow memory — one flush-window of records at a time.
         self.league_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=32)
+        # Gradient-update window events (training:update_start /
+        # training:update_end). Emitted by UpdateWindowCallback at
+        # SB3 rollout boundaries so the FE stops heuristic-timing the
+        # env.step gap; see docs/diagnostics/FREEZE-ANALYSIS-20260419.md
+        # Fix A. Bounded at a handful of records — these fire at most
+        # twice per rollout (start + end), so queue depth is always
+        # small even if the WS fan-out stalls briefly.
+        self.update_events_queue: asyncio.Queue[dict[str, Any]] = (
+            asyncio.Queue(maxsize=32)
+        )
 
         self._model: PPO | None = None
         self._thread: threading.Thread | None = None
@@ -521,6 +532,16 @@ class TrainingManager:
                 LeagueCallback(
                     broadcast_queue=self.league_queue,
                     loop=loop,
+                ),
+                # Gradient-update window events (Fix A from freeze diag
+                # 2026-04-19). Emits training:update_start at
+                # rollout-end and training:update_end at rollout-start
+                # so the FE overlay doesn't have to heuristic-time the
+                # env.step gap.
+                UpdateWindowCallback(
+                    update_events_queue=self.update_events_queue,
+                    loop=loop,
+                    experiment_id=self._experiment_id,
                 ),
                 _StopEventCallback(self._stop_event, self._pause_event, self),
             ])
