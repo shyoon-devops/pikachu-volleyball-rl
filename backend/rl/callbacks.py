@@ -17,7 +17,6 @@ from backend.game.bot import RuleBasedBot
 from backend.game.constants import FPS, MAX_SCORE, NET_PILLAR_X
 from backend.game.engine import PikachuVolleyball
 from backend.rl.env import ACTION_MAP
-from backend.rl import _freeze_diag as _diag  # TEMP: freeze diagnosis
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +65,11 @@ def _safe_enqueue(
     ``call_soon_threadsafe`` so queue operations stay on the loop.
     Silently drops when the loop is closed (client disconnected).
     """
-    with _diag.timed("ws.enqueue"):
-        try:
-            loop.call_soon_threadsafe(_enqueue_with_drop, queue, data)
-        except RuntimeError:
-            # Event loop was closed (e.g., shutdown). Training continues.
-            pass
+    try:
+        loop.call_soon_threadsafe(_enqueue_with_drop, queue, data)
+    except RuntimeError:
+        # Event loop was closed (e.g., shutdown). Training continues.
+        pass
 
 
 class MetricsCallback(BaseCallback):

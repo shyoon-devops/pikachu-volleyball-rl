@@ -360,17 +360,10 @@ async def frames_push_loop(
     training_service: TrainingServiceWrapper,
 ) -> None:
     """Drain live-frame queue and broadcast to all WS clients."""
-    # TEMP: freeze-diag broadcast timing. Records time-spent-in-broadcast
-    # per drain so the WS side can be correlated with training thread
-    # gaps. Revert with the rest of the freeze-diag instrumentation.
-    from backend.rl import _freeze_diag as _diag  # noqa: PLC0415
     queue = training_service.manager.frames_queue
     while True:
         data = await queue.get()
-        with _diag.timed("ws.broadcast", extra="frame"):
-            await manager.broadcast(
-                {"type": "training:frame", "payload": data}
-            )
+        await manager.broadcast({"type": "training:frame", "payload": data})
 
 
 def _build_league_opponent_provider(
