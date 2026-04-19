@@ -124,6 +124,21 @@ class TestPayloadShape:
         assert set(items[0].keys()) == {"type", "experiment_id"}
         loop.close()
 
+    def test_update_end_payload_has_same_shape(self) -> None:
+        # Parallel shape assertion on the update_end envelope so a
+        # future divergence between the two branches fails loudly
+        # rather than sneaking through TestRolloutCadence's type
+        # list-check.
+        cb, loop, queue = _make()
+        cb._on_rollout_end()     # latches flag + emits start
+        cb._on_rollout_start()   # emits end
+        items = _drain(loop, queue)
+        end_envelope = next(
+            i for i in items if i["type"] == "training:update_end"
+        )
+        assert set(end_envelope.keys()) == {"type", "experiment_id"}
+        loop.close()
+
     def test_on_step_returns_true_and_emits_nothing(self) -> None:
         # _on_step is called every env step; it must be cheap and must
         # not emit events of its own.
