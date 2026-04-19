@@ -19,7 +19,14 @@ def _make_callback(
     broadcast_interval: int = 64,
     recent_buffer_size: int = 64,
 ) -> tuple[LeagueCallback, asyncio.AbstractEventLoop, asyncio.Queue]:
-    """Build a LeagueCallback with a fresh event loop + queue."""
+    """Build a LeagueCallback with a fresh event loop + queue.
+
+    Note on cleanup: tests call ``loop.close()`` but never
+    ``queue.close()``. ``asyncio.Queue`` holds no OS handles — it's
+    purely in-memory — so there's nothing to release. Debug-mode
+    ``ResourceWarning`` (if any) is acceptable; the shipped code
+    lives inside a long-lived training thread anyway.
+    """
     loop = asyncio.new_event_loop()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=128)
     cb = LeagueCallback(

@@ -89,6 +89,13 @@ class LeagueCallback(BaseCallback):
     # SB3 hook
     # ------------------------------------------------------------------
     def _on_step(self) -> bool:
+        # Unconditional True: this callback is aggregation-only and
+        # must never vote to stop training. ``_safe_enqueue`` is the
+        # only I/O path and it is already guarded against closed-loop
+        # RuntimeError inside its own body, so no call here can
+        # realistically raise — if one ever does we'd rather let the
+        # uncaught exception crash the training thread loudly than
+        # swallow it silently and produce stale league stats.
         infos = self.locals.get("infos", [])
         for i, info in enumerate(infos):
             if not self._info_reports_completion(info):
@@ -96,6 +103,13 @@ class LeagueCallback(BaseCallback):
             key = (int(info.get("score1", 0)), int(info.get("score2", 0)))
             # Skip repeated reports of the same terminal info (SB3
             # forwards the last info on the auto-reset step).
+            # Accepted false-dedup edge case: two back-to-back genuine
+            # matches in the same env slot that happen to end with
+            # identical scores (e.g. 15-9 twice) — the second is
+            # dropped. The alternative (a per-match nonce in info)
+            # would require an env-contract change; the score-pair
+            # key is cheaper and the collision probability is well
+            # under the broadcast cadence, so ADR §4 accepts it.
             if self._last_terminal_key.get(i) == key:
                 continue
             self._last_terminal_key[i] = key
