@@ -16,6 +16,7 @@ interface MockState {
   gameResultSeq: number
   leagueUpdate: LeagueUpdatePayload | null
   trainingMode: 'bot_ladder' | 'self_play'
+  updatingPolicy: { active: boolean; longGap: boolean }
   send: () => void
 }
 
@@ -68,6 +69,7 @@ function resetMockState(overrides: Partial<MockState> = {}) {
     gameResultSeq: 0,
     leagueUpdate: null,
     trainingMode: 'bot_ladder' as const,
+    updatingPolicy: { active: false, longGap: false },
     send: vi.fn(),
     ...overrides,
   })
