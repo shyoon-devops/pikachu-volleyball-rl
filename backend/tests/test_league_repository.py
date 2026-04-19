@@ -191,6 +191,31 @@ class TestUpdateEloBatch:
         assert a.games == 1
 
     @pytest.mark.asyncio
+    async def test_champion_excludes_anchor_rows(self, tmp_path):
+        """Anchor rows (L5 at 1200) must NEVER win the champion slot —
+        they're a fixed reference corridor, not training candidates.
+
+        Regression guard: before the review fix the champion selector
+        sorted the whole pool (anchors + training) so L5 at 1200
+        always beat a fresh training checkpoint at 1000.
+        """
+        repo = LeagueRepository(db=None, league_dir=str(tmp_path / "league"))
+        repo.save_manifest(LeagueManifest(
+            checkpoints=[
+                _ckpt("L5", elo=1200, source="anchor"),
+                _ckpt("run-fresh", elo=1000, games=0),
+                _ckpt("run-older", elo=990, games=5),
+            ]
+        ))
+        await repo.update_elo_batch([
+            {"id_a": "run-fresh", "id_b": "run-older", "winner": 1},
+        ])
+        champion = repo.load_manifest().champion_id
+        # Champion is the best TRAINING checkpoint, not L5.
+        assert champion in ("run-fresh", "run-older")
+        assert champion != "L5"
+
+    @pytest.mark.asyncio
     async def test_champion_updates_on_rating_flip(self, tmp_path):
         repo = LeagueRepository(db=None, league_dir=str(tmp_path / "league"))
         repo.save_manifest(LeagueManifest(

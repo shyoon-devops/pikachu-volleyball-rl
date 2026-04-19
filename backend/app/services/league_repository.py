@@ -18,7 +18,6 @@ pool entry.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -228,11 +227,15 @@ class LeagueRepository:
         if not touched:
             return
         manifest.checkpoints = [by_id[c.id] for c in manifest.checkpoints]
-        # Champion: highest current elo. Simple Sprint-1 rule
-        # (ADR §7 open question 1 reserves a sticky-streak variant for
-        # Sprint 2). Ties break by games-desc to match ``top_n()``.
+        # Champion: highest current elo AMONG TRAINING CHECKPOINTS
+        # (ADR §2 — anchors are a fixed reference corridor, not
+        # candidates for champion). L5 at 1200 would otherwise always
+        # win before any training checkpoint crosses it. Simple
+        # Sprint-1 rule; ADR §7 open question 1 reserves a sticky-
+        # streak variant for Sprint 2. Ties break by games-desc.
+        non_anchor = [c for c in manifest.checkpoints if not c.is_anchor]
         sorted_ckpts = sorted(
-            manifest.checkpoints,
+            non_anchor,
             key=lambda c: (-c.elo, -c.games),
         )
         manifest.champion_id = sorted_ckpts[0].id if sorted_ckpts else None

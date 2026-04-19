@@ -235,8 +235,8 @@ async def _dispatch(
         except Exception:  # noqa: BLE001
             logger.exception("training_runs register failed for %s", experiment_id)
         logger.info(
-            "Training started: experiment=%s bot_level=%d title=%s",
-            experiment_id, effective_bot_level, final_title,
+            "Training started: experiment=%s bot_level=%d title=%s mode=%s",
+            experiment_id, effective_bot_level, final_title, effective_mode,
         )
         await _emit_status(ws, manager, {
             "type": "training:status",
@@ -244,6 +244,13 @@ async def _dispatch(
                 "state": "running",
                 "experiment_id": experiment_id,
                 "title": final_title,
+                # FE needs the POST-fallback mode so the dashboard
+                # header renders the correct opponent source even
+                # when self_play downgraded to bot_ladder on an
+                # empty pool. Matches the ADR §7 contract ("Training
+                # start modal: toggle ... if league, show current
+                # pool size + top Elo") — FE reads this field.
+                "mode": effective_mode,
             },
         })
 
