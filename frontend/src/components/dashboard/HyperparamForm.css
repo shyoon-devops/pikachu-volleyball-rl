@@ -262,3 +262,136 @@
   color: var(--color-danger, #ef4444);
   margin-top: 2px;
 }
+
+/* ── Opponent section (v2.x Sprint 1) ───────────────────────────── */
+.hyperparam-form-group--opponent {
+  gap: var(--space-2);
+}
+
+.opponent-segmented {
+  display: flex;
+  gap: 0;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  height: 36px;
+}
+
+.opponent-segmented-option {
+  flex: 1;
+  padding: 0 var(--space-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.opponent-segmented-option:hover:not([disabled]):not(.opponent-segmented-option--active) {
+  color: var(--color-text-primary);
+}
+
+.opponent-segmented-option--active {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.opponent-segmented-option[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.opponent-sampling {
+  border: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.opponent-sampling-legend {
+  padding: 0;
+  margin-bottom: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.opponent-sampling-option {
+  display: grid;
+  grid-template-columns: 18px auto 1fr;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.opponent-sampling-option:hover {
+  border-color: var(--color-border-strong);
+}
+
+.opponent-sampling-option:has(input:checked) {
+  border-color: var(--color-accent);
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.08));
+}
+
+.opponent-sampling-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.opponent-sampling-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.opponent-pool-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.opponent-pool-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.opponent-k-factor {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.opponent-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}

@@ -141,11 +141,32 @@ _METRIC_INDEXES = _IndexSpec(
     ),
 )
 
+_LEAGUE_INDEXES = _IndexSpec(
+    collection="league_standings",
+    models=(
+        # Dashboard top-N query: ``find({}).sort([("elo",-1),("games",-1)])``.
+        # Compound index matches the tiebreaker so the route doesn't
+        # scan unsorted docs.
+        IndexModel(
+            [("elo", DESCENDING), ("games", DESCENDING)],
+            name="league_elo_games_desc",
+        ),
+        # Lineage / provenance lookups (``where experiment_id = X``)
+        # used by the detail endpoint and the migration script.
+        IndexModel(
+            [("experiment_id", ASCENDING)],
+            name="league_experiment",
+            partialFilterExpression={"experiment_id": {"$type": "string"}},
+        ),
+    ),
+)
+
 _ALL_INDEXES: tuple[_IndexSpec, ...] = (
     _GAME_INDEXES,
     _EVAL_INDEXES,
     _METRIC_INDEXES,
     _TRAINING_RUN_INDEXES,
+    _LEAGUE_INDEXES,
 )
 
 
