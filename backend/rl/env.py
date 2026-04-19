@@ -10,6 +10,7 @@ import gymnasium
 from gymnasium import spaces
 
 from backend.rl.opponent import FixedBotProvider, OpponentProvider
+from backend.rl import _freeze_diag as _diag  # TEMP: freeze diagnosis
 from backend.game.constants import (
     BALL_RADIUS,
     GROUND_HEIGHT,
@@ -150,7 +151,8 @@ class PikachuVolleyballEnv(gymnasium.Env):
         # path returns a new RuleBasedBot(level=bot_level) — same
         # behavior as the pre-league direct construction. The PFSP
         # path samples from the league pool.
-        self._bot = self._opponent_provider.get_opponent(self.env_index)
+        with _diag.timed("provider.get_opponent", env_index=self.env_index):
+            self._bot = self._opponent_provider.get_opponent(self.env_index)
         state = self._game.reset()
         self._steps = 0
         self._prev_score1 = 0
@@ -172,6 +174,16 @@ class PikachuVolleyballEnv(gymnasium.Env):
     def step(
         self, action: int
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        # TEMP: record env.step timing so gradient-update / WS-broadcast
+        # pauses show up as outlier gaps between consecutive entries
+        # for the same env_index. Revert-together with the rest of the
+        # freeze_diag instrumentation.
+        with _diag.timed("env.step", env_index=self.env_index):
+            return self._step_inner(action)
+
+    def _step_inner(
+        self, action: int
+    ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         self._steps += 1
 
         p1_input = ACTION_MAP[int(action)]
@@ -190,7 +202,11 @@ class PikachuVolleyballEnv(gymnasium.Env):
                     power_hit=True,
                 )
 
-        p2_input = self._bot.get_action(state, is_player2=True)
+        with _diag.timed(
+            "bot.get_action", env_index=self.env_index,
+            extra=type(self._bot).__name__,
+        ):
+            p2_input = self._bot.get_action(state, is_player2=True)
         new_state = self._game.step(p1_input, p2_input)
 
         obs = self._get_obs(new_state)

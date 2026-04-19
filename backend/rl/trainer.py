@@ -27,6 +27,7 @@ from backend.rl.callbacks import (
 )
 from backend.rl.env import PikachuVolleyballEnv
 from backend.rl.league_callback import LeagueCallback
+from backend.rl import _freeze_diag as _diag  # TEMP: freeze diagnosis
 
 logger = logging.getLogger(__name__)
 
@@ -606,6 +607,12 @@ class _StopEventCallback(BaseCallback):
         self._stop_event = stop_event
         self._pause_event = pause_event
         self._manager = manager
+
+    def _on_rollout_start(self) -> None:
+        _diag.mark("rollout.start")
+
+    def _on_rollout_end(self) -> None:
+        _diag.mark("rollout.end")
 
     def _on_step(self) -> bool:
         self._manager.current_step = self.num_timesteps
