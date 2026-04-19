@@ -228,8 +228,11 @@ class TestPFSPProviderMirror:
             mirror_factory=lambda: _DummyOpponent(id="MIRROR"),
             mirror_rate=0.0,  # disable periodic mirror
         )
-        opp = provider.get_opponent(env_index=1)
-        assert opp.id == "MIRROR"
+        # Both env_index=0 and env_index=1 should reach the empty-pool
+        # branch (pins the ordering: the empty-pool mirror fallback
+        # must run after the periodic-mirror check is disabled).
+        assert provider.get_opponent(env_index=0).id == "MIRROR"
+        assert provider.get_opponent(env_index=1).id == "MIRROR"
 
     def test_empty_pool_without_mirror_raises(self) -> None:
         provider = PFSPProvider(pool=[], rating_store=None, mirror_rate=0.0)
@@ -281,6 +284,11 @@ class TestPFSPProviderMatchEnd:
         assert store.recorded == []
 
     def test_store_exception_never_propagates(self) -> None:
+        # _AngryStore intentionally omits win_rate_against — the pool
+        # is empty on this provider so _pfsp_weights is never called.
+        # If a future copy of this double sees PFSP sampling run, the
+        # missing method will raise AttributeError, which is the right
+        # signal (vs. silently being swallowed).
         class _AngryStore:
             def record_match(self, **kwargs: Any) -> None:
                 raise RuntimeError("mongo down")

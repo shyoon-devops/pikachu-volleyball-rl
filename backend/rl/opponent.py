@@ -19,10 +19,15 @@ provider holds onto (e.g. a ``RatingStore`` passed into
 
 from __future__ import annotations
 
+import logging
+import math
 import random
 from typing import Any, Protocol, runtime_checkable
 
 from backend.game.bot import BOT_PARAMS, RuleBasedBot
+from backend.game.engine import GameState, PlayerInput
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -34,7 +39,9 @@ class Opponent(Protocol):
     snapshot, or a scripted replay.
     """
 
-    def get_action(self, state: Any, *, is_player2: bool) -> Any: ...
+    def get_action(
+        self, state: GameState, *, is_player2: bool
+    ) -> PlayerInput: ...
 
 
 class OpponentProvider:
@@ -158,7 +165,16 @@ class PFSPProvider(OpponentProvider):
             ):
                 try:
                     wr = float(self.rating_store.win_rate_against(entry_id))
-                except Exception:
+                except (TypeError, ValueError) as exc:
+                    # Surface misbehaving stores in the training log (a
+                    # non-numeric return previously got silently cast to
+                    # 0.5). Training continues with the fallback.
+                    logger.warning(
+                        "rating_store.win_rate_against(%s) returned "
+                        "non-numeric value; falling back to 0.5 (%s)",
+                        entry_id,
+                        exc,
+                    )
                     wr = 0.5
             # Floor avoids a zero weight when we dominate an opponent so
             # the distribution keeps a small exploration tail.
@@ -171,9 +187,7 @@ class PFSPProvider(OpponentProvider):
         for entry in self.pool:
             rating = float(_entry_rating(entry))
             # exp(-|dr|/scale) peaks at my_rating and decays smoothly.
-            weights.append(
-                pow(2.718281828, -abs(rating - self.my_rating) / scale)
-            )
+            weights.append(math.exp(-abs(rating - self.my_rating) / scale))
         return weights
 
     def _pick_index(self) -> int:
