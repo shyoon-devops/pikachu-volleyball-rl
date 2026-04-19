@@ -37,6 +37,7 @@ from backend.app.ws.handlers import (
     league_push_loop,
     metrics_push_loop,
     results_push_loop,
+    update_events_push_loop,
     ws_endpoint,
 )
 from backend.app.ws.manager import ConnectionManager
@@ -107,6 +108,15 @@ async def lifespan(app: FastAPI):
                 app.state.ws_manager,
                 app.state.training_service,
                 app.state.league_repository,
+            )
+        ),
+        # Gradient-update window events — emits training:update_start
+        # at rollout-end and training:update_end at rollout-start so
+        # the FE overlay doesn't have to heuristic-time env.step gaps.
+        # See docs/diagnostics/FREEZE-ANALYSIS-20260419.md Fix A.
+        asyncio.create_task(
+            update_events_push_loop(
+                app.state.ws_manager, app.state.training_service
             )
         ),
     ]
