@@ -420,6 +420,8 @@ export type WSServerMessageType =
   | 'training:status'
   | 'training:env_frame'
   | 'training:league_update'
+  | 'training:update_start'
+  | 'training:update_end'
   | 'game:result'
   | 'replay:data'
 
@@ -507,6 +509,25 @@ export interface LeagueStandings {
   generation: number
   poolSize: number
   totalCheckpoints: number
+}
+
+/**
+ * Payloads for the PPO gradient-update lifecycle (Fix-A FE).
+ * BE emits `training:update_start` when the rollout finishes and
+ * the PPO `.learn()` call begins; `training:update_end` fires when
+ * the first post-update frame is ready. Both carry the owning
+ * experiment id so consumers can ignore stale events from a
+ * previous session. `step` may be null for legacy / edge-case
+ * emissions; the overlay renders without it in that case.
+ */
+export interface TrainingUpdateStartPayload {
+  experimentId: string
+  step?: number | null
+}
+
+export interface TrainingUpdateEndPayload {
+  experimentId: string
+  step?: number | null
 }
 
 /** Payload for the `training:league_update` WS broadcast
