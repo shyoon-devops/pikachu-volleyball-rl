@@ -75,6 +75,26 @@ export interface TrainingState {
   recentGames: GameRecord[]
   envFrames: EnvFramesMap
   /**
+   * Driver state for the UpdatingOverlay (Designer spec f02a9785).
+   *
+   * `active` flips true when training is `running` AND no frame has
+   * arrived for > UPDATING_GAP_MS (1.5 s) — the FE heuristic for
+   * the PPO gradient-update freeze. Flips back to false the instant
+   * a new frame lands OR the WS disconnects OR status leaves
+   * running. The consuming overlay still owns the 400 ms minimum-
+   * visible + 200/300 ms fade-in/out timing; this field is the raw
+   * on/off signal.
+   *
+   * `longGap` becomes true after UPDATING_LONG_GAP_MS (8 s) of
+   * silence while `active` is already true; drives the alternate
+   * subtitle "This is taking longer than usual…" per spec §5.
+   *
+   * Purely FE-derived — no BE contract today. When BE ships an
+   * explicit `training:gradient_update` signal this field can be
+   * sourced from that broadcast instead of the gap heuristic.
+   */
+  updatingPolicy: { active: boolean; longGap: boolean }
+  /**
    * Monotonic counter bumped every time a `game:result` WS payload
    * lands. Pages that render server-fetched lists (TrainingRunList,
    * level-2 ReplayList) can `useEffect(() => refetch(), [gameResultSeq])`
@@ -108,6 +128,25 @@ function getWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${window.location.host}/ws`
 }
+
+/**
+ * Threshold + poll cadence for the "updating policy" heuristic.
+ *
+ * During a rollout the BE streams `training:frame` at ~30 Hz
+ * (broadcast_interval 4 vec steps ≈ 33 ms at 30 ticks/s). Once the
+ * rollout finishes, Stable-Baselines3's PPO.learn() enters a
+ * gradient-update phase that takes ~2–5 s and emits no frames.
+ *
+ * We declare "updating" after 1500 ms of silence — well past the
+ * normal broadcast spacing but fast enough that the UI catches the
+ * freeze visibly. The 500 ms poll gives ≤500 ms latency on the
+ * off-to-on transition; the on-to-off transition is instant
+ * (frame arrival triggers a React re-render).
+ */
+const UPDATING_GAP_MS = 1500
+const UPDATING_POLL_MS = 500
+/** Spec §5: swap subtitle to the "taking longer" variant after 8 s. */
+const UPDATING_LONG_GAP_MS = 8000
 
 /**
  * Internal: subscribes to the WebSocket and derives training state.
@@ -185,9 +224,34 @@ export function useTrainingStateImpl(): TrainingState {
     }))
   }, [])
 
+  /**
+   * Monotonic clock of the last frame arrival (either demo
+   * `training:frame` or parallel `training:env_frame`). Kept on a
+   * ref because the poll-timer closure below doesn't need to
+   * re-register on every frame. `updatingPolicy` state is the
+   * React-visible derivative that the UI renders against.
+   *
+   * `0` means "no frame seen for the current running session";
+   * the effect below resets it to `0` on the stopped→running
+   * transition so a restart doesn't inherit a stale timestamp.
+   */
+  const lastFrameAtRef = useRef<number>(0)
+  const [updatingPolicy, setUpdatingPolicy] = useState<{ active: boolean; longGap: boolean }>({
+    active: false,
+    longGap: false,
+  })
+
+  const markFrameArrival = useCallback(() => {
+    lastFrameAtRef.current = Date.now()
+    // Instant hide the moment a frame lands — only the poll tick
+    // flips the flag on, only a frame flips it off.
+    setUpdatingPolicy({ active: false, longGap: false })
+  }, [])
+
   const handleFrame = useCallback((msg: WSMessage<'training:frame'>) => {
     setLatestFrame(snakeToCamel<GameState>(msg.payload))
-  }, [])
+    markFrameArrival()
+  }, [markFrameArrival])
 
   /**
    * `training:env_frame` arrives once per parallel env per broadcast
@@ -219,7 +283,8 @@ export function useTrainingStateImpl(): TrainingState {
       frame: snakeToCamel<GameState>(result.data.frame),
     }
     setEnvFrames(prev => ({ ...prev, [payload.envId]: payload }))
-  }, [])
+    markFrameArrival()
+  }, [markFrameArrival])
 
   const handleStatus = useCallback((msg: WSMessage<'training:status'>) => {
     // A6: schema enforces `state` is one of the three known values
@@ -301,6 +366,60 @@ export function useTrainingStateImpl(): TrainingState {
     ]
     return () => { unsubs.forEach(u => u()) }
   }, [subscribe, handleMetrics, handleFrame, handleEnvFrame, handleStatus, handleGameResult, handleLeagueUpdate])
+
+  /**
+   * Updating-policy gap heuristic (Designer spec f02a9785).
+   *
+   * Flips `updatingPolicy.active` to true when a running session
+   * hasn't streamed a frame for UPDATING_GAP_MS; escalates to
+   * `longGap` when silence exceeds UPDATING_LONG_GAP_MS (§5 "taking
+   * longer than usual" subtitle). The opposite transition
+   * (active → false) is handled by `markFrameArrival` so the
+   * overlay snaps off the instant the rollout resumes.
+   *
+   * Teardown conditions (spec §5):
+   *   * status leaves `running` — paused / stopped / etc.
+   *   * WS disconnect — the existing connection-lost banner owns
+   *     the state; we don't stack blockers.
+   *
+   * Reset ref only on the stopped→running transition so a fresh
+   * start doesn't inherit a frame timestamp from the previous
+   * session. Inside a running session the ref advances only when
+   * `markFrameArrival` fires — the poll never touches it.
+   */
+  const prevRunningRef = useRef(false)
+  useEffect(() => {
+    const isRunning = status.state === 'running'
+    const isConnected = connectionState === 'connected'
+    if (!isRunning || !isConnected) {
+      setUpdatingPolicy({ active: false, longGap: false })
+      prevRunningRef.current = false
+      return
+    }
+    // stopped/paused → running transition: clear the stale frame
+    // timestamp so first-tick-after-resume doesn't immediately
+    // declare the gap exceeded.
+    if (!prevRunningRef.current) {
+      lastFrameAtRef.current = 0
+    }
+    prevRunningRef.current = true
+    const tick = () => {
+      // No frame yet for this session — warmup, not a gradient phase.
+      if (lastFrameAtRef.current === 0) return
+      const gap = Date.now() - lastFrameAtRef.current
+      if (gap > UPDATING_GAP_MS) {
+        setUpdatingPolicy(prev => {
+          const long = gap > UPDATING_LONG_GAP_MS
+          // Skip the set when nothing changed so consumers don't
+          // thrash-render the overlay every 500 ms.
+          if (prev.active && prev.longGap === long) return prev
+          return { active: true, longGap: long }
+        })
+      }
+    }
+    const id = setInterval(tick, UPDATING_POLL_MS)
+    return () => clearInterval(id)
+  }, [status.state, connectionState])
 
   // Sync authoritative training state from REST on mount and again whenever
   // the WebSocket reconnects. WS broadcasts `training:status` only when the
@@ -562,7 +681,7 @@ export function useTrainingStateImpl(): TrainingState {
     }
   }, [wsSend])
 
-  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, gameResultSeq, leagueUpdate, trainingMode, send }
+  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, gameResultSeq, leagueUpdate, trainingMode, updatingPolicy, send }
 }
 
 export const TrainingStateContext = createContext<TrainingState | null>(null)

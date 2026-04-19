@@ -11,6 +11,7 @@ import { ErrorBoundary } from '../ErrorBoundary'
 import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
+import { UpdatingOverlay } from './UpdatingOverlay'
 import type { TitleValidationState } from './TitleInput'
 import { getLeagueStandings } from '../../lib/api'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
@@ -46,7 +47,7 @@ const MAX_N_ENVS = 16
 const CANVAS_FADE_MS = 180
 
 export function Dashboard() {
-  const { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, leagueUpdate, trainingMode, send } = useTrainingState()
+  const { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, leagueUpdate, trainingMode, updatingPolicy, send } = useTrainingState()
 
   // Hyperparams live at the Dashboard so the single Start button in
   // <TrainingControls /> can submit them. Do NOT re-introduce a second
@@ -342,6 +343,7 @@ export function Dashboard() {
                 Waiting for game frames...
               </div>
             )}
+            <UpdatingOverlay show={updatingPolicy.active} longGap={updatingPolicy.longGap} />
           </div>
 
           {effectiveNEnvs > 0 ? (

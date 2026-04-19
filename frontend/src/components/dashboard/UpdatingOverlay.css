@@ -1,0 +1,113 @@
+/*
+ * UpdatingOverlay — PPO gradient-update phase (spec f02a9785).
+ * Existing tokens only; no new colors, fonts, or surfaces.
+ */
+
+.updating-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Spec §1: --color-bg-primary (#0f1117) @ 55% + 6px blur. Token
+     isn't available as an rgba() construct, so the literal is
+     duplicated here; if the palette shifts, update both sites. */
+  background: rgba(15, 17, 23, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  /* Spec §3: clicks pass through so Stop/Pause stay reachable. */
+  pointer-events: none;
+  /* Spec §2: fade-in 200 ms / fade-out 300 ms on --ease-out.
+     The shared token is --ease-out (exponential-out cubic-bezier). */
+  transition: opacity 300ms var(--ease-out);
+  z-index: 2;
+}
+
+.updating-overlay--visible {
+  opacity: 1;
+  transition-duration: 200ms;
+}
+
+.updating-overlay-card {
+  max-width: 320px;
+  padding: 24px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.updating-overlay-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.updating-overlay-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.updating-overlay-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  letter-spacing: 0.01em;
+}
+
+.updating-overlay-subtitle {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+/* Spec §4: mobile <768 px — container shrinks to min(80vw, 280px),
+   padding tightens to 16 px, subtitle may wrap to 2 lines. */
+@media (max-width: 767px) {
+  .updating-overlay-card {
+    max-width: min(80vw, 280px);
+    padding: 16px;
+  }
+}
+
+/* Spec §2: prefers-reduced-motion collapses fades to 0 ms; the
+   400 ms minimum-visible floor is owned in the React layer so
+   reduced motion does NOT shorten the on-screen duration. */
+@media (prefers-reduced-motion: reduce) {
+  .updating-overlay {
+    transition-duration: 0ms !important;
+  }
+  .updating-overlay--visible {
+    transition-duration: 0ms !important;
+  }
+  .dot-pulse {
+    animation: none !important;
+  }
+}
+
+/*
+ * Shared dot-pulse utility — spec §1 wants a "lighter than a
+ * spinner" indicator reusing an existing utility. The shared
+ * class lives here because this is its only consumer today; if
+ * additional surfaces adopt it, lift into global.css.
+ */
+.dot-pulse {
+  animation: updating-overlay-dot-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes updating-overlay-dot-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+}
