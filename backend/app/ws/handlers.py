@@ -181,6 +181,32 @@ async def _dispatch(
         }
         if params.n_envs is not None:
             start_kwargs["n_envs"] = params.n_envs
+
+        # Self-play league wiring (v2 Sprint-1 B-impl-7). The handler
+        # materialises a PFSPProvider here so the training thread
+        # doesn't do disk/mongo I/O at startup. Fallback to
+        # bot_ladder when: FE requested self_play but no pool is
+        # seeded yet, or the LeagueRepository / OpponentProvider
+        # modules aren't wired (legacy / test).
+        effective_mode = params.mode
+        if params.mode == "self_play":
+            provider = _build_league_opponent_provider(
+                request_app=getattr(ws, "app", None)
+                or getattr(manager, "_app", None),
+                sampling=params.sampling,
+            )
+            if provider is None:
+                logger.info(
+                    "training:start mode=self_play fell back to bot_ladder "
+                    "(pool empty or services unwired)"
+                )
+                effective_mode = "bot_ladder"
+            else:
+                start_kwargs["training_mode"] = "self_play"
+                start_kwargs["opponent_provider"] = provider
+        # When the caller explicitly asked for bot_ladder we leave
+        # start_kwargs untouched — the manager default is bot_ladder.
+
         experiment_id = await training_service.start(**start_kwargs)
         # Persist the run record (BE-T1) so future uniqueness checks
         # see this title. Best-effort — failure logs but doesn't fail
@@ -331,6 +357,47 @@ async def frames_push_loop(
     while True:
         data = await queue.get()
         await manager.broadcast({"type": "training:frame", "payload": data})
+
+
+def _build_league_opponent_provider(
+    request_app: Any, sampling: str
+) -> Any | None:
+    """Build a ``PFSPProvider`` from the current league pool.
+
+    Returns ``None`` when the caller should fall back to bot_ladder —
+    pool is empty, opponent module not importable (tests), or the
+    repository isn't wired. Called from the WS ``training:start``
+    handler so the training thread doesn't pay for manifest I/O.
+    """
+    try:
+        from backend.app.services.league_elo import is_anchor
+        from backend.rl.opponent import PFSPProvider
+    except Exception:  # noqa: BLE001 — older deployments without v2 modules
+        return None
+    repo = getattr(request_app, "state", None) if request_app is not None else None
+    repo = getattr(repo, "league_repository", None) if repo is not None else None
+    if repo is None:
+        return None
+    try:
+        manifest = repo.load_manifest()
+    except Exception:  # noqa: BLE001 — broken manifest → fall back
+        logger.exception("league provider build: manifest load failed")
+        return None
+    # Drop anchor rows — the league provider samples TRAINED opponents.
+    # Anchor rows are for scoring the baseline corridor, not for
+    # producing Opponent instances (there's no .zip to load).
+    pool = [c for c in manifest.checkpoints if not is_anchor(c.id)]
+    if not pool:
+        return None
+    try:
+        # rating_store=None is supported — the provider degrades to
+        # 0.5 win-rate fallback on every pool entry, which makes PFSP
+        # equivalent to uniform weighting for Sprint-1. A proper
+        # head-to-head store is reserved for Sprint-2 per ADR §4.
+        return PFSPProvider(pool=pool, rating_store=None, strategy=sampling)
+    except Exception:  # noqa: BLE001
+        logger.exception("league provider build: PFSPProvider init failed")
+        return None
 
 
 async def env_frames_push_loop(
