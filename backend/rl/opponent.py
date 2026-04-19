@@ -228,6 +228,34 @@ class PFSPProvider(OpponentProvider):
         (idx,) = self._rng.choices(range(n), weights=weights, k=1)
         return idx
 
+    def _pick_index_excluding(self, excluded: set[int]) -> int | None:
+        """Sample an index, skipping members of ``excluded``.
+
+        Used by the build-retry loop so a broken entry (missing file)
+        isn't resampled within the same ``get_opponent`` call. Returns
+        None when every index has been excluded — caller falls back to
+        mirror.
+        """
+        n = len(self.pool)
+        remaining = [i for i in range(n) if i not in excluded]
+        if not remaining:
+            return None
+        use_uniform = (
+            self.strategy == "uniform"
+            or (self.strategy == "pfsp" and n < self.min_pool_for_pfsp)
+        )
+        if use_uniform:
+            return self._rng.choice(remaining)
+        if self.strategy == "pfsp":
+            full_weights = self._pfsp_weights()
+        else:
+            full_weights = self._proximity_weights()
+        weights = [full_weights[i] for i in remaining]
+        (pick_pos,) = self._rng.choices(
+            range(len(remaining)), weights=weights, k=1
+        )
+        return remaining[pick_pos]
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -255,14 +283,25 @@ class PFSPProvider(OpponentProvider):
         # max_build_retries consecutive FileNotFoundError's, fall back
         # to mirror (if any) or re-raise the last error so the admin
         # is forced to fix the manifest.
+        #
+        # Failed-index dedup: track indices that raised this call so
+        # the sampler doesn't keep landing on the same broken entry
+        # when the pool is small. Small pools (e.g. 2 entries, 1
+        # broken) previously needed max_build_retries >> pool size to
+        # stochastically find the good one; with the dedup, the
+        # worst-case retry count equals pool size.
         last_err: FileNotFoundError | None = None
+        failed_indices: set[int] = set()
         for _ in range(self.max_build_retries):
-            idx = self._pick_index()
+            idx = self._pick_index_excluding(failed_indices)
+            if idx is None:
+                break  # every entry has already failed this call
             try:
                 return _entry_build(
                     self.pool[idx], models_base_dir=self.models_base_dir
                 )
             except FileNotFoundError as exc:
+                failed_indices.add(idx)
                 last_err = exc
                 logger.warning(
                     "pool entry %s could not be built: %s — resampling",
@@ -396,7 +435,22 @@ def _resolve_checkpoint_path(
         raise FileNotFoundError(
             f"entry {entry!r} has no experiment_id — cannot resolve path"
         )
-    exp_dir = Path(models_base_dir) / str(experiment_id)
+    # Path-traversal hardening. ``experiment_id`` is BE-validated but
+    # the provider must not trust upstream input for filesystem access.
+    # After joining + resolve(), the experiment dir must still live
+    # under models_base_dir — a value like ``"../../etc"`` escapes and
+    # must be rejected before we stat() or open() anything.
+    base_resolved = Path(models_base_dir).resolve()
+    exp_dir = (base_resolved / str(experiment_id)).resolve()
+    try:
+        _is_under = exp_dir.is_relative_to(base_resolved)
+    except AttributeError:  # pragma: no cover — py<3.9
+        _is_under = str(exp_dir).startswith(str(base_resolved))
+    if not _is_under:
+        raise ValueError(
+            f"experiment_id {experiment_id!r} escapes models dir "
+            f"({exp_dir} not under {base_resolved})"
+        )
     if not exp_dir.exists():
         raise FileNotFoundError(
             f"experiment dir {exp_dir} missing for entry "

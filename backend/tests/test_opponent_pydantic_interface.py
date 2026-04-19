@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from pydantic import BaseModel
@@ -81,6 +80,12 @@ class TestAccessorsOnPydantic:
 
     def test_entry_source_missing_returns_none(self) -> None:
         assert _entry_source({"id": "xxx", "elo": 1000}) is None
+
+    def test_entry_source_explicit_none_returns_none(self) -> None:
+        # Distinct from "missing key" path: a dict that explicitly
+        # sets source=None must still yield None so the dispatch in
+        # _entry_build falls through to the learned-policy branch.
+        assert _entry_source({"id": "xxx", "elo": 1000, "source": None}) is None
 
 
 # ─── _entry_build: anchor dispatch ────────────────────────────────────
@@ -161,6 +166,54 @@ class TestLoadedPolicyBuild:
             experiment_id="exp_missing", source="v1_legacy",
         )
         with pytest.raises(FileNotFoundError):
+            _entry_build(entry, models_base_dir=tmp_path)
+
+    def test_missing_experiment_id_raises(
+        self, tmp_path: Path
+    ) -> None:
+        # Non-anchor source with experiment_id=None cannot resolve a
+        # path; must raise loudly rather than silently fall through.
+        entry = LeagueCheckpoint(
+            id="orphan", elo=1000, step=50000,
+            experiment_id=None, source="new",
+        )
+        with pytest.raises(FileNotFoundError, match="experiment_id"):
+            _entry_build(entry, models_base_dir=tmp_path)
+
+    def test_step_none_falls_back_to_final_zip(
+        self, tmp_path: Path
+    ) -> None:
+        # A post-training export that stored only ``final.zip`` should
+        # still resolve via the fallback at the end of the resolver.
+        exp_dir = tmp_path / "exp_final"
+        exp_dir.mkdir()
+        (exp_dir / "final.zip").write_bytes(b"")
+        entry = LeagueCheckpoint(
+            id="export_1", elo=1150.0, step=None,
+            experiment_id="exp_final", source="new",
+        )
+        opp = _entry_build(entry, models_base_dir=tmp_path)
+        assert isinstance(opp, LoadedPolicyBot)
+        assert opp.model_path.name == "final.zip"
+
+
+class TestPathTraversalHardening:
+    def test_experiment_id_escape_rejected(self, tmp_path: Path) -> None:
+        # Even with a real file sitting in the escape target, the
+        # resolver must refuse to look above models_base_dir. Prevents
+        # a poisoned manifest from reading arbitrary files.
+        escape_target = tmp_path.parent / "escape_target"
+        escape_target.mkdir(exist_ok=True)
+        (escape_target / "10.zip").write_bytes(b"")
+
+        entry = LeagueCheckpoint(
+            id="evil",
+            elo=1000.0,
+            step=10,
+            experiment_id="../escape_target",
+            source="new",
+        )
+        with pytest.raises(ValueError, match="escapes models dir"):
             _entry_build(entry, models_base_dir=tmp_path)
 
 
@@ -255,7 +308,10 @@ class TestBrokenEntryRetry:
     def test_missing_file_triggers_resample(self, tmp_path: Path) -> None:
         # Broken entry (missing file) + good entries. Provider must
         # silently skip the broken one and return a working opponent
-        # instead of crashing.
+        # instead of crashing. With the failed-index dedup now in
+        # place, worst-case retry count equals pool size, so 2 is
+        # sufficient (previously this needed >>pool size because the
+        # stateless sampler could re-land on the broken entry).
         _make_checkpoint_file(tmp_path, "exp_good", 100000)
         pool = [
             LeagueCheckpoint(
@@ -272,15 +328,54 @@ class TestBrokenEntryRetry:
             rating_store=None,
             strategy="uniform",
             models_base_dir=tmp_path,
-            max_build_retries=20,  # plenty so we reliably hit the good one
+            max_build_retries=2,  # = pool size; dedup guarantees coverage
             rng_seed=0,
         )
-        # With 20 retries the rng is overwhelmingly likely to land on
-        # the good entry at least once. Run enough calls to catch any
-        # regression where _entry_build propagates FileNotFoundError.
         for i in range(10):
             opp = provider.get_opponent(env_index=i)
             assert opp is not None
+
+    def test_dedup_prevents_re_sampling_broken_entry(
+        self, tmp_path: Path
+    ) -> None:
+        # Tighter guard on the dedup: with max_build_retries equal to
+        # pool size and only one good entry, every call MUST land on
+        # the good one because the broken index gets excluded after
+        # its first FileNotFoundError. Without the dedup, the stateless
+        # sampler could burn all retries on the broken entry on a bad
+        # seed and fall through to mirror.
+        _make_checkpoint_file(tmp_path, "exp_good", 100000)
+        pool = [
+            LeagueCheckpoint(
+                id="broken", elo=1500.0, step=99999,
+                experiment_id="exp_missing", source="v1_legacy",
+            ),
+            LeagueCheckpoint(
+                id="good", elo=1000.0, step=100000,
+                experiment_id="exp_good", source="v1_legacy",
+            ),
+        ]
+        mirror_calls = [0]
+        provider = PFSPProvider(
+            pool=pool,
+            rating_store=None,
+            strategy="uniform",
+            models_base_dir=tmp_path,
+            max_build_retries=2,
+            mirror_factory=lambda: (
+                mirror_calls.__setitem__(0, mirror_calls[0] + 1)
+                or RuleBasedBot(level=1)
+            ),
+            mirror_rate=0.0,
+            rng_seed=0,
+        )
+        # 50 calls — every successful path must be the good entry.
+        # Any mirror fallback here would indicate dedup broke.
+        for i in range(50):
+            opp = provider.get_opponent(env_index=i)
+            assert isinstance(opp, LoadedPolicyBot)
+            assert opp.checkpoint_id == "good"
+        assert mirror_calls[0] == 0
 
     def test_all_broken_falls_back_to_mirror(
         self, tmp_path: Path
