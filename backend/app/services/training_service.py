@@ -21,6 +21,8 @@ class TrainingServiceWrapper:
         n_envs: int = 8,
         title: str = "",
         slug: str = "",
+        training_mode: str = "bot_ladder",
+        opponent_provider: Any = None,
     ) -> str:
         """Start a new training run.
 
@@ -33,6 +35,15 @@ class TrainingServiceWrapper:
         via ``title_service.allocate_title`` + ``slugify``; forwarding
         them here keeps the manager the single owner of the run's
         identity fields.
+
+        ``training_mode`` / ``opponent_provider`` (v2 Sprint-1): the
+        WS handler (B-impl-7) forwards both when ``mode="self_play"``
+        resolves to a live PFSPProvider; ``bot_ladder`` callers omit
+        them entirely. Defaults here match the manager's
+        ``bot_ladder`` / None contract so the old call shape keeps
+        working. Adding the kwargs was missed in the original
+        B-impl-7 commit — the WS handler crashed with TypeError on
+        any self_play request until this hotfix.
         """
         return await self.manager.start(
             hyperparams=hyperparams,
@@ -41,6 +52,8 @@ class TrainingServiceWrapper:
             n_envs=n_envs,
             title=title,
             slug=slug,
+            training_mode=training_mode,
+            opponent_provider=opponent_provider,
         )
 
     async def stop(self, *, force: bool = True) -> dict[str, Any]:
