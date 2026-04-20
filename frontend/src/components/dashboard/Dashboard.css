@@ -493,6 +493,12 @@
   border-radius: 2px;
 }
 
+/* Reward-model chip slot — 8 px gap right of the title link
+   (DESIGN-REWARD-MODEL-SELECTOR.md §4). */
+.recent-games-reward-chip {
+  margin-left: 8px;
+}
+
 /* FC-R8a: Placeholder shown in place of BatchTabBar when no live
    env frames exist — either training is idle (no active run) or
    the first frame hasn't landed yet. Keeps the layout stable so

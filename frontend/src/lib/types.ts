@@ -285,6 +285,14 @@ export interface GameRecord {
    * `game:result` payload to carry this field.
    */
   opponentCheckpointId?: string | null
+  /**
+   * Reward-model regime of the training run that produced this
+   * game (v2.x Sprint 2). Denormalised off `TrainingRun.reward_model`
+   * by BE so the Recent Games widget can render the reward chip
+   * without a separate join. Follows the same `parseRewardModel`
+   * guard — unknown values degrade to the `shaped_v1` default.
+   */
+  rewardModel?: RewardModel | null
 }
 
 /**
@@ -318,6 +326,16 @@ export interface TrainingRun {
    * at the display layer — `snakeToCamel` handles the wire format.
    */
   hyperparams?: Partial<Hyperparams> | null
+  /**
+   * Reward-model regime the run was launched with (v2.x Sprint 2,
+   * ADR 0015). BE decorates every `/api/training/runs` row with
+   * this field (shaped_v1 default for pre-S2 legacy rows, per the
+   * Mongo backfill migration). The FE guards the value via
+   * `parseRewardModel` — rows arriving with an unknown string
+   * collapse to the `shaped_v1` display default rather than
+   * propagating the bad value.
+   */
+  rewardModel?: RewardModel | null
 }
 
 export interface EvalResult {
@@ -482,6 +500,40 @@ export type TrainingMode = 'bot_ladder' | 'self_play'
  * nearby Elo; `uniform` draws unbiased.
  */
 export type LeagueSampling = 'uniform' | 'elo_proximity' | 'pfsp'
+
+/**
+ * Reward-model regime the trainer optimises (v2.x Sprint 2,
+ * ADR 0015 / docs/design/DESIGN-REWARD-MODEL-SELECTOR.md).
+ *
+ * The three literal values mirror the BE `WsTrainingStartPayload`
+ * enum (`backend/app/models/schemas.py`). The FE rejects any other
+ * value on the wire via `parseRewardModel` — BE-only additions
+ * will appear as the safe default until the FE adds the matching
+ * segmented-control cell.
+ */
+export type RewardModel = 'shaped_v1' | 'sparse_v1' | 'learned_shaped_v1'
+
+/** All reward-model values in canonical display order (Shaped →
+ *  Sparse → Learned shaped). Used by the segmented control and
+ *  the runtime-guard allow-list. */
+export const REWARD_MODELS = [
+  'shaped_v1',
+  'sparse_v1',
+  'learned_shaped_v1',
+] as const satisfies readonly RewardModel[]
+
+/**
+ * Runtime guard: accept only the three known enum values, `null`
+ * / `undefined` / unknown → `null`. Callers that need the spec's
+ * default behaviour should coalesce with `'shaped_v1'`; callers
+ * that must surface the drift (e.g. API decoders) can branch on
+ * `null` to log + degrade rather than silently backfill.
+ */
+export function parseRewardModel(v: unknown): RewardModel | null {
+  return typeof v === 'string' && (REWARD_MODELS as readonly string[]).includes(v)
+    ? (v as RewardModel)
+    : null
+}
 
 /** Source label for a pool entry (ADR-0014 §1). `anchor` rows are
  *  the fixed-Elo L1/L3/L5 rule baselines that never update. */

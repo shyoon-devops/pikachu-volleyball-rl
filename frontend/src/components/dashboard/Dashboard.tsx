@@ -4,6 +4,7 @@ import { EnvChip } from '../shared/EnvChip'
 import { ScoreCell } from '../shared/ScoreCell'
 import { TimestampText } from '../shared/TimestampText'
 import { OpponentChip } from '../shared/OpponentChip'
+import { RewardModelChip } from '../shared/RewardModelChip'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { BatchTabBar } from '../game/BatchTabBar'
@@ -17,7 +18,14 @@ import { getLeagueStandings } from '../../lib/api'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
-import type { GameRecord, Hyperparams, LeagueSampling, LeagueUpdatePayload, TrainingMode } from '../../lib/types'
+import type {
+  GameRecord,
+  Hyperparams,
+  LeagueSampling,
+  LeagueUpdatePayload,
+  RewardModel,
+  TrainingMode,
+} from '../../lib/types'
 import {
   formatBotLevel,
   formatRallyCount,
@@ -78,6 +86,14 @@ export function Dashboard() {
   const [opponentMode, setOpponentMode] = useState<TrainingMode>('bot_ladder')
   const [samplingStrategy, setSamplingStrategy] = useState<LeagueSampling>('pfsp')
   const [leaguePoolSize, setLeaguePoolSize] = useState<number | null>(null)
+
+  // v2.x Sprint 2 — reward model regime (ADR 0015 / Designer spec
+  // DESIGN-REWARD-MODEL-SELECTOR.md). Default `shaped_v1` preserves
+  // v1.0.0 behaviour; the BE WsTrainingStartPayload defaults to the
+  // same enum member so an omitted field here would be equivalent.
+  // We still spread the key on `training:start` so payload shape is
+  // stable across bot_ladder / self_play / reward-model switches.
+  const [rewardModel, setRewardModel] = useState<RewardModel>('shaped_v1')
 
   /**
    * Fetch the current league standings once on mount + after every
@@ -245,6 +261,10 @@ export function Dashboard() {
       // is stable and a mid-session switch doesn't churn keys.
       mode: opponentMode,
       sampling: samplingStrategy,
+      // v2.x Sprint 2 (ADR 0015): reward-model regime. Always sent
+      // for payload-shape stability; BE Pydantic validates the
+      // literal and rejects unknown values at the handler boundary.
+      reward_model: rewardModel,
     })
   }
 
@@ -389,6 +409,8 @@ export function Dashboard() {
             samplingStrategy={samplingStrategy}
             onSamplingStrategyChange={setSamplingStrategy}
             leaguePoolSize={leaguePoolSize}
+            rewardModel={rewardModel}
+            onRewardModelChange={setRewardModel}
           />
         )}
       </section>
@@ -490,6 +512,10 @@ const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecor
         ) : (
           '—'
         )}
+        {/* Reward-model chip — 8 px gap, right of title (spec §4). */}
+        <span className="recent-games-reward-chip">
+          <RewardModelChip value={g.rewardModel} />
+        </span>
       </td>
       <td>
         <EnvChip envId={g.envId} />
