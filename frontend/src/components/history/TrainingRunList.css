@@ -384,3 +384,9 @@
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+/* Reward-model chip slot — 8 px gap right of the title link
+   (DESIGN-REWARD-MODEL-SELECTOR.md §4). */
+.training-run-list-reward-chip {
+  margin-left: 8px;
+}

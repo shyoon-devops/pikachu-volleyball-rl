@@ -8,6 +8,7 @@ import { LeaguePanel } from './LeaguePanel'
 import { getTrainingRuns } from '../../lib/api'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import { TimestampText } from '../shared/TimestampText'
+import { RewardModelChip } from '../shared/RewardModelChip'
 import type { TrainingRun } from '../../lib/types'
 import './UnifiedRunDetail.css'
 
@@ -169,6 +170,14 @@ export function UnifiedRunDetail() {
                     {Number.isFinite(run?.avgRallyLength)
                       ? (run?.avgRallyLength ?? 0).toFixed(1)
                       : '—'}
+                  </dd>
+                </div>
+                {/* Reward-model regime — full label, no chip styling
+                    (DESIGN-REWARD-MODEL-SELECTOR.md §4). */}
+                <div className="unified-run-overview-meta-item">
+                  <dt>Reward model</dt>
+                  <dd>
+                    <RewardModelChip value={run?.rewardModel} variant="full" />
                   </dd>
                 </div>
               </dl>

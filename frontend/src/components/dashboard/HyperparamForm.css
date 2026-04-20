@@ -395,3 +395,123 @@
   color: var(--color-text-muted);
   font-style: italic;
 }
+
+/* ── Reward-model selector (v2.x Sprint 2) ─────────────────────── */
+/* docs/design/DESIGN-REWARD-MODEL-SELECTOR.md §1. Tokens only. */
+.reward-model-selector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.reward-model-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+}
+
+.reward-model-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  height: 36px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.reward-model-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 var(--space-3);
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  position: relative;
+  transition: background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+
+.reward-model-option + .reward-model-option {
+  border-left: 1px solid var(--color-border);
+}
+
+.reward-model-option:hover:not([disabled]):not(.reward-model-option--active) {
+  color: var(--color-text-primary);
+}
+
+.reward-model-option--active {
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+}
+
+/* 2 px inset accent underline on the active cell — spec §1. */
+.reward-model-option--active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: 2px;
+}
+
+.reward-model-option:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.reward-model-option[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* prefers-reduced-motion → no underline transition (spec §7). */
+@media (prefers-reduced-motion: reduce) {
+  .reward-model-option,
+  .reward-model-option--active::after {
+    transition: none !important;
+  }
+}
+
+.reward-model-option-label {
+  white-space: nowrap;
+}
+
+.reward-model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+.reward-model-badge--recommended {
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.15));
+  color: var(--color-accent);
+}
+
+.reward-model-badge--experimental {
+  background: var(--color-warning-dim, rgba(234, 179, 8, 0.15));
+  color: var(--color-warning, #eab308);
+}
+
+.reward-model-badge-glyph {
+  font-size: 11px;
+  line-height: 1;
+}

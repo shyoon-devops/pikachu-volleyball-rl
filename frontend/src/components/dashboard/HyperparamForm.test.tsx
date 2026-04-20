@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { HyperparamForm } from './HyperparamForm'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
-import type { LeagueSampling, TrainingMode } from '../../lib/types'
+import type { LeagueSampling, RewardModel, TrainingMode } from '../../lib/types'
 
 // getTrainingTitles is mocked so TitleInput's debounced dup-check
 // doesn't fire real network during tests (jsdom's fetch is a stub).
@@ -16,12 +16,14 @@ function renderForm(overrides: {
   opponentMode?: TrainingMode
   samplingStrategy?: LeagueSampling
   leaguePoolSize?: number | null
+  rewardModel?: RewardModel
 } = {}) {
   const onParamsChange = vi.fn()
   const onTitleChange = vi.fn()
   const onTitleValidationChange = vi.fn()
   const onOpponentModeChange = vi.fn()
   const onSamplingStrategyChange = vi.fn()
+  const onRewardModelChange = vi.fn()
 
   render(
     <HyperparamForm
@@ -36,6 +38,8 @@ function renderForm(overrides: {
       samplingStrategy={overrides.samplingStrategy ?? 'pfsp'}
       onSamplingStrategyChange={onSamplingStrategyChange}
       leaguePoolSize={overrides.leaguePoolSize ?? null}
+      rewardModel={overrides.rewardModel ?? 'shaped_v1'}
+      onRewardModelChange={onRewardModelChange}
     />,
   )
 
@@ -45,6 +49,7 @@ function renderForm(overrides: {
     onTitleValidationChange,
     onOpponentModeChange,
     onSamplingStrategyChange,
+    onRewardModelChange,
   }
 }
 
@@ -175,6 +180,8 @@ describe('HyperparamForm', () => {
         samplingStrategy="pfsp"
         onSamplingStrategyChange={vi.fn()}
         leaguePoolSize={null}
+        rewardModel="shaped_v1"
+        onRewardModelChange={vi.fn()}
       />,
     )
     const input = byLabelPrefix('n_envs')
@@ -198,6 +205,8 @@ describe('HyperparamForm', () => {
         samplingStrategy="pfsp"
         onSamplingStrategyChange={vi.fn()}
         leaguePoolSize={null}
+        rewardModel="shaped_v1"
+        onRewardModelChange={vi.fn()}
       />,
     )
     // Basic reset button lives alongside its "BASIC" heading.
@@ -259,5 +268,39 @@ describe('HyperparamForm — Opponent section (v2.x)', () => {
   it('fallback hint is surfaced in self-play branch so users know empty pools degrade cleanly', () => {
     renderForm({ opponentMode: 'self_play', leaguePoolSize: 0 })
     expect(screen.getByText(/auto-falls back to rule ladder/i)).toBeInTheDocument()
+  })
+})
+
+// v2.x Sprint 2 — Reward-model selector
+// (docs/design/DESIGN-REWARD-MODEL-SELECTOR.md §1, ADR 0015).
+describe('HyperparamForm — Reward-model selector (v2.x Sprint 2)', () => {
+  it('renders the three options as a radiogroup with Recommended + Experimental badges', () => {
+    renderForm()
+    const shaped = screen.getByRole('radio', { name: /Shaped \(v1\)/ })
+    const sparse = screen.getByRole('radio', { name: /^Sparse/ })
+    const learned = screen.getByRole('radio', { name: /Learned shaped/ })
+    expect(shaped).toBeInTheDocument()
+    expect(sparse).toBeInTheDocument()
+    expect(learned).toBeInTheDocument()
+    // shaped_v1 is the default, so it's the checked radio.
+    expect(shaped.getAttribute('aria-checked')).toBe('true')
+    // Badges resolve via i18n.
+    expect(screen.getByText('Recommended')).toBeInTheDocument()
+    expect(screen.getByText('Experimental')).toBeInTheDocument()
+  })
+
+  it('clicking a non-default option fires onRewardModelChange with the enum value', () => {
+    const { onRewardModelChange } = renderForm()
+    fireEvent.click(screen.getByRole('radio', { name: /Learned shaped/ }))
+    expect(onRewardModelChange).toHaveBeenCalledWith('learned_shaped_v1')
+  })
+
+  it('disables every option when the form is disabled', () => {
+    renderForm({ disabled: true })
+    const radios = screen.getAllByRole('radio', { name: /(Shaped \(v1\)|^Sparse|Learned shaped)/ })
+    expect(radios).toHaveLength(3)
+    for (const r of radios) {
+      expect((r as HTMLButtonElement).disabled).toBe(true)
+    }
   })
 })
