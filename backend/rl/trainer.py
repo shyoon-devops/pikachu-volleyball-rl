@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import signal
@@ -113,6 +114,11 @@ class TrainingManager:
         # called (test isolation / introspection paths).
         self._training_mode: str = "bot_ladder"
         self._opponent_provider: Any = None
+        # Reward selector (ADR 0015). Default keeps v1.0.0 nine-term
+        # shaped reward; WS start payload overrides per-run. Stored
+        # on the manager so the run-record writer + env factories can
+        # both read it without replumbing kwargs everywhere.
+        self._reward_model: str = "shaped_v1"
         # Human title + its filesystem slug for this run. Both are set
         # by start() before the thread kicks off; callbacks that tag
         # result/frame payloads read them off this object at emit time.
@@ -136,6 +142,7 @@ class TrainingManager:
         slug: str = "",
         training_mode: str = "bot_ladder",
         opponent_provider: Any = None,
+        reward_model: str = "shaped_v1",
     ) -> str:
         """Start a new training experiment. Returns experiment_id.
 
@@ -176,6 +183,7 @@ class TrainingManager:
         self._bot_level = bot_level
         self._training_mode = training_mode
         self._opponent_provider = opponent_provider
+        self._reward_model = reward_model
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         # Title + slug set BEFORE the thread starts so the first demo-
         # tick + result-drain both see them. Slug defaults keep legacy
@@ -428,6 +436,22 @@ class TrainingManager:
             bot_level = self._bot_level
             training_mode = self._training_mode
             provider = self._opponent_provider
+            # Thread the reward selector (ADR 0015) into env construction.
+            # Guarded: the AI Sprint-2 branch adds ``reward_model`` to
+            # PikachuVolleyballEnv.__init__; until that merges the env
+            # still has the v1 signature, and blindly forwarding would
+            # TypeError before the BE and AI branches converge. Once
+            # merged the guard is a no-op since the kwarg is always
+            # accepted.
+            env_accepts_reward_model = (
+                "reward_model"
+                in inspect.signature(PikachuVolleyballEnv).parameters
+            )
+            reward_kwargs: dict[str, Any] = (
+                {"reward_model": self._reward_model}
+                if env_accepts_reward_model
+                else {}
+            )
             if training_mode == "self_play" and provider is not None:
                 # Shared in-process PFSP provider: DummyVecEnv keeps the
                 # rating store, checkpoint cache, and pool manifest
@@ -453,6 +477,7 @@ class TrainingManager:
                             bot_level=bot_level,
                             opponent_provider=provider,
                             env_index=i,
+                            **reward_kwargs,
                         )
                         return Monitor(base_env)
                     return _f
@@ -462,7 +487,7 @@ class TrainingManager:
                 env = make_vec_env(
                     PikachuVolleyballEnv,
                     n_envs=n_envs,
-                    env_kwargs={"bot_level": bot_level},
+                    env_kwargs={"bot_level": bot_level, **reward_kwargs},
                     vec_env_cls=SubprocVecEnv,
                 )
 

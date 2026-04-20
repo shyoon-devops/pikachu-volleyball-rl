@@ -23,6 +23,7 @@ class TrainingServiceWrapper:
         slug: str = "",
         training_mode: str = "bot_ladder",
         opponent_provider: Any = None,
+        reward_model: str = "shaped_v1",
     ) -> str:
         """Start a new training run.
 
@@ -44,6 +45,13 @@ class TrainingServiceWrapper:
         working. Adding the kwargs was missed in the original
         B-impl-7 commit — the WS handler crashed with TypeError on
         any self_play request until this hotfix.
+
+        ``reward_model`` (v2 Sprint-2, ADR 0015): selects the reward
+        function variant (``shaped_v1`` / ``sparse_v1`` /
+        ``learned_shaped_v1``). Default keeps v1.0.0 behavior for any
+        caller that omits it. The manager forwards to PikaEnv's
+        constructor where the reward branching lives (AI Sprint-2
+        scope); the BE contract is the pass-through.
         """
         return await self.manager.start(
             hyperparams=hyperparams,
@@ -54,6 +62,7 @@ class TrainingServiceWrapper:
             slug=slug,
             training_mode=training_mode,
             opponent_provider=opponent_provider,
+            reward_model=reward_model,
         )
 
     async def stop(self, *, force: bool = True) -> dict[str, Any]:

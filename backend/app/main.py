@@ -28,6 +28,7 @@ from backend.app.services.eval_service import EvalServiceWrapper
 from backend.app.services.game_service import GameService
 from backend.app.services.indexes import ensure_indexes
 from backend.app.services.metrics_service import MetricsService
+from backend.app.services.migrations import backfill_training_runs_reward_model
 from backend.app.services.replay_service import ReplayService
 from backend.app.services.title_service import TrainingRunsService
 from backend.app.services.training_service import TrainingServiceWrapper
@@ -65,6 +66,14 @@ async def lifespan(app: FastAPI):
         await ensure_indexes(db)
     except Exception:  # noqa: BLE001 — logged and swallowed intentionally
         logger.exception("ensure_indexes failed at startup; continuing without indexes")
+
+    # One-shot data migration: backfill reward_model on pre-v2.x
+    # training_runs docs (ADR 0015). Idempotent — no-op after the
+    # first successful run.
+    try:
+        await backfill_training_runs_reward_model(db)
+    except Exception:  # noqa: BLE001 — logged; app continues
+        logger.exception("backfill_training_runs_reward_model failed at startup")
 
     app.state.mongo_client = client
     app.state.db = db
