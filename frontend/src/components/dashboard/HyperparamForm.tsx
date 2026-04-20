@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import type { Hyperparams, LeagueSampling, TrainingMode } from '../../lib/types'
+import { useMemo, useState, type KeyboardEvent } from 'react'
+import type { Hyperparams, LeagueSampling, RewardModel, TrainingMode } from '../../lib/types'
 import {
   HYPERPARAM_SCHEMA,
   type HyperparamFieldSchema,
@@ -8,6 +8,7 @@ import {
   normalizeHyperparam,
   formatScalar,
 } from '../../lib/hyperparams'
+import { t } from '../../lib/i18n'
 import { TitleInput, type TitleValidationState } from './TitleInput'
 import './HyperparamForm.css'
 
@@ -48,6 +49,13 @@ interface HyperparamFormProps {
   /** Live pool fill (denominator capped at 32). `null` means the
    *  standings fetch hasn't landed yet — chip renders `— / 32`. */
   leaguePoolSize: number | null
+
+  // ── v2.x Sprint 2 (reward model selector) ─────────────────────
+  /** Reward-model regime for the next training run (ADR 0015,
+   *  DESIGN-REWARD-MODEL-SELECTOR.md). Default `shaped_v1`
+   *  preserves v1.0.0 behaviour. */
+  rewardModel: RewardModel
+  onRewardModelChange: (next: RewardModel) => void
 }
 
 /**
@@ -85,6 +93,8 @@ export function HyperparamForm({
   samplingStrategy,
   onSamplingStrategyChange,
   leaguePoolSize,
+  rewardModel,
+  onRewardModelChange,
 }: HyperparamFormProps) {
   // Advanced group collapsed by default per Designer §2. Basic is
   // always open (no collapse affordance needed).
@@ -140,6 +150,19 @@ export function HyperparamForm({
         onChange={onTitleChange}
         disabled={disabled}
         onValidationChange={onTitleValidationChange}
+      />
+
+      {/*
+        Reward-model selector — v2.x Sprint 2 (ADR 0015, Designer
+        spec docs/design/DESIGN-REWARD-MODEL-SELECTOR.md §1).
+        Placed at the top of the Basic area (before total_timesteps)
+        because the regime choice changes WHAT the agent optimises;
+        the numeric knobs tune HOW inside that choice.
+      */}
+      <RewardModelSelector
+        value={rewardModel}
+        onChange={onRewardModelChange}
+        disabled={disabled}
       />
 
       <HyperparamGroupView
@@ -487,6 +510,116 @@ function OpponentSection({
           </p>
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * Reward-model segmented control (v2.x Sprint 2).
+ *
+ * 3 cells, full row width, keyed against the `RewardModel` enum.
+ * Active cell gets a 2 px inset accent underline (spec §1). Each
+ * cell carries its tooltip as `title` (hover) and inline describe-
+ * ment spans (screen reader + focus) wired via `aria-describedby`
+ * so the trade-off is discoverable by keyboard users — spec §7.
+ *
+ * Badges (Recommended / Experimental) live inside each cell and
+ * take their copy from the i18n map; the ⚠ glyph is
+ * `aria-hidden` because the `aria-label="experimental"` carries
+ * the semantic weight (spec §7).
+ */
+interface RewardModelSelectorProps {
+  value: RewardModel
+  onChange: (next: RewardModel) => void
+  disabled: boolean
+}
+
+/** Option order matches the Designer spec table (Shaped → Sparse →
+ *  Learned shaped). Badge variant drives the chip colour class;
+ *  `null` = no badge (Sparse cell). */
+const REWARD_OPTIONS: Array<{
+  value: RewardModel
+  badge: 'recommended' | 'experimental' | null
+}> = [
+  { value: 'shaped_v1',          badge: 'recommended' },
+  { value: 'sparse_v1',          badge: null },
+  { value: 'learned_shaped_v1',  badge: 'experimental' },
+]
+
+function RewardModelSelector({ value, onChange, disabled }: RewardModelSelectorProps) {
+  // Keyboard navigation — ←/→ moves selection among the 3 cells
+  // while focus stays on the active cell (roving tabindex-free
+  // because we only ever have one focusable radio via
+  // aria-checked=true; browsers / screen readers read the group
+  // atomically).
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    const idx = REWARD_OPTIONS.findIndex(o => o.value === value)
+    if (idx < 0) return
+    const delta = e.key === 'ArrowLeft' ? -1 : 1
+    const next = REWARD_OPTIONS[(idx + delta + REWARD_OPTIONS.length) % REWARD_OPTIONS.length]
+    e.preventDefault()
+    if (!disabled) onChange(next.value)
+  }
+
+  return (
+    <div
+      className="reward-model-selector"
+      role="group"
+      aria-labelledby="reward-model-label"
+    >
+      <span id="reward-model-label" className="reward-model-label">
+        {t('training.reward_model.label')}
+      </span>
+      <div
+        className="reward-model-segmented"
+        role="radiogroup"
+        aria-labelledby="reward-model-label"
+        onKeyDown={onKeyDown}
+      >
+        {REWARD_OPTIONS.map(opt => {
+          const active = opt.value === value
+          const labelKey = `training.reward_model.options.${opt.value}.label`
+          const tipKey = `training.reward_model.options.${opt.value}.tooltip`
+          const tipId = `reward-model-tip-${opt.value}`
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-describedby={tipId}
+              tabIndex={active ? 0 : -1}
+              disabled={disabled}
+              onClick={() => onChange(opt.value)}
+              title={t(tipKey)}
+              className={`reward-model-option${active ? ' reward-model-option--active' : ''}`}
+            >
+              <span className="reward-model-option-label">{t(labelKey)}</span>
+              {opt.badge === 'recommended' && (
+                <span
+                  className="reward-model-badge reward-model-badge--recommended"
+                  aria-label="recommended"
+                >
+                  {t('training.reward_model.recommended_badge')}
+                </span>
+              )}
+              {opt.badge === 'experimental' && (
+                <span
+                  className="reward-model-badge reward-model-badge--experimental"
+                  aria-label="experimental"
+                >
+                  <span aria-hidden="true" className="reward-model-badge-glyph">⚠</span>
+                  {t('training.reward_model.experimental_badge')}
+                </span>
+              )}
+              <span id={tipId} className="sr-only">
+                {t(tipKey)}
+              </span>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }

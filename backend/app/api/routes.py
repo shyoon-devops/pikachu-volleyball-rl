@@ -707,12 +707,15 @@ def _normalize_hyperparams(stored: dict[str, Any] | None) -> dict[str, Any]:
 async def _decorate_runs_with_hyperparams(
     request: Request, rows: list[dict[str, Any]]
 ) -> None:
-    """Join hyperparams onto each aggregation row in place.
+    """Join hyperparams + reward_model onto each aggregation row in place.
 
     Bulk ``$in`` lookup so the query cost is O(1) regardless of page
     size. Rows without a training_runs record (pre-T10 games, demo-only
     experiments) get the canonical defaults via normalize so FE never
-    sees a missing key.
+    sees a missing key. ``reward_model`` (ADR 0015) piggy-backs on the
+    same lookup — legacy rows resolve to ``"shaped_v1"`` which also
+    matches the migration backfill default, so the FE can't tell a
+    pre-S2 row from a v1.0.0-era run explicitly tagged that way.
     """
     runs_service = getattr(request.app.state, "training_runs_service", None)
     exp_ids = [row.get("experiment_id") for row in rows if row.get("experiment_id")]
@@ -726,6 +729,7 @@ async def _decorate_runs_with_hyperparams(
         exp_id = row.get("experiment_id") or ""
         run_doc = lookup.get(exp_id) or {}
         row["hyperparams"] = _normalize_hyperparams(run_doc.get("hyperparams"))
+        row["reward_model"] = run_doc.get("reward_model") or "shaped_v1"
 
 
 def _overlay_running_status(

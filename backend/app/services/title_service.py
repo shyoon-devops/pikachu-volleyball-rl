@@ -125,6 +125,7 @@ class TrainingRunsService:
         bot_level: int,
         started_at,
         hyperparams: dict[str, Any] | None = None,
+        reward_model: str = "shaped_v1",
     ) -> None:
         """Insert a run doc; tolerates a dead Mongo (best-effort).
 
@@ -133,6 +134,13 @@ class TrainingRunsService:
         here rather than on every ``GameRecord`` because the values
         don't change over the run; ``/api/training/runs`` joins on
         ``experiment_id`` at query time.
+
+        ``reward_model`` (ADR 0015 — v2 Sprint-2) records which reward
+        variant produced this run. Stored verbatim so a future ablation
+        report can group evaluator scorecards by reward function. The
+        default ``"shaped_v1"`` matches the migration backfill so a
+        legacy run inserted without the arg is indistinguishable from
+        a v1.0.0-era run tagged explicitly.
 
         The in-memory manager remains the source of truth for the live
         run — Mongo is the persistence layer for the history + title
@@ -149,6 +157,7 @@ class TrainingRunsService:
                 "slug": slug,
                 "bot_level": int(bot_level),
                 "started_at": started_at,
+                "reward_model": reward_model,
             }
             if hyperparams:
                 # Pass through as-is so a new field the caller adds

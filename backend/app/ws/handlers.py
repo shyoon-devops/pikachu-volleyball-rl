@@ -178,6 +178,7 @@ async def _dispatch(
             "total_timesteps": params.total_timesteps,
             "title": final_title,
             "slug": final_slug,
+            "reward_model": params.reward_model,
         }
         if params.n_envs is not None:
             start_kwargs["n_envs"] = params.n_envs
@@ -231,6 +232,7 @@ async def _dispatch(
                 bot_level=effective_bot_level,
                 started_at=datetime.now(timezone.utc),
                 hyperparams=hp_snapshot,
+                reward_model=params.reward_model,
             )
         except Exception:  # noqa: BLE001
             logger.exception("training_runs register failed for %s", experiment_id)
