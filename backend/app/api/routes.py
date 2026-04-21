@@ -735,6 +735,10 @@ async def _decorate_runs_with_hyperparams(
         # startup backfill default, so a pre-S3 row is indistinguishable
         # from one explicitly tagged mlp_v1.
         row["policy_type"] = run_doc.get("policy_type") or "mlp_v1"
+        # algorithm (ADR 0017 Sprint-4). Same defaulting story — pre-S4
+        # rows were all PPO so the backfill value ``"ppo"`` doubles as
+        # the legacy-row display.
+        row["algorithm"] = run_doc.get("algorithm") or "ppo"
 
 
 def _overlay_running_status(

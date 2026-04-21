@@ -195,6 +195,19 @@ class WsTrainingStartPayload(BaseModel):
     policy_type: Literal[
         "mlp_v1", "lstm_v1", "gru_v1", "transformer_v1"
     ] = "mlp_v1"
+    # Algorithm selector (ADR 0017 — Sprint 4). Net-new field; the PM
+    # call (ADR §3) is an opt-in enum rather than a bool flag so future
+    # additions (``dqn``, ``ppo_mask``, ``sac_crossq``) extend this
+    # membership list without schema churn:
+    #   * ``"ppo"`` (default) — on-policy PPO, matches every run before
+    #     S4. Legacy callers stay here.
+    #   * ``"sac"`` — off-policy SAC-Discrete (Christodoulou 2019) per
+    #     ADR §2 option A. Paired typically with ``policy_type="mlp_v1"``
+    #     (ADR §4 matrix — ``sac × lstm_v1`` is experimental; no
+    #     RecurrentSAC exists in SB3).
+    # Unknown values → Pydantic Literal reject → WS payload_invalid
+    # → caller sees the 400-equivalent; the handler never runs.
+    algorithm: Literal["ppo", "sac"] = "ppo"
 
 
 class WsSetLevelPayload(BaseModel):
