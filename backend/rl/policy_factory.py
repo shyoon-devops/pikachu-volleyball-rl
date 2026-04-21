@@ -52,8 +52,8 @@ LSTM_POLICY_KWARGS: dict[str, Any] = {
 # the default so every pre-S4 callsite (including the trainer + S3
 # parity tests) keeps its bit-identical PPO construction — the S4
 # factory change is purely additive.
-VALID_ALGORITHMS: tuple[str, ...] = ("ppo", "sac")
-IMPLEMENTED_ALGORITHMS: tuple[str, ...] = ("ppo", "sac")
+VALID_ALGORITHMS: tuple[str, ...] = ("ppo", "sac", "dreamer_v3")
+IMPLEMENTED_ALGORITHMS: tuple[str, ...] = ("ppo", "sac", "dreamer_v3")
 
 # ADR 0017 §5: SAC-Discrete defaults. Not WS-surfaced. Aligned with
 # the Christodoulou 2019 implementation conventions + SB3 SAC
@@ -194,12 +194,31 @@ def make_policy_spec(
             policy_kwargs={"net_arch": list(net_arch)},
         )
 
+    if algorithm == "dreamer_v3":
+        # ADR 0018 §4: Dreamer's RSSM replaces MLP/LSTM as the
+        # temporal feature extractor, so ``policy_type`` is
+        # intentionally ignored on this branch — the record still
+        # persists it as audit metadata but the runtime dispatch
+        # doesn't consult it. Upstream ``NM512/dreamerv3-torch``
+        # is NOT pip-installable (verified 2026-04-22: no
+        # setup.py / pyproject.toml), so the algorithm is vendored
+        # in ``backend/rl/dreamer_runner.py``.
+        from backend.rl.dreamer_runner import DreamerAgent  # noqa: PLC0415
+
+        # policy_class_id is a sentinel here ("MlpPolicy") so
+        # downstream code that logs or compares it doesn't get a
+        # surprise None — but the trainer's dreamer branch builds
+        # ``DreamerAgent`` directly without consulting it.
+        return PolicySpec(
+            algo_class=DreamerAgent,
+            policy_class_id="MlpPolicy",
+            policy_kwargs={},
+        )
+
     # Remaining cell is sac × lstm_v1 — ADR 0017 §4 explicitly
     # defers it to S5 (no RecurrentSAC in SB3 or sb3-contrib).
-    # Raise with the pair so the FE/test surface gets a clear
-    # "why this combination" message.
     raise NotImplementedError(
         f"algorithm={algorithm!r} × policy_type={policy_type!r} is "
         f"not implemented in v2.x (ADR 0017 §4). A GRU-head SAC "
-        f"variant is deferred to Sprint 5."
+        f"variant is deferred to v3.x."
     )

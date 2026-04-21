@@ -571,10 +571,43 @@ class TrainingManager:
                 self._policy_type, DEFAULT_NET_ARCH, algorithm=self._algorithm
             )
             if checkpoint_path:
-                self._model = spec.algo_class.load(
-                    checkpoint_path,
+                # DreamerAgent.load accepts env= but not learning_rate;
+                # SB3 .load accepts both. Split the call shape here.
+                if self._algorithm == "dreamer_v3":
+                    self._model = spec.algo_class.load(
+                        checkpoint_path, env=env,
+                    )
+                else:
+                    self._model = spec.algo_class.load(
+                        checkpoint_path,
+                        env=env,
+                        learning_rate=hp.get("learning_rate", 3e-4),
+                    )
+            elif self._algorithm == "dreamer_v3":
+                # ADR 0018 §6: Dreamer's constructor has its own
+                # hyperparam surface (RSSM hidden size, latent dims,
+                # imagine horizon, replay capacity) sourced from
+                # ``DREAMER_DEFAULT_KWARGS``. PPO's n_steps /
+                # gae_lambda / clip_range have no meaning here and
+                # MUST NOT be forwarded — would raise TypeError.
+                # WS ``hyperparams`` blob can still override the
+                # shared knobs (learning rates, batch_size).
+                from backend.rl.dreamer_runner import (  # noqa: PLC0415
+                    DREAMER_DEFAULT_KWARGS,
+                )
+
+                dreamer_kwargs = {}
+                for key in (
+                    "world_model_lr", "actor_lr", "critic_lr",
+                    "batch_size", "sequence_length", "imagine_horizon",
+                    "train_every",
+                ):
+                    if key in hp:
+                        dreamer_kwargs[key] = hp[key]
+                self._model = spec.algo_class(
                     env=env,
-                    learning_rate=hp.get("learning_rate", 3e-4),
+                    verbose=0,
+                    **dreamer_kwargs,
                 )
             elif self._algorithm == "sac":
                 # SAC has an entirely different hyperparam surface

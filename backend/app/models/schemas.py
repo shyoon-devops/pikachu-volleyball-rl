@@ -195,19 +195,26 @@ class WsTrainingStartPayload(BaseModel):
     policy_type: Literal[
         "mlp_v1", "lstm_v1", "gru_v1", "transformer_v1"
     ] = "mlp_v1"
-    # Algorithm selector (ADR 0017 — Sprint 4). Net-new field; the PM
-    # call (ADR §3) is an opt-in enum rather than a bool flag so future
-    # additions (``dqn``, ``ppo_mask``, ``sac_crossq``) extend this
-    # membership list without schema churn:
+    # Algorithm selector (ADR 0017 Sprint-4, extended by ADR 0018
+    # Sprint-5). The membership list grows with each sprint; this is
+    # the extension-point the S4 ADR called out ("future additions
+    # extend this enum, not a new field"):
     #   * ``"ppo"`` (default) — on-policy PPO, matches every run before
     #     S4. Legacy callers stay here.
     #   * ``"sac"`` — off-policy SAC-Discrete (Christodoulou 2019) per
-    #     ADR §2 option A. Paired typically with ``policy_type="mlp_v1"``
-    #     (ADR §4 matrix — ``sac × lstm_v1`` is experimental; no
-    #     RecurrentSAC exists in SB3).
+    #     ADR 0017 §2 option A. Paired typically with
+    #     ``policy_type="mlp_v1"`` (S4 matrix — ``sac × lstm_v1`` is
+    #     experimental; no RecurrentSAC exists in SB3).
+    #   * ``"dreamer_v3"`` — model-based world-model learner (ADR
+    #     0018). ``policy_type`` is still accepted at this boundary
+    #     but the AI-side factory ignores it at runtime (Dreamer
+    #     builds its own actor from the RSSM latent, not from an SB3
+    #     policy registry key). BE stays at pass-through; no new
+    #     migration since the S4 ``ppo`` backfill is already idempotent
+    #     and covers pre-S5 rows correctly.
     # Unknown values → Pydantic Literal reject → WS payload_invalid
     # → caller sees the 400-equivalent; the handler never runs.
-    algorithm: Literal["ppo", "sac"] = "ppo"
+    algorithm: Literal["ppo", "sac", "dreamer_v3"] = "ppo"
 
 
 class WsSetLevelPayload(BaseModel):
