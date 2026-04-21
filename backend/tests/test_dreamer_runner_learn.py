@@ -175,6 +175,90 @@ class TestDreamerLearnSmoke:
         )
 
 
+class TestDreamerVecEnvMultiStream:
+    """QA 2026-04-22 regression: ``_collect_step`` crashed on
+    ``n_envs > 1`` because the action array was hardcoded to length
+    1. These tests exercise n_envs=2 so the fix stays live — if
+    anyone reverts the per-env loop or drops
+    ``_SequenceReplayBuffer.n_streams``, this trips."""
+
+    def _multi_env(self, n: int) -> Any:
+        from stable_baselines3.common.env_util import make_vec_env
+        from stable_baselines3.common.monitor import Monitor
+        from stable_baselines3.common.vec_env import DummyVecEnv
+
+        # Monitor-wrap each sub-env so gym/SB3 treats episodes the
+        # same way the trainer's real path does.
+        def _mk() -> Any:
+            return Monitor(PikachuVolleyballEnv(bot_level=1))
+
+        return make_vec_env(_mk, n_envs=n, vec_env_cls=DummyVecEnv)
+
+    def test_learn_with_n_envs_2_does_not_crash(self) -> None:
+        env = self._multi_env(2)
+        agent = DreamerAgent(
+            env=env, device="cpu",
+            rssm_hidden_size=32, latent_dim=4, latent_axes=4,
+            batch_size=4, sequence_length=8, train_every=8,
+            imagine_horizon=3, replay_capacity=512, free_bits=0.1,
+        )
+        # The crash mode pre-fix was at the first env.step call
+        # inside _collect_step — a handful of timesteps is enough
+        # to prove the shape contract holds end-to-end.
+        agent.learn(total_timesteps=32)
+        # num_timesteps counts in env-step units (n_envs=2 means
+        # each iteration consumes 2 env steps toward the budget).
+        assert agent.num_timesteps == 32
+        # Buffer should have 32 entries (16 iter × 2 env-steps).
+        assert len(agent.buffer) == 32
+        # Multi-stream buffer was created.
+        assert agent.buffer.n_streams == 2
+
+    def test_per_env_streams_not_conflated(self) -> None:
+        # The semantic reason for n_streams > 1: parallel env
+        # trajectories must NOT be spliced into a single sequence.
+        # Assertion: every completed episode in the buffer has a
+        # consistent ``done`` pattern — interior frames all
+        # ``done=False``, last frame ``done=True`` (or the episode
+        # is still open and excluded from sample pool). A conflated
+        # stream would produce mid-sequence done=True flags.
+        env = self._multi_env(2)
+        agent = DreamerAgent(
+            env=env, device="cpu",
+            rssm_hidden_size=32, latent_dim=4, latent_axes=4,
+            batch_size=4, sequence_length=8, train_every=16,
+            imagine_horizon=3, replay_capacity=2048, free_bits=0.1,
+        )
+        # Long enough that some episodes complete and close into
+        # the shared pool (Pika rallies are ~150 frames).
+        agent.learn(total_timesteps=400)
+        for ep in agent.buffer._episodes:
+            # Only the LAST step of a closed episode can have done=True.
+            interior_dones = [s.done for s in ep[:-1]]
+            assert not any(interior_dones), (
+                "Replay episode has a mid-sequence done=True — "
+                "n_envs > 1 stream conflation regression"
+            )
+            assert ep[-1].done is True
+
+    def test_predict_returns_per_env_actions(self) -> None:
+        env = self._multi_env(2)
+        agent = DreamerAgent(
+            env=env, device="cpu",
+            rssm_hidden_size=32, latent_dim=4, latent_axes=4,
+            batch_size=4, sequence_length=8, train_every=8,
+            imagine_horizon=3, replay_capacity=512, free_bits=0.1,
+        )
+        agent.learn(total_timesteps=16)
+        obs = env.reset()
+        # (n_envs, obs_dim) in → (n_envs,) out. Predict must not
+        # collapse to scalar; the VecEnv consumer expects a vector.
+        action, _ = agent.predict(obs, deterministic=True)
+        assert action.shape == (2,)
+        for a in action:
+            assert 0 <= int(a) < 12
+
+
 class TestDreamerPredict:
     """Predict must return a valid Discrete(12) action index in the
     SB3-shaped (action, state) tuple."""

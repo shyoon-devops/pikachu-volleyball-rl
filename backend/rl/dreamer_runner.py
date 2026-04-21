@@ -1,29 +1,20 @@
 """Vendored Dreamer V3 — minimal, SB3-compatible adapter.
 
 ADR 0018 §5 intended to pin ``NM512/dreamerv3-torch`` by git+SHA.
-Verification (2026-04-22): that repo has **no setup.py / pyproject.toml**
-— it's a research script for ``python dreamer.py``, not a pip
-library. No PyTorch Dreamer V3 package ships on PyPI (only Hafner's
-TF/JAX ``dreamerv3`` v1.5.0, which would drag JAX into our image).
-Vendoring in-tree is the only path that respects the ADR's "keep
-the PyTorch stack" decision.
+Verification (2026-04-22): that repo has no setup.py / pyproject.toml
+— not a pip library. No PyTorch Dreamer V3 ships on PyPI (only
+Hafner's TF/JAX ``dreamerv3`` 1.5.0, which would drag JAX in).
+Vendoring in-tree is the only path that respects the ADR's
+PyTorch-stack decision.
 
-This is a compact Dreamer V3 **skeleton** — correct three-phase
-structure (env interaction → world-model train → AC imagine) on
-real tensors, but WITHOUT the full Hafner 2023 engineering
-niceties (KL-balance schedule, symlog reward head, two-hot
-encoding, prior ensembles). Those ship with the v3.x parity
-follow-up; the algorithm is opt-in + **experimental** per ADR
-0018 §8 exactly to create room for that swap without breaking the
-boundary contract.
-
-API delivered: ``DreamerAgent(env, ...)`` constructs on any
-Gymnasium (Box obs, Discrete action) env; ``.learn(total_timesteps)``
-runs the three phases; ``.predict(obs, deterministic)`` matches
-SB3's predict contract so ``LoadedPolicyBot`` doesn't need a
-separate code path; ``.save`` / ``.load`` round-trip a zip
-wrapping a torch state-dict (same container convention as SB3 so
-``{slug}__{exp8}__final.zip`` keeps working).
+Compact Dreamer V3 skeleton: correct three-phase structure (env
+interaction → world-model train → AC imagine) on real tensors,
+WITHOUT the full Hafner 2023 niceties (KL-balance schedule, symlog
+reward, two-hot encoding, prior ensembles). Those ship v3.x; S5
+is opt-in + experimental per ADR 0018 §8 to create room for the
+swap. API: ``DreamerAgent(env).learn / predict / save / load``
+all match SB3's shape so ``trainer.py`` + ``LoadedPolicyBot``
+dispatch on algorithm alone.
 """
 
 from __future__ import annotations
@@ -72,24 +63,35 @@ class _Step:
     done: bool
 
 
-class _SequenceReplayBuffer:
-    """Trajectory replay — Dreamer trains on sub-sequences, not
-    single transitions. ``sample`` returns contiguous slices from
-    episodes that are at least ``seq_len`` long (falling back to
-    the open episode if no completed one qualifies yet)."""
+def _mlp(in_dim: int, hidden: int, out_dim: int) -> nn.Sequential:
+    return nn.Sequential(
+        nn.Linear(in_dim, hidden), nn.SiLU(),
+        nn.Linear(hidden, out_dim),
+    )
 
-    def __init__(self, capacity: int) -> None:
+
+class _SequenceReplayBuffer:
+    """Trajectory replay — Dreamer trains on sub-sequences.
+
+    ``n_streams`` supports one open episode per VecEnv sub-env so
+    parallel trajectories don't splice into a single sequence. Each
+    stream closes to the shared completed-pool on its own ``done``.
+    """
+
+    def __init__(self, capacity: int, n_streams: int = 1) -> None:
         self.capacity = capacity
+        self.n_streams = max(1, int(n_streams))
         self._episodes: deque[list[_Step]] = deque()
-        self._current: list[_Step] = []
+        self._currents: list[list[_Step]] = [[] for _ in range(self.n_streams)]
         self._total_steps = 0
 
-    def add(self, step: _Step) -> None:
-        self._current.append(step)
+    def add(self, step: _Step, env_idx: int = 0) -> None:
+        cur = self._currents[env_idx]
+        cur.append(step)
         self._total_steps += 1
         if step.done:
-            self._episodes.append(self._current)
-            self._current = []
+            self._episodes.append(cur)
+            self._currents[env_idx] = []
         while self._total_steps > self.capacity and self._episodes:
             self._total_steps -= len(self._episodes.popleft())
 
@@ -99,9 +101,12 @@ class _SequenceReplayBuffer:
     def sample(
         self, batch_size: int, seq_len: int, obs_dim: int
     ) -> tuple[th.Tensor, th.Tensor, th.Tensor, th.Tensor] | None:
+        # Include in-progress streams so CPU-smoke runs can train
+        # before the first episode closes.
         pool = list(self._episodes)
-        if self._current and len(self._current) >= seq_len:
-            pool.append(self._current)
+        for cur in self._currents:
+            if cur and len(cur) >= seq_len:
+                pool.append(cur)
         pool = [ep for ep in pool if len(ep) >= seq_len]
         if not pool:
             return None
@@ -141,14 +146,8 @@ class _RSSM(nn.Module):
             nn.Linear(hidden, hidden), nn.SiLU(),
         )
         self.cell = nn.GRUCell(latent_flat + action_dim, hidden)
-        self.prior_head = nn.Sequential(
-            nn.Linear(hidden, hidden), nn.SiLU(),
-            nn.Linear(hidden, latent_flat),
-        )
-        self.post_head = nn.Sequential(
-            nn.Linear(hidden * 2, hidden), nn.SiLU(),
-            nn.Linear(hidden, latent_flat),
-        )
+        self.prior_head = _mlp(hidden, hidden, latent_flat)
+        self.post_head = _mlp(hidden * 2, hidden, latent_flat)
         self.action_dim = action_dim
 
     def _one_hot_latent(self, logits: th.Tensor) -> tuple[th.Tensor, th.Tensor]:
@@ -174,21 +173,16 @@ class _RSSM(nn.Module):
         return th.zeros(batch_size, self.hidden, device=device)
 
     def observe(
-        self,
-        obs_seq: th.Tensor,     # (B, T, obs_dim)
-        action_seq: th.Tensor,  # (B, T) int64
+        self, obs_seq: th.Tensor, action_seq: th.Tensor,
     ) -> dict[str, th.Tensor]:
-        """Run the posterior pass over a sequence, returning all the
+        """Posterior pass over a (B, T, obs_dim) sequence — returns
         intermediate tensors the world-model loss needs."""
         B, T, _ = obs_seq.shape
         device = obs_seq.device
-        embeds = self.embed(obs_seq)                       # (B, T, H)
+        embeds = self.embed(obs_seq)
         action_onehot = F.one_hot(action_seq, self.action_dim).float()
-
         h = self.initial_state(B, device)
-        latent = th.zeros(
-            B, self.latent_axes * self.latent_dim, device=device
-        )
+        latent = th.zeros(B, self.latent_axes * self.latent_dim, device=device)
         h_list, prior_lp_list, post_lp_list, latent_list = [], [], [], []
         for t in range(T):
             cell_in = th.cat([latent, action_onehot[:, t]], dim=-1)
@@ -217,13 +211,6 @@ class _RSSM(nn.Module):
         prior_logits = self.prior_head(h_new)
         latent_new, _ = self._one_hot_latent(prior_logits)
         return h_new, latent_new
-
-
-def _mlp(in_dim: int, hidden: int, out_dim: int) -> nn.Sequential:
-    return nn.Sequential(
-        nn.Linear(in_dim, hidden), nn.SiLU(),
-        nn.Linear(hidden, out_dim),
-    )
 
 
 class _DecoderHead(nn.Module):
@@ -301,6 +288,10 @@ class DreamerAgent:
         self.obs_dim = int(np.prod(obs_space.shape))
         self.action_dim = int(act_space.n)
         self.verbose = verbose
+        # VecEnv n_envs — trainer builds SubprocVecEnv n_envs=8 for
+        # every algo. Per-env action + n_streams buffer fix the
+        # n_envs>1 crash from the 2026-04-22 QA regression.
+        self.num_envs = int(getattr(env, "num_envs", 1))
 
         # Merge caller overrides onto the ADR-pinned defaults.
         cfg = {**DREAMER_DEFAULT_KWARGS, **dreamer_kwargs}
@@ -314,11 +305,8 @@ class DreamerAgent:
         latent_flat = int(cfg["latent_dim"]) * int(cfg["latent_axes"])
 
         self.rssm = _RSSM(
-            obs_dim=self.obs_dim,
-            action_dim=self.action_dim,
-            hidden=hidden,
-            latent_dim=int(cfg["latent_dim"]),
-            latent_axes=int(cfg["latent_axes"]),
+            self.obs_dim, self.action_dim, hidden,
+            int(cfg["latent_dim"]), int(cfg["latent_axes"]),
         ).to(self.device)
         self.decoder = _DecoderHead(hidden, self.obs_dim, latent_flat).to(self.device)
         self.actor = _ActorHead(hidden, latent_flat, self.action_dim).to(self.device)
@@ -326,66 +314,71 @@ class DreamerAgent:
 
         self.wm_params = list(self.rssm.parameters()) + list(self.decoder.parameters())
         self.opt_wm = th.optim.Adam(self.wm_params, lr=float(cfg["world_model_lr"]))
-        self.opt_actor = th.optim.Adam(
-            self.actor.parameters(), lr=float(cfg["actor_lr"])
-        )
-        self.opt_critic = th.optim.Adam(
-            self.critic.parameters(), lr=float(cfg["critic_lr"])
-        )
+        self.opt_actor = th.optim.Adam(self.actor.parameters(), lr=float(cfg["actor_lr"]))
+        self.opt_critic = th.optim.Adam(self.critic.parameters(), lr=float(cfg["critic_lr"]))
 
-        self.buffer = _SequenceReplayBuffer(int(cfg["replay_capacity"]))
+        self.buffer = _SequenceReplayBuffer(
+            int(cfg["replay_capacity"]), n_streams=self.num_envs,
+        )
         self._n_updates = 0
         self.num_timesteps = 0
         if seed is not None:
             th.manual_seed(seed)
             np.random.seed(seed)
 
-    # -------------------------------------------------------------
-    # Env interaction — Phase 1 of Dreamer's three-phase loop
-    # -------------------------------------------------------------
+    # Phase 1 — env interaction
     def _collect_step(self, obs: np.ndarray) -> np.ndarray:
-        """Pick an action, step the env, stash the transition."""
-        # obs for VecEnv is (n_envs, obs_dim); Dreamer's actor wants
-        # a single env. Use env index 0 — we don't run vectorised
-        # rollouts in the vendored skeleton.
-        single_obs = obs[0] if obs.ndim == 2 else obs
-        with th.no_grad():
-            obs_t = th.from_numpy(single_obs).float().unsqueeze(0).to(self.device)
-            h = self.rssm.initial_state(1, self.device)
-            latent = th.zeros(
-                1, int(self.cfg["latent_dim"]) * int(self.cfg["latent_axes"]),
-                device=self.device,
-            )
-            emb = self.rssm.embed(obs_t)
-            _, post_lp = self.rssm._one_hot_latent(
-                self.rssm.post_head(th.cat([h, emb], dim=-1))
-            )
-            latent, _ = self.rssm._one_hot_latent(
-                self.rssm.post_head(th.cat([h, emb], dim=-1))
-            )
-            logits = self.actor(h, latent)
-            action = int(th.distributions.Categorical(logits=logits).sample().item())
+        """Pick actions for every parallel env, step the VecEnv,
+        stash per-env transitions.
 
-        # VecEnv step returns (obs, rew, done, info) — possibly
-        # (obs, rew, terminated, truncated, info) on Gymnasium 0.29+
-        # when wrapped; the DummyVecEnv normalises to the 4-tuple.
-        stepped = self.env.step(np.array([action]))
+        QA 2026-04-22 hit a crash here under SubprocVecEnv n_envs=8
+        — old shape was ``env.step(np.array([action]))`` (length-1)
+        against an n_envs-wide VecEnv. Fix: per-env actor pass
+        building a full ``(n_envs,)`` action array. Per-env
+        independent forwards (not batched) — the skeleton's RSSM
+        posterior init is (1, H) and rewriting the batch shape is
+        out of scope for a crash-fix patch.
+        """
+        if obs.ndim == 1:
+            obs = obs.reshape(1, -1)
+        n_envs = obs.shape[0]
+
+        actions = np.zeros(n_envs, dtype=np.int64)
+        with th.no_grad():
+            for i in range(n_envs):
+                obs_t = th.from_numpy(obs[i]).float().unsqueeze(0).to(self.device)
+                h = self.rssm.initial_state(1, self.device)
+                emb = self.rssm.embed(obs_t)
+                latent, _ = self.rssm._one_hot_latent(
+                    self.rssm.post_head(th.cat([h, emb], dim=-1))
+                )
+                logits = self.actor(h, latent)
+                actions[i] = int(
+                    th.distributions.Categorical(logits=logits).sample().item()
+                )
+
+        # VecEnv step returns 4-tuple (obs, rew, done, info) —
+        # DummyVecEnv / SubprocVecEnv both normalise away
+        # Gymnasium's 5-tuple terminated/truncated split.
+        stepped = self.env.step(actions)
         if len(stepped) == 4:
             new_obs, rew, done, _info = stepped
-        else:  # gymnasium new API
+        else:
             new_obs, rew, term, trunc, _info = stepped
             done = term | trunc
-        self.buffer.add(_Step(
-            obs=single_obs.astype(np.float32).copy(),
-            action=action,
-            reward=float(rew[0]),
-            done=bool(done[0]),
-        ))
+        for i in range(n_envs):
+            self.buffer.add(
+                _Step(
+                    obs=obs[i].astype(np.float32).copy(),
+                    action=int(actions[i]),
+                    reward=float(rew[i]),
+                    done=bool(done[i]),
+                ),
+                env_idx=i,
+            )
         return new_obs
 
-    # -------------------------------------------------------------
-    # World-model train — Phase 2
-    # -------------------------------------------------------------
+    # Phase 2 — world-model train
     def _train_world_model(self) -> dict[str, float]:
         batch = self.buffer.sample(
             int(self.cfg["batch_size"]),
@@ -405,13 +398,11 @@ class DreamerAgent:
         rew_loss = F.mse_loss(recon_rew, rew)
         cont_loss = F.binary_cross_entropy_with_logits(recon_cont, 1.0 - done)
 
-        # KL with free-bits: max(free_bits, KL). post_lp / prior_lp
-        # have shape (B, T, axes, classes); sum over classes to get
-        # per-axis KL, then clamp at free_bits before averaging.
+        # KL with free-bits: sum over classes → per-axis KL, clamp
+        # at free_bits, mean.
         post_probs = post_lp.exp()
         kl_per_axis = (post_probs * (post_lp - prior_lp.detach())).sum(dim=-1)
-        free = float(self.cfg["free_bits"])
-        kl = kl_per_axis.clamp(min=free).mean()
+        kl = kl_per_axis.clamp(min=float(self.cfg["free_bits"])).mean()
 
         wm_loss = obs_loss + rew_loss + cont_loss + float(self.cfg["kl_scale"]) * kl
         self.opt_wm.zero_grad()
@@ -419,7 +410,6 @@ class DreamerAgent:
         th.nn.utils.clip_grad_norm_(self.wm_params, 100.0)
         self.opt_wm.step()
 
-        # Return detached scalars + the traces the AC phase needs.
         self._last_trace = (h.detach(), latent.detach())
         return {
             "wm_loss": float(wm_loss.item()),
@@ -428,9 +418,7 @@ class DreamerAgent:
             "kl": float(kl.item()),
         }
 
-    # -------------------------------------------------------------
-    # Actor-critic imagine-train — Phase 3
-    # -------------------------------------------------------------
+    # Phase 3 — actor-critic imagine-train
     def _train_actor_critic(self) -> dict[str, float]:
         if not hasattr(self, "_last_trace"):
             return {"actor_loss": float("nan"), "critic_loss": float("nan")}
@@ -488,25 +476,31 @@ class DreamerAgent:
             "critic_loss": float(critic_loss.item()),
         }
 
-    # -------------------------------------------------------------
     # Public SB3-compatible API
-    # -------------------------------------------------------------
     def learn(
         self,
         total_timesteps: int,
         callback: Any = None,
         progress_bar: bool = False,
     ) -> "DreamerAgent":
+        """Drive the three-phase loop. ``total_timesteps`` is counted
+        in env-step units matching SB3 convention — each
+        ``_collect_step`` consumes ``num_envs`` env steps toward the
+        budget, so ``learn(1M)`` means 1M real env steps regardless
+        of n_envs."""
         obs = self.env.reset()
         if isinstance(obs, tuple):  # gymnasium new API
             obs = obs[0]
         train_every = int(self.cfg["train_every"])
+        seq_len = int(self.cfg["sequence_length"])
         steps_since_train = 0
-        for _ in range(total_timesteps):
+        collected = 0
+        while collected < total_timesteps:
             obs = self._collect_step(obs)
-            self.num_timesteps += 1
-            steps_since_train += 1
-            if steps_since_train >= train_every and len(self.buffer) >= int(self.cfg["sequence_length"]):
+            self.num_timesteps += self.num_envs
+            collected += self.num_envs
+            steps_since_train += self.num_envs
+            if steps_since_train >= train_every and len(self.buffer) >= seq_len:
                 self._train_world_model()
                 self._train_actor_critic()
                 self._n_updates += 1
@@ -520,17 +514,12 @@ class DreamerAgent:
         episode_start: Any = None,
         deterministic: bool = True,
     ) -> tuple[np.ndarray, Any]:
-        """SB3-shaped predict. ``state`` / ``episode_start`` accepted
-        for interface-compat and ignored — the skeleton resets the
-        posterior per-call to stay stateless at the boundary.
-
-        In ``deterministic=True`` mode the categorical latent is
-        collapsed to its argmax one-hot (not sampled) so repeated
-        calls on the same obs give identical actions — SB3's
-        ``PPO.predict`` + ``SACDiscrete.predict`` both have this
-        contract; LoadedPolicyBot relies on it for reproducible
-        replay / league matches.
-        """
+        """SB3-shaped predict. ``state`` / ``episode_start`` ignored
+        — skeleton resets the posterior per-call. In deterministic
+        mode the categorical latent collapses to its argmax one-hot
+        so repeated calls on the same obs give identical actions,
+        matching PPO / SACDiscrete's contract (LoadedPolicyBot
+        relies on this for reproducible replay / league matches)."""
         obs_t = th.from_numpy(np.asarray(observation)).float().to(self.device)
         if obs_t.ndim == 1:
             obs_t = obs_t.unsqueeze(0)
