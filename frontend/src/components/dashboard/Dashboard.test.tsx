@@ -338,6 +338,27 @@ describe('Dashboard loading state', () => {
     expect(payload.sampling).toBe('pfsp')
   })
 
+  // ── v2.x Sprint 4: algorithm in training:start (ADR 0017 §3) ──
+  it('training:start payload includes algorithm (default ppo) + reflects SAC selection', () => {
+    const send = vi.fn()
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      send,
+    })
+    renderDashboard()
+    // Default — first click sends ppo.
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+    const [, firstPayload] = send.mock.calls[0] as [string, Record<string, unknown>]
+    expect(firstPayload.algorithm).toBe('ppo')
+    // Switch to SAC + re-click — payload flips to sac without
+    // any FE gate (ADR 0017 §4 pushes gating to the trainer).
+    fireEvent.click(screen.getByRole('radio', { name: /^SAC/ }))
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+    const [, secondPayload] = send.mock.calls[1] as [string, Record<string, unknown>]
+    expect(secondPayload.algorithm).toBe('sac')
+  })
+
   // ── FC-R6G: title in training:start payload ──
   it('training:start payload includes a (possibly empty) title field', () => {
     // BE T1 (a7351e57) accepts `title: str | None`; empty triggers
