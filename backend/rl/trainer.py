@@ -135,6 +135,12 @@ class TrainingManager:
         # RecurrentPPO.load on the stored tag without re-plumbing
         # kwargs; the run-record writer also reads it off the manager.
         self._policy_type: str = "mlp_v1"
+        # Algorithm selector (ADR 0017 Sprint-4). Default ``ppo`` keeps
+        # on-policy PPO, the pre-S4 baseline. ``sac`` flips to off-
+        # policy SAC-Discrete via the ``policy_factory`` dispatch that
+        # the AI branch adds in Sprint 4; the manager holds the tag so
+        # the run-record writer + resume path can both read it.
+        self._algorithm: str = "ppo"
         # Human title + its filesystem slug for this run. Both are set
         # by start() before the thread kicks off; callbacks that tag
         # result/frame payloads read them off this object at emit time.
@@ -160,6 +166,7 @@ class TrainingManager:
         opponent_provider: Any = None,
         reward_model: str = "shaped_v1",
         policy_type: str = "mlp_v1",
+        algorithm: str = "ppo",
     ) -> str:
         """Start a new training experiment. Returns experiment_id.
 
@@ -217,6 +224,7 @@ class TrainingManager:
         self._opponent_provider = opponent_provider
         self._reward_model = reward_model
         self._policy_type = policy_type
+        self._algorithm = algorithm
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         # Title + slug set BEFORE the thread starts so the first demo-
         # tick + result-drain both see them. Slug defaults keep legacy
@@ -390,6 +398,12 @@ class TrainingManager:
                 # silently PPO.load-ing an LSTM checkpoint (which
                 # would hit a layer-shape mismatch mid-unpickle).
                 "policy_type": self._policy_type,
+                # ADR 0017 Sprint-4: resume also needs algorithm so
+                # the factory picks SAC.load vs PPO.load — a SAC
+                # checkpoint loaded through PPO.load would deserialize
+                # with a different replay-buffer / actor-critic layout
+                # and corrupt the first training step.
+                "algorithm": self._algorithm,
             }
             meta_path = Path(self.model_dir) / _INTERRUPTED_META_FILENAME
             meta_path.write_text(json.dumps(meta, indent=2))
@@ -439,6 +453,9 @@ class TrainingManager:
         # Default to ``mlp_v1`` for metas written before Sprint 3 — the
         # entire pre-LSTM universe is MLP, so missing key == MLP.
         self._policy_type = meta.get("policy_type", "mlp_v1")
+        # Default to ``ppo`` for pre-Sprint-4 metas — every run before
+        # S4 was PPO by construction.
+        self._algorithm = meta.get("algorithm", "ppo")
 
         checkpoint_path = str(
             Path(self.model_dir) / exp_id / "interrupted"

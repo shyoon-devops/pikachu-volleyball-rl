@@ -25,6 +25,7 @@ class TrainingServiceWrapper:
         opponent_provider: Any = None,
         reward_model: str = "shaped_v1",
         policy_type: str = "mlp_v1",
+        algorithm: str = "ppo",
     ) -> str:
         """Start a new training run.
 
@@ -61,6 +62,12 @@ class TrainingServiceWrapper:
         field in the trainer to dispatch ``(algo_class, policy_class,
         policy_kwargs)``; the BE contract is the pass-through + run-
         record tag.
+
+        ``algorithm`` (v2 Sprint-4, ADR 0017): on- vs off-policy
+        learner (``ppo`` default / ``sac``). The AI Sprint-4 branch
+        extends ``policy_factory.make_policy_spec`` to dispatch on
+        both (algorithm × policy_type); the BE stays at pass-through
+        + run-record tag.
         """
         return await self.manager.start(
             hyperparams=hyperparams,
@@ -73,6 +80,7 @@ class TrainingServiceWrapper:
             opponent_provider=opponent_provider,
             reward_model=reward_model,
             policy_type=policy_type,
+            algorithm=algorithm,
         )
 
     async def stop(self, *, force: bool = True) -> dict[str, Any]:

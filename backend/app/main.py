@@ -29,6 +29,7 @@ from backend.app.services.game_service import GameService
 from backend.app.services.indexes import ensure_indexes
 from backend.app.services.metrics_service import MetricsService
 from backend.app.services.migrations import (
+    backfill_training_runs_algorithm,
     backfill_training_runs_policy_type,
     backfill_training_runs_reward_model,
 )
@@ -84,6 +85,13 @@ async def lifespan(app: FastAPI):
         await backfill_training_runs_policy_type(db)
     except Exception:  # noqa: BLE001 — logged; app continues
         logger.exception("backfill_training_runs_policy_type failed at startup")
+
+    # Sprint-4 companion: backfill algorithm (ADR 0017). Idempotent
+    # alongside the reward_model + policy_type backfills.
+    try:
+        await backfill_training_runs_algorithm(db)
+    except Exception:  # noqa: BLE001 — logged; app continues
+        logger.exception("backfill_training_runs_algorithm failed at startup")
 
     app.state.mongo_client = client
     app.state.db = db

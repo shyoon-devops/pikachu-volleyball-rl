@@ -90,7 +90,40 @@ async def backfill_training_runs_policy_type(
     return count
 
 
+async def backfill_training_runs_algorithm(
+    db: AsyncIOMotorDatabase | None,
+) -> int:
+    """Backfill ``algorithm="ppo"`` onto pre-Sprint-4 run docs.
+
+    ADR 0017 §3 — SAC is net-new; every run before Sprint 4 was PPO
+    by construction so the backfill value is the historical truth, not
+    a stand-in. Matches ``TrainingRunsService.register``'s default so a
+    fresh S4 run that omits the kwarg is indistinguishable from a
+    backfilled legacy row.
+
+    Idempotent via ``$exists: False``; safe to invoke on every app
+    start. Mongo-less deployments no-op.
+    """
+    if db is None:
+        return 0
+    try:
+        result: Any = await db["training_runs"].update_many(
+            {"algorithm": {"$exists": False}},
+            {"$set": {"algorithm": "ppo"}},
+        )
+    except Exception:  # noqa: BLE001 — non-fatal; startup continues
+        logger.exception("backfill_training_runs_algorithm failed")
+        return 0
+    count = int(getattr(result, "modified_count", 0) or 0)
+    if count:
+        logger.info(
+            "backfill_training_runs_algorithm: set ppo on %d docs", count
+        )
+    return count
+
+
 __all__ = [
     "backfill_training_runs_reward_model",
     "backfill_training_runs_policy_type",
+    "backfill_training_runs_algorithm",
 ]
