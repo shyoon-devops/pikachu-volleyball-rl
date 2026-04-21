@@ -302,11 +302,12 @@ describe('HyperparamForm — Reward-model selector (v2.x Sprint 2)', () => {
     expect(learned).toBeInTheDocument()
     // shaped_v1 is the default, so it's the checked radio.
     expect(shaped.getAttribute('aria-checked')).toBe('true')
-    // Badges resolve via i18n. "Recommended" appears twice once
-    // the policy selector lands (reward + policy share the badge);
-    // "Experimental" is reward-only.
+    // Badges resolve via i18n. "Recommended" recurs across the
+    // three regime selectors (reward/policy/algorithm) and
+    // "Experimental" recurs across reward + algorithm — we only
+    // assert *presence*, not uniqueness.
     expect(screen.getAllByText('Recommended').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('Experimental')).toBeInTheDocument()
+    expect(screen.getAllByText('Experimental').length).toBeGreaterThanOrEqual(1)
   })
 
   it('clicking a non-default option fires onRewardModelChange with the enum value', () => {
@@ -381,15 +382,18 @@ describe('HyperparamForm — Policy-type selector (v2.x Sprint 3)', () => {
 })
 
 // v2.x Sprint 4 — Algorithm selector (ADR 0017 §8).
-describe('HyperparamForm — Algorithm selector (v2.x Sprint 4)', () => {
-  it('renders the two algorithm options with PPO as the default', () => {
+describe('HyperparamForm — Algorithm selector (v2.x Sprint 4 + 5)', () => {
+  it('renders all three algorithm options with PPO as the default', () => {
     renderForm()
     const ppo = screen.getByRole('radio', { name: /^PPO/ })
     const sac = screen.getByRole('radio', { name: /^SAC/ })
+    const dreamer = screen.getByRole('radio', { name: /Dreamer V3/ })
     expect(ppo).toBeInTheDocument()
     expect(sac).toBeInTheDocument()
+    expect(dreamer).toBeInTheDocument()
     expect(ppo.getAttribute('aria-checked')).toBe('true')
     expect(sac.getAttribute('aria-checked')).toBe('false')
+    expect(dreamer.getAttribute('aria-checked')).toBe('false')
   })
 
   it('clicking SAC fires onAlgorithmChange("sac")', () => {
@@ -398,10 +402,26 @@ describe('HyperparamForm — Algorithm selector (v2.x Sprint 4)', () => {
     expect(onAlgorithmChange).toHaveBeenCalledWith('sac')
   })
 
-  it('reflects the controlled value — sac as checked', () => {
-    renderForm({ algorithm: 'sac' })
-    expect(screen.getByRole('radio', { name: /^SAC/ }).getAttribute('aria-checked')).toBe('true')
+  it('clicking Dreamer V3 fires onAlgorithmChange("dreamer_v3")', () => {
+    const { onAlgorithmChange } = renderForm()
+    fireEvent.click(screen.getByRole('radio', { name: /Dreamer V3/ }))
+    expect(onAlgorithmChange).toHaveBeenCalledWith('dreamer_v3')
+  })
+
+  it('reflects the controlled value — dreamer_v3 as checked', () => {
+    renderForm({ algorithm: 'dreamer_v3' })
+    expect(screen.getByRole('radio', { name: /Dreamer V3/ }).getAttribute('aria-checked')).toBe('true')
     expect(screen.getByRole('radio', { name: /^PPO/ }).getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('surfaces the Dreamer V3 Experimental badge + tooltip', () => {
+    renderForm()
+    const dreamer = screen.getByRole('radio', { name: /Dreamer V3/ })
+    expect(dreamer.getAttribute('title')).toMatch(/model-based/i)
+    expect(dreamer.getAttribute('title')).toMatch(/3×|3x/)
+    // "Experimental" is also used by the reward selector (Learned shaped),
+    // so we assert *at least* one — the new algorithm badge adds one more.
+    expect(screen.getAllByText('Experimental').length).toBeGreaterThanOrEqual(2)
   })
 
   it('surfaces the SAC tooltip via the title attribute', () => {
@@ -415,6 +435,7 @@ describe('HyperparamForm — Algorithm selector (v2.x Sprint 4)', () => {
     const radios = [
       screen.getByRole('radio', { name: /^PPO/ }),
       screen.getByRole('radio', { name: /^SAC/ }),
+      screen.getByRole('radio', { name: /Dreamer V3/ }),
     ]
     for (const r of radios) {
       expect((r as HTMLButtonElement).disabled).toBe(true)

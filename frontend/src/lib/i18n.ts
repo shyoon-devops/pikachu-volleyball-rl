@@ -79,7 +79,20 @@ const EN: StringMap = {
   'training.algorithm.options.sac.label': 'SAC',
   'training.algorithm.options.sac.tooltip':
     'Off-policy actor-critic. Better sample efficiency, higher training cost.',
+  // ── v2.x Sprint 5 (ADR 0018). Dreamer V3 — model-based
+  // world-model learner. Experimental this sprint; cost warning
+  // in the tooltip so users self-select the 3× wall-clock hit.
+  'training.algorithm.options.dreamer_v3.label': 'Dreamer V3',
+  'training.algorithm.options.dreamer_v3.tooltip':
+    'Model-based. Highest sample efficiency, highest training cost (~3× wall clock).',
   'training.algorithm.recommended_badge': 'Recommended',
+  'training.algorithm.experimental_badge': 'Experimental',
+  /** Compact chip labels for list surfaces (v2.x Sprint 5).
+   *  Lowercase mono, short enough to stack with the existing
+   *  reward + policy chips. */
+  'training.algorithm.chip.ppo': 'ppo',
+  'training.algorithm.chip.sac': 'sac',
+  'training.algorithm.chip.dreamer_v3': 'dreamer',
 }
 
 /**

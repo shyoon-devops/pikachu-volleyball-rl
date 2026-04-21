@@ -493,10 +493,16 @@
   border-radius: 2px;
 }
 
-/* Reward-model chip slot — 8 px gap right of the title link
+/* Algorithm chip slot — 8 px gap right of the title link
+   (v2.x Sprint 5, ADR 0018). Leads the three-chip stack. */
+.recent-games-algo-chip {
+  margin-left: 8px;
+}
+
+/* Reward-model chip slot — 4 px gap right of the algorithm chip
    (DESIGN-REWARD-MODEL-SELECTOR.md §4). */
 .recent-games-reward-chip {
-  margin-left: 8px;
+  margin-left: 4px;
 }
 
 /* Policy-type chip slot — 4 px gap right of the reward chip

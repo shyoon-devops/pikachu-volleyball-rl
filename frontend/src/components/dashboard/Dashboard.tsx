@@ -6,6 +6,7 @@ import { TimestampText } from '../shared/TimestampText'
 import { OpponentChip } from '../shared/OpponentChip'
 import { RewardModelChip } from '../shared/RewardModelChip'
 import { PolicyTypeChip } from '../shared/PolicyTypeChip'
+import { AlgorithmChip } from '../shared/AlgorithmChip'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { BatchTabBar } from '../game/BatchTabBar'
@@ -531,7 +532,13 @@ const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecor
         ) : (
           '—'
         )}
-        {/* Reward-model chip — 8 px gap, right of title (spec §4). */}
+        {/* Algorithm chip — 8 px gap, right of title. Algorithm
+            leads because it's the most foundational regime choice
+            (v2.x Sprint 5, ADR 0018). */}
+        <span className="recent-games-algo-chip">
+          <AlgorithmChip value={g.algorithm} />
+        </span>
+        {/* Reward-model chip — 4 px gap, right of algorithm chip. */}
         <span className="recent-games-reward-chip">
           <RewardModelChip value={g.rewardModel} />
         </span>
