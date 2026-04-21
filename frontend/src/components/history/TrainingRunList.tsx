@@ -5,6 +5,7 @@ import type { TrainingRun } from '../../lib/types'
 import { TimestampText } from '../shared/TimestampText'
 import { RewardModelChip } from '../shared/RewardModelChip'
 import { PolicyTypeChip } from '../shared/PolicyTypeChip'
+import { AlgorithmChip } from '../shared/AlgorithmChip'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import './TrainingRunList.css'
 
@@ -52,7 +53,8 @@ function runsShallowEqual(a: TrainingRun, b: TrainingRun): boolean {
     a.avgRallyLength === b.avgRallyLength &&
     a.status === b.status &&
     a.rewardModel === b.rewardModel &&
-    a.policyType === b.policyType
+    a.policyType === b.policyType &&
+    a.algorithm === b.algorithm
   )
 }
 
@@ -349,7 +351,12 @@ const RunRow = memo(function RunRow({ run, query, linkBase, evalMode = false, ch
     <tr className={rowClass}>
       <td className="training-run-list-cell-title">
         {titleCell}
-        {/* Reward-model chip — 8 px gap, right of title
+        {/* Algorithm chip — 8 px gap, right of title (v2.x
+            Sprint 5, ADR 0018). Leads the three-chip stack. */}
+        <span className="training-run-list-algo-chip">
+          <AlgorithmChip value={run.algorithm} />
+        </span>
+        {/* Reward-model chip — 4 px gap, right of algorithm
             (DESIGN-REWARD-MODEL-SELECTOR.md §4). */}
         <span className="training-run-list-reward-chip">
           <RewardModelChip value={run.rewardModel} />
@@ -412,6 +419,9 @@ const RunCard = memo(function RunCard({ run, query, linkBase, evalMode = false, 
       <div className="training-run-card-row-1">
         <span className="training-run-card-title">
           <HighlightedText text={safeTitle} query={query} />
+          <span className="training-run-list-algo-chip">
+            <AlgorithmChip value={run.algorithm} />
+          </span>
           <span className="training-run-list-reward-chip">
             <RewardModelChip value={run.rewardModel} />
           </span>

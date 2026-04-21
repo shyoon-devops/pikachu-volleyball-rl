@@ -10,6 +10,7 @@ import { useTrainingState } from '../../hooks/useTrainingState'
 import { TimestampText } from '../shared/TimestampText'
 import { RewardModelChip } from '../shared/RewardModelChip'
 import { PolicyTypeChip } from '../shared/PolicyTypeChip'
+import { AlgorithmChip } from '../shared/AlgorithmChip'
 import type { TrainingRun } from '../../lib/types'
 import './UnifiedRunDetail.css'
 
@@ -173,13 +174,14 @@ export function UnifiedRunDetail() {
                       : '—'}
                   </dd>
                 </div>
-                {/* Algorithm — full label (v2.x Sprint 4, ADR 0017
-                    §8 — HyperparamsSummary gains an Algorithm row;
-                    drill-down mirrors the same visual treatment). */}
+                {/* Algorithm — full label (v2.x Sprint 4, ADR 0017;
+                    Dreamer V3 label added in S5 per ADR 0018). Uses
+                    the AlgorithmChip `full` variant so the label
+                    formatting stays consistent across surfaces. */}
                 <div className="unified-run-overview-meta-item">
                   <dt>Algorithm</dt>
-                  <dd className="text-mono">
-                    {(run?.algorithm ?? 'ppo').toUpperCase()}
+                  <dd>
+                    <AlgorithmChip value={run?.algorithm} variant="full" />
                   </dd>
                 </div>
                 {/* Reward-model regime — full label, no chip styling

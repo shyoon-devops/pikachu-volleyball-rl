@@ -803,10 +803,11 @@ interface AlgorithmSelectorProps {
 
 const ALGORITHM_OPTIONS: Array<{
   value: Algorithm
-  badge: 'recommended' | null
+  badge: 'recommended' | 'experimental' | null
 }> = [
-  { value: 'ppo', badge: 'recommended' },
-  { value: 'sac', badge: null },
+  { value: 'ppo',        badge: 'recommended' },
+  { value: 'sac',        badge: null },
+  { value: 'dreamer_v3', badge: 'experimental' },
 ]
 
 function AlgorithmSelector({ value, onChange, disabled }: AlgorithmSelectorProps) {
@@ -860,6 +861,15 @@ function AlgorithmSelector({ value, onChange, disabled }: AlgorithmSelectorProps
                   aria-label="recommended"
                 >
                   {t('training.algorithm.recommended_badge')}
+                </span>
+              )}
+              {opt.badge === 'experimental' && (
+                <span
+                  className="reward-model-badge reward-model-badge--experimental"
+                  aria-label="experimental"
+                >
+                  <span aria-hidden="true" className="reward-model-badge-glyph">⚠</span>
+                  {t('training.algorithm.experimental_badge')}
                 </span>
               )}
               <span id={tipId} className="sr-only">

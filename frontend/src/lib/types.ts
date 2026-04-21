@@ -302,6 +302,13 @@ export interface GameRecord {
    * run — the spec surfaces data drift as a danger-tone chip.
    */
   policyType?: PolicyType | null
+  /**
+   * RL algorithm the run was launched with. Denormalised on
+   * `/api/games` for list-surface chips (v2.x Sprint 5 — list
+   * chip lands in S5, after ADR 0018 expanded the enum to
+   * `ppo | sac | dreamer_v3`).
+   */
+  algorithm?: Algorithm | null
 }
 
 /**
@@ -599,19 +606,25 @@ export function parsePolicyType(v: unknown): PolicyType | null {
 }
 
 /**
- * RL algorithm the trainer instantiates (v2.x Sprint 4,
- * ADR 0017 / `docs/adr/0017-sac-continuous-actor-critic.md`).
+ * RL algorithm the trainer instantiates. Enum extended across
+ * sprints:
+ *   - S4 (ADR 0017) — `ppo` (on-policy baseline) + `sac`
+ *     (off-policy actor-critic).
+ *   - S5 (ADR 0018) — `dreamer_v3` (model-based world-model).
+ *     `policy_type` is orthogonal / ignored when
+ *     `algorithm === 'dreamer_v3'` (RSSM replaces MLP/LSTM as the
+ *     temporal feature extractor — ADR 0018 §4). Record still
+ *     persists caller's `policy_type` for audit parity.
  *
- * `ppo` ships today (on-policy baseline). `sac × mlp_v1` is the
- * S4 primary target (off-policy actor-critic, sample-efficiency
- * win per ADR §6); `sac × lstm_v1` is runtime-gated by the
- * trainer (no RecurrentSAC in sb3-contrib yet). No cross-field
- * WS constraint — FE must not gate (ADR §4).
+ * No cross-field WS constraint — FE must not pre-gate triples;
+ * runtime `NotImplementedError` in the trainer is the source of
+ * truth (ADR 0017 §4 / ADR 0018 §4).
  */
-export type Algorithm = 'ppo' | 'sac'
+export type Algorithm = 'ppo' | 'sac' | 'dreamer_v3'
 
-/** All algorithm values in canonical display order (PPO → SAC). */
-export const ALGORITHMS = ['ppo', 'sac'] as const satisfies readonly Algorithm[]
+/** All algorithm values in canonical display order (PPO → SAC →
+ *  Dreamer V3). Drives the segmented control + guard. */
+export const ALGORITHMS = ['ppo', 'sac', 'dreamer_v3'] as const satisfies readonly Algorithm[]
 
 /** Runtime guard — unknown strings return `null`. Callers that
  *  need the spec default should coalesce with `'ppo'`. */

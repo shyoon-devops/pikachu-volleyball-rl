@@ -338,8 +338,9 @@ describe('Dashboard loading state', () => {
     expect(payload.sampling).toBe('pfsp')
   })
 
-  // ── v2.x Sprint 4: algorithm in training:start (ADR 0017 §3) ──
-  it('training:start payload includes algorithm (default ppo) + reflects SAC selection', () => {
+  // ── v2.x Sprint 4/5: algorithm in training:start (ADR 0017 §3,
+  // ADR 0018 §4 — enum now `ppo | sac | dreamer_v3`) ──
+  it('training:start payload carries ppo → sac → dreamer_v3 without any FE gate', () => {
     const send = vi.fn()
     resetMockState({
       connectionState: 'connected',
@@ -351,12 +352,16 @@ describe('Dashboard loading state', () => {
     fireEvent.click(screen.getByRole('button', { name: /start training/i }))
     const [, firstPayload] = send.mock.calls[0] as [string, Record<string, unknown>]
     expect(firstPayload.algorithm).toBe('ppo')
-    // Switch to SAC + re-click — payload flips to sac without
-    // any FE gate (ADR 0017 §4 pushes gating to the trainer).
+    // Switch to SAC.
     fireEvent.click(screen.getByRole('radio', { name: /^SAC/ }))
     fireEvent.click(screen.getByRole('button', { name: /start training/i }))
     const [, secondPayload] = send.mock.calls[1] as [string, Record<string, unknown>]
     expect(secondPayload.algorithm).toBe('sac')
+    // Switch to Dreamer V3 — the S5 enum extension.
+    fireEvent.click(screen.getByRole('radio', { name: /Dreamer V3/ }))
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+    const [, thirdPayload] = send.mock.calls[2] as [string, Record<string, unknown>]
+    expect(thirdPayload.algorithm).toBe('dreamer_v3')
   })
 
   // ── FC-R6G: title in training:start payload ──
