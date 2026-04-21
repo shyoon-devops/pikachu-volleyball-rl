@@ -293,6 +293,15 @@ export interface GameRecord {
    * guard — unknown values degrade to the `shaped_v1` default.
    */
   rewardModel?: RewardModel | null
+  /**
+   * Policy architecture the run was launched with (v2.x Sprint 3,
+   * ADR 0016). Denormalised on `/api/games` so the Recent Games
+   * row can render the policy chip alongside the reward chip.
+   * `parsePolicyType` guards unknown values; reserved values
+   * (`gru_v1`, `transformer_v1`) are never persisted on a real
+   * run — the spec surfaces data drift as a danger-tone chip.
+   */
+  policyType?: PolicyType | null
 }
 
 /**
@@ -336,6 +345,14 @@ export interface TrainingRun {
    * propagating the bad value.
    */
   rewardModel?: RewardModel | null
+  /**
+   * Policy architecture the run was launched with (v2.x Sprint 3,
+   * ADR 0016). BE decorates every `/api/training/runs` row with
+   * this field; pre-S3 rows default to `mlp_v1` via the Mongo
+   * backfill. `parsePolicyType` gates the value — unknowns fall
+   * back to the `mlp_v1` display default at the component layer.
+   */
+  policyType?: PolicyType | null
 }
 
 export interface EvalResult {
@@ -532,6 +549,44 @@ export const REWARD_MODELS = [
 export function parseRewardModel(v: unknown): RewardModel | null {
   return typeof v === 'string' && (REWARD_MODELS as readonly string[]).includes(v)
     ? (v as RewardModel)
+    : null
+}
+
+/**
+ * Policy architecture the trainer instantiates (v2.x Sprint 3,
+ * ADR 0016 / docs/design/DESIGN-POLICY-TYPE-SELECTOR.md).
+ *
+ * Four literal values mirror the BE `WsTrainingStartPayload`
+ * enum. `gru_v1` and `transformer_v1` are *reserved* — the BE
+ * rejects them at `training:start`, so they only ever appear as
+ * disabled "Coming soon" cells in the selector. Runtime guard
+ * rejects unknown values; decoded `null` collapses to the
+ * `mlp_v1` display default the same way reward_model does.
+ */
+export type PolicyType = 'mlp_v1' | 'lstm_v1' | 'gru_v1' | 'transformer_v1'
+
+/** All policy-type values in canonical display order (MLP → LSTM
+ *  → GRU → Transformer). Drives the segmented control + guard. */
+export const POLICY_TYPES = [
+  'mlp_v1',
+  'lstm_v1',
+  'gru_v1',
+  'transformer_v1',
+] as const satisfies readonly PolicyType[]
+
+/** Reserved (trainer-rejected) policy values. The selector marks
+ *  these as disabled "Coming soon" cells; no chip renders for
+ *  them on list surfaces. */
+export const RESERVED_POLICY_TYPES = ['gru_v1', 'transformer_v1'] as const satisfies readonly PolicyType[]
+
+/**
+ * Runtime guard: accept only the four known enum values; returns
+ * `null` for unknown / missing. Callers that need the spec default
+ * should coalesce with `'mlp_v1'`.
+ */
+export function parsePolicyType(v: unknown): PolicyType | null {
+  return typeof v === 'string' && (POLICY_TYPES as readonly string[]).includes(v)
+    ? (v as PolicyType)
     : null
 }
 

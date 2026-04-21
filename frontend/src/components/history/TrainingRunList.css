@@ -390,3 +390,9 @@
 .training-run-list-reward-chip {
   margin-left: 8px;
 }
+
+/* Policy-type chip slot — 4 px gap right of the reward chip
+   (DESIGN-POLICY-TYPE-SELECTOR.md §4). */
+.training-run-list-policy-chip {
+  margin-left: 4px;
+}

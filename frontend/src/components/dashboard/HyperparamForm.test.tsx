@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { HyperparamForm } from './HyperparamForm'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
-import type { LeagueSampling, RewardModel, TrainingMode } from '../../lib/types'
+import type { LeagueSampling, PolicyType, RewardModel, TrainingMode } from '../../lib/types'
 
 // getTrainingTitles is mocked so TitleInput's debounced dup-check
 // doesn't fire real network during tests (jsdom's fetch is a stub).
@@ -17,6 +17,7 @@ function renderForm(overrides: {
   samplingStrategy?: LeagueSampling
   leaguePoolSize?: number | null
   rewardModel?: RewardModel
+  policyType?: PolicyType
 } = {}) {
   const onParamsChange = vi.fn()
   const onTitleChange = vi.fn()
@@ -24,6 +25,7 @@ function renderForm(overrides: {
   const onOpponentModeChange = vi.fn()
   const onSamplingStrategyChange = vi.fn()
   const onRewardModelChange = vi.fn()
+  const onPolicyTypeChange = vi.fn()
 
   render(
     <HyperparamForm
@@ -40,6 +42,8 @@ function renderForm(overrides: {
       leaguePoolSize={overrides.leaguePoolSize ?? null}
       rewardModel={overrides.rewardModel ?? 'shaped_v1'}
       onRewardModelChange={onRewardModelChange}
+      policyType={overrides.policyType ?? 'mlp_v1'}
+      onPolicyTypeChange={onPolicyTypeChange}
     />,
   )
 
@@ -50,6 +54,7 @@ function renderForm(overrides: {
     onOpponentModeChange,
     onSamplingStrategyChange,
     onRewardModelChange,
+    onPolicyTypeChange,
   }
 }
 
@@ -182,6 +187,8 @@ describe('HyperparamForm', () => {
         leaguePoolSize={null}
         rewardModel="shaped_v1"
         onRewardModelChange={vi.fn()}
+        policyType="mlp_v1"
+        onPolicyTypeChange={vi.fn()}
       />,
     )
     const input = byLabelPrefix('n_envs')
@@ -207,6 +214,8 @@ describe('HyperparamForm', () => {
         leaguePoolSize={null}
         rewardModel="shaped_v1"
         onRewardModelChange={vi.fn()}
+        policyType="mlp_v1"
+        onPolicyTypeChange={vi.fn()}
       />,
     )
     // Basic reset button lives alongside its "BASIC" heading.
@@ -284,8 +293,10 @@ describe('HyperparamForm — Reward-model selector (v2.x Sprint 2)', () => {
     expect(learned).toBeInTheDocument()
     // shaped_v1 is the default, so it's the checked radio.
     expect(shaped.getAttribute('aria-checked')).toBe('true')
-    // Badges resolve via i18n.
-    expect(screen.getByText('Recommended')).toBeInTheDocument()
+    // Badges resolve via i18n. "Recommended" appears twice once
+    // the policy selector lands (reward + policy share the badge);
+    // "Experimental" is reward-only.
+    expect(screen.getAllByText('Recommended').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Experimental')).toBeInTheDocument()
   })
 
@@ -300,6 +311,61 @@ describe('HyperparamForm — Reward-model selector (v2.x Sprint 2)', () => {
     const radios = screen.getAllByRole('radio', { name: /(Shaped \(v1\)|^Sparse|Learned shaped)/ })
     expect(radios).toHaveLength(3)
     for (const r of radios) {
+      expect((r as HTMLButtonElement).disabled).toBe(true)
+    }
+  })
+})
+
+// v2.x Sprint 3 — Policy-type selector
+// (docs/design/DESIGN-POLICY-TYPE-SELECTOR.md §1, ADR 0016).
+describe('HyperparamForm — Policy-type selector (v2.x Sprint 3)', () => {
+  it('renders the four options with Recommended + Coming soon badges', () => {
+    renderForm()
+    const mlp = screen.getByRole('radio', { name: /MLP \(v1\)/ })
+    const lstm = screen.getByRole('radio', { name: /^LSTM/ })
+    const gru = screen.getByRole('radio', { name: /^GRU/ })
+    const transformer = screen.getByRole('radio', { name: /^Transformer/ })
+    expect(mlp).toBeInTheDocument()
+    expect(lstm).toBeInTheDocument()
+    expect(gru).toBeInTheDocument()
+    expect(transformer).toBeInTheDocument()
+    expect(mlp.getAttribute('aria-checked')).toBe('true')
+    // Coming soon badge appears twice (gru + transformer); Recommended
+    // appears for both reward (Shaped) and policy (MLP) selectors —
+    // we only assert presence of "Coming soon" since it's policy-only.
+    expect(screen.getAllByText('Coming soon')).toHaveLength(2)
+  })
+
+  it('marks reserved cells (gru / transformer) as disabled', () => {
+    renderForm()
+    const gru = screen.getByRole('radio', { name: /^GRU/ }) as HTMLButtonElement
+    const transformer = screen.getByRole('radio', { name: /^Transformer/ }) as HTMLButtonElement
+    expect(gru.disabled).toBe(true)
+    expect(transformer.disabled).toBe(true)
+  })
+
+  it('clicking LSTM fires onPolicyTypeChange("lstm_v1")', () => {
+    const { onPolicyTypeChange } = renderForm()
+    fireEvent.click(screen.getByRole('radio', { name: /^LSTM/ }))
+    expect(onPolicyTypeChange).toHaveBeenCalledWith('lstm_v1')
+  })
+
+  it('clicking a reserved cell does not fire onPolicyTypeChange', () => {
+    const { onPolicyTypeChange } = renderForm()
+    fireEvent.click(screen.getByRole('radio', { name: /^GRU/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /^Transformer/ }))
+    expect(onPolicyTypeChange).not.toHaveBeenCalled()
+  })
+
+  it('disables every option when the form is disabled', () => {
+    renderForm({ disabled: true })
+    const policyRadios = [
+      screen.getByRole('radio', { name: /MLP \(v1\)/ }),
+      screen.getByRole('radio', { name: /^LSTM/ }),
+      screen.getByRole('radio', { name: /^GRU/ }),
+      screen.getByRole('radio', { name: /^Transformer/ }),
+    ]
+    for (const r of policyRadios) {
       expect((r as HTMLButtonElement).disabled).toBe(true)
     }
   })

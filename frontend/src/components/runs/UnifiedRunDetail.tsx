@@ -9,6 +9,7 @@ import { getTrainingRuns } from '../../lib/api'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import { TimestampText } from '../shared/TimestampText'
 import { RewardModelChip } from '../shared/RewardModelChip'
+import { PolicyTypeChip } from '../shared/PolicyTypeChip'
 import type { TrainingRun } from '../../lib/types'
 import './UnifiedRunDetail.css'
 
@@ -178,6 +179,14 @@ export function UnifiedRunDetail() {
                   <dt>Reward model</dt>
                   <dd>
                     <RewardModelChip value={run?.rewardModel} variant="full" />
+                  </dd>
+                </div>
+                {/* Policy architecture — full label, no chip styling
+                    (DESIGN-POLICY-TYPE-SELECTOR.md §5). */}
+                <div className="unified-run-overview-meta-item">
+                  <dt>Policy</dt>
+                  <dd>
+                    <PolicyTypeChip value={run?.policyType} variant="full" />
                   </dd>
                 </div>
               </dl>
