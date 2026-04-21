@@ -29,6 +29,10 @@ from backend.rl.callbacks import (
 )
 from backend.rl.env import PikachuVolleyballEnv
 from backend.rl.league_callback import LeagueCallback
+from backend.rl.policy_factory import (
+    VALID_POLICY_TYPES,
+    make_policy_spec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +100,10 @@ class TrainingManager:
             asyncio.Queue(maxsize=32)
         )
 
-        self._model: PPO | None = None
+        # ``Any`` rather than ``PPO`` — ADR 0016 admits
+        # ``RecurrentPPO`` via the policy_factory; both expose the
+        # ``learn`` / ``save`` / ``load`` surface we use below.
+        self._model: Any = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         # Pause is a distinct signal from stop: the training thread keeps its
@@ -120,10 +127,13 @@ class TrainingManager:
         # both read it without replumbing kwargs everywhere.
         self._reward_model: str = "shaped_v1"
         # Policy architecture selector (ADR 0016). Default ``mlp_v1``
-        # matches SB3's MlpPolicy which was the v1.0.0 baseline. The
-        # AI Sprint-3 ``policy_factory.py`` consumes this to pick
-        # (algo_class, policy_class, policy_kwargs); the manager just
-        # holds the tag for the run-record writer.
+        # matches SB3's MlpPolicy — the v1.0.0 baseline — so every
+        # callsite that doesn't opt in keeps identical behaviour
+        # (parity test anchors this). ``policy_factory.py`` consumes
+        # this to pick (algo_class, policy_class, policy_kwargs), and
+        # the resume + checkpoint-load paths branch PPO.load vs
+        # RecurrentPPO.load on the stored tag without re-plumbing
+        # kwargs; the run-record writer also reads it off the manager.
         self._policy_type: str = "mlp_v1"
         # Human title + its filesystem slug for this run. Both are set
         # by start() before the thread kicks off; callbacks that tag
@@ -184,6 +194,21 @@ class TrainingManager:
             raise ValueError(
                 "training_mode='self_play' requires an opponent_provider "
                 "(typically a PFSPProvider built over the league pool)"
+            )
+        # policy_type enum validation mirrors ``reward_model``: the WS
+        # validator is the primary boundary guardrail, but a bypass
+        # (test / notebook / direct call) should crash here too rather
+        # than silently degrade to MLP. Reserved values
+        # (``gru_v1`` / ``transformer_v1``) are explicitly permitted
+        # at this surface — ADR 0016 §8 calls for runtime gating
+        # inside the training loop via ``make_policy_spec``, not at
+        # the awaited entry point, so that the manager's
+        # ``_policy_type`` + run-record persistence still round-trips
+        # the caller's selection for audit/backfill purposes.
+        if policy_type not in VALID_POLICY_TYPES:
+            raise ValueError(
+                f"policy_type must be one of {VALID_POLICY_TYPES}, "
+                f"got {policy_type!r}"
             )
 
         self._experiment_id = str(uuid.uuid4())
@@ -360,6 +385,11 @@ class TrainingManager:
                 "current_step": self.current_step,
                 "bot_level": self._bot_level,
                 "hyperparams": self._hyperparams,
+                # ADR 0016: the resume path needs policy_type so the
+                # factory dispatches to RecurrentPPO.load instead of
+                # silently PPO.load-ing an LSTM checkpoint (which
+                # would hit a layer-shape mismatch mid-unpickle).
+                "policy_type": self._policy_type,
             }
             meta_path = Path(self.model_dir) / _INTERRUPTED_META_FILENAME
             meta_path.write_text(json.dumps(meta, indent=2))
@@ -406,6 +436,9 @@ class TrainingManager:
         self._experiment_id = exp_id
         self._bot_level = meta.get("bot_level", 1)
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **meta.get("hyperparams", {})}
+        # Default to ``mlp_v1`` for metas written before Sprint 3 — the
+        # entire pre-LSTM universe is MLP, so missing key == MLP.
+        self._policy_type = meta.get("policy_type", "mlp_v1")
 
         checkpoint_path = str(
             Path(self.model_dir) / exp_id / "interrupted"
@@ -500,15 +533,21 @@ class TrainingManager:
                 )
 
             hp = self._hyperparams
+            # ADR 0016: policy_factory owns SB3 class + policy-registry
+            # key + LSTM kwargs. Both fresh-start and checkpoint-load
+            # routes dispatch through it — mlp_v1 continues to build
+            # PPO + "MlpPolicy" + net_arch=[256,256] so pre-Sprint-3
+            # runs are bit-identical (parity test anchors this).
+            spec = make_policy_spec(self._policy_type, DEFAULT_NET_ARCH)
             if checkpoint_path:
-                self._model = PPO.load(
+                self._model = spec.algo_class.load(
                     checkpoint_path,
                     env=env,
                     learning_rate=hp.get("learning_rate", 3e-4),
                 )
             else:
-                self._model = PPO(
-                    policy="MlpPolicy",
+                self._model = spec.algo_class(
+                    policy=spec.policy_class_id,
                     env=env,
                     learning_rate=hp.get("learning_rate", 3e-4),
                     n_steps=hp.get("n_steps", 2048),
@@ -519,7 +558,7 @@ class TrainingManager:
                     clip_range=hp.get("clip_range", 0.2),
                     ent_coef=hp.get("ent_coef", 0.01),
                     verbose=0,
-                    policy_kwargs={"net_arch": DEFAULT_NET_ARCH},
+                    policy_kwargs=dict(spec.policy_kwargs),
                 )
 
             callbacks = CallbackList([
