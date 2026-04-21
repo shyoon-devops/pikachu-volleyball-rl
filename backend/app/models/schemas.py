@@ -179,6 +179,22 @@ class WsTrainingStartPayload(BaseModel):
     reward_model: Literal["shaped_v1", "sparse_v1", "learned_shaped_v1"] = (
         "shaped_v1"
     )
+    # Policy architecture selector (ADR 0016 — Sprint 3). Mirrors the
+    # reward_model plumbing:
+    #   * ``"mlp_v1"`` (default) — v1.0.0 SB3 ``MlpPolicy``. Every pre-
+    #     Sprint-3 caller stays on this branch so behavior is unchanged.
+    #   * ``"lstm_v1"`` — ``RecurrentPPO`` with an LSTM backbone
+    #     (sb3-contrib). Non-trivial path — AI's ``policy_factory.py``
+    #     dispatches (algo_class, policy_class, policy_kwargs).
+    #   * ``"gru_v1"`` / ``"transformer_v1"`` — reserved. Pydantic
+    #     accepts them so the FE/CI surface is stable, but the trainer
+    #     raises ``NotImplementedError`` at runtime (ADR §8). No cross-
+    #     field constraint with reward_model or algorithm.
+    # Unknown values are rejected by ``Literal`` → the WS layer returns
+    # a payload_invalid failure, the handler never runs.
+    policy_type: Literal[
+        "mlp_v1", "lstm_v1", "gru_v1", "transformer_v1"
+    ] = "mlp_v1"
 
 
 class WsSetLevelPayload(BaseModel):

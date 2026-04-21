@@ -126,6 +126,7 @@ class TrainingRunsService:
         started_at,
         hyperparams: dict[str, Any] | None = None,
         reward_model: str = "shaped_v1",
+        policy_type: str = "mlp_v1",
     ) -> None:
         """Insert a run doc; tolerates a dead Mongo (best-effort).
 
@@ -141,6 +142,13 @@ class TrainingRunsService:
         default ``"shaped_v1"`` matches the migration backfill so a
         legacy run inserted without the arg is indistinguishable from
         a v1.0.0-era run tagged explicitly.
+
+        ``policy_type`` (ADR 0016 — v2 Sprint-3) records the policy
+        architecture for this run (``mlp_v1`` / ``lstm_v1`` / reserved
+        ``gru_v1`` / ``transformer_v1``). Enables the evaluator and
+        LoadedPolicyBot to pick the correct ``PPO.load`` vs
+        ``RecurrentPPO.load`` path later; the run-record write is the
+        source of truth. Default matches the migration backfill.
 
         The in-memory manager remains the source of truth for the live
         run — Mongo is the persistence layer for the history + title
@@ -158,6 +166,7 @@ class TrainingRunsService:
                 "bot_level": int(bot_level),
                 "started_at": started_at,
                 "reward_model": reward_model,
+                "policy_type": policy_type,
             }
             if hyperparams:
                 # Pass through as-is so a new field the caller adds

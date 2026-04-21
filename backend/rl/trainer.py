@@ -119,6 +119,12 @@ class TrainingManager:
         # on the manager so the run-record writer + env factories can
         # both read it without replumbing kwargs everywhere.
         self._reward_model: str = "shaped_v1"
+        # Policy architecture selector (ADR 0016). Default ``mlp_v1``
+        # matches SB3's MlpPolicy which was the v1.0.0 baseline. The
+        # AI Sprint-3 ``policy_factory.py`` consumes this to pick
+        # (algo_class, policy_class, policy_kwargs); the manager just
+        # holds the tag for the run-record writer.
+        self._policy_type: str = "mlp_v1"
         # Human title + its filesystem slug for this run. Both are set
         # by start() before the thread kicks off; callbacks that tag
         # result/frame payloads read them off this object at emit time.
@@ -143,6 +149,7 @@ class TrainingManager:
         training_mode: str = "bot_ladder",
         opponent_provider: Any = None,
         reward_model: str = "shaped_v1",
+        policy_type: str = "mlp_v1",
     ) -> str:
         """Start a new training experiment. Returns experiment_id.
 
@@ -184,6 +191,7 @@ class TrainingManager:
         self._training_mode = training_mode
         self._opponent_provider = opponent_provider
         self._reward_model = reward_model
+        self._policy_type = policy_type
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         # Title + slug set BEFORE the thread starts so the first demo-
         # tick + result-drain both see them. Slug defaults keep legacy
