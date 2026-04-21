@@ -127,6 +127,7 @@ class TrainingRunsService:
         hyperparams: dict[str, Any] | None = None,
         reward_model: str = "shaped_v1",
         policy_type: str = "mlp_v1",
+        algorithm: str = "ppo",
     ) -> None:
         """Insert a run doc; tolerates a dead Mongo (best-effort).
 
@@ -150,6 +151,11 @@ class TrainingRunsService:
         ``RecurrentPPO.load`` path later; the run-record write is the
         source of truth. Default matches the migration backfill.
 
+        ``algorithm`` (ADR 0017 — v2 Sprint-4) records the learner
+        family (``ppo`` / ``sac``). Drives ``PPO.load`` vs ``SAC.load``
+        dispatch symmetrically to ``policy_type``; pre-S4 rows are
+        PPO by construction so the default matches the backfill.
+
         The in-memory manager remains the source of truth for the live
         run — Mongo is the persistence layer for the history + title
         uniqueness lookup. If the insert fails we log and continue; the
@@ -167,6 +173,7 @@ class TrainingRunsService:
                 "started_at": started_at,
                 "reward_model": reward_model,
                 "policy_type": policy_type,
+                "algorithm": algorithm,
             }
             if hyperparams:
                 # Pass through as-is so a new field the caller adds

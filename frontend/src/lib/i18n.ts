@@ -68,6 +68,18 @@ const EN: StringMap = {
   'training.policy_type.chip.lstm_v1': 'lstm',
   'training.policy_type.chip.gru_v1': 'gru',
   'training.policy_type.chip.transformer_v1': 'transformer',
+  // ── Algorithm selector (v2.x Sprint 4, ADR 0017). Same
+  // keyspace shape as reward_model / policy_type — no dedicated
+  // design doc this sprint; ADR §8 specifies the UI is a sibling
+  // segmented control to the S2/S3 selectors.
+  'training.algorithm.label': 'Algorithm',
+  'training.algorithm.options.ppo.label': 'PPO',
+  'training.algorithm.options.ppo.tooltip':
+    'On-policy actor-critic (default). Stable; matches v1–v2 baselines.',
+  'training.algorithm.options.sac.label': 'SAC',
+  'training.algorithm.options.sac.tooltip':
+    'Off-policy actor-critic. Better sample efficiency, higher training cost.',
+  'training.algorithm.recommended_badge': 'Recommended',
 }
 
 /**

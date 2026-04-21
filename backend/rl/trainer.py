@@ -30,6 +30,7 @@ from backend.rl.callbacks import (
 from backend.rl.env import PikachuVolleyballEnv
 from backend.rl.league_callback import LeagueCallback
 from backend.rl.policy_factory import (
+    VALID_ALGORITHMS,
     VALID_POLICY_TYPES,
     make_policy_spec,
 )
@@ -135,6 +136,13 @@ class TrainingManager:
         # RecurrentPPO.load on the stored tag without re-plumbing
         # kwargs; the run-record writer also reads it off the manager.
         self._policy_type: str = "mlp_v1"
+        # Algorithm selector (ADR 0017 Sprint-4). Default ``ppo`` keeps
+        # the v1.0.0 on-policy PPO path unchanged; ``sac`` dispatches
+        # to the vendored SACDiscrete via the ``policy_factory``. The
+        # manager holds the tag so the run-record writer + resume
+        # path can both read it, and checkpoint resume branches on
+        # this tag (SACDiscrete.load vs PPO.load vs RecurrentPPO.load).
+        self._algorithm: str = "ppo"
         # Human title + its filesystem slug for this run. Both are set
         # by start() before the thread kicks off; callbacks that tag
         # result/frame payloads read them off this object at emit time.
@@ -160,6 +168,7 @@ class TrainingManager:
         opponent_provider: Any = None,
         reward_model: str = "shaped_v1",
         policy_type: str = "mlp_v1",
+        algorithm: str = "ppo",
     ) -> str:
         """Start a new training experiment. Returns experiment_id.
 
@@ -210,6 +219,15 @@ class TrainingManager:
                 f"policy_type must be one of {VALID_POLICY_TYPES}, "
                 f"got {policy_type!r}"
             )
+        # Algorithm enum validation (ADR 0017 §3). Same pattern as
+        # policy_type: reserved / unimplemented cells are runtime-
+        # gated inside the factory so the run-record writer still
+        # persists the caller's selection for audit.
+        if algorithm not in VALID_ALGORITHMS:
+            raise ValueError(
+                f"algorithm must be one of {VALID_ALGORITHMS}, "
+                f"got {algorithm!r}"
+            )
 
         self._experiment_id = str(uuid.uuid4())
         self._bot_level = bot_level
@@ -217,6 +235,7 @@ class TrainingManager:
         self._opponent_provider = opponent_provider
         self._reward_model = reward_model
         self._policy_type = policy_type
+        self._algorithm = algorithm
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         # Title + slug set BEFORE the thread starts so the first demo-
         # tick + result-drain both see them. Slug defaults keep legacy
@@ -390,6 +409,14 @@ class TrainingManager:
                 # silently PPO.load-ing an LSTM checkpoint (which
                 # would hit a layer-shape mismatch mid-unpickle).
                 "policy_type": self._policy_type,
+                # ADR 0017 §9 + Sprint-4: resume also needs algorithm
+                # so the factory picks SACDiscrete.load vs PPO.load.
+                # Replay/rollout buffers are not portable across
+                # algorithms — a SAC checkpoint loaded through
+                # PPO.load would deserialize with a different
+                # actor-critic + buffer layout and either fail at
+                # unpickle or corrupt the first training step.
+                "algorithm": self._algorithm,
             }
             meta_path = Path(self.model_dir) / _INTERRUPTED_META_FILENAME
             meta_path.write_text(json.dumps(meta, indent=2))
@@ -439,6 +466,9 @@ class TrainingManager:
         # Default to ``mlp_v1`` for metas written before Sprint 3 — the
         # entire pre-LSTM universe is MLP, so missing key == MLP.
         self._policy_type = meta.get("policy_type", "mlp_v1")
+        # Pre-Sprint-4 metas implicitly mean PPO — every run before
+        # S4 was PPO by construction.
+        self._algorithm = meta.get("algorithm", "ppo")
 
         checkpoint_path = str(
             Path(self.model_dir) / exp_id / "interrupted"
@@ -533,19 +563,57 @@ class TrainingManager:
                 )
 
             hp = self._hyperparams
-            # ADR 0016: policy_factory owns SB3 class + policy-registry
-            # key + LSTM kwargs. Both fresh-start and checkpoint-load
-            # routes dispatch through it — mlp_v1 continues to build
-            # PPO + "MlpPolicy" + net_arch=[256,256] so pre-Sprint-3
-            # runs are bit-identical (parity test anchors this).
-            spec = make_policy_spec(self._policy_type, DEFAULT_NET_ARCH)
+            # ADR 0016 + 0017: policy_factory owns SB3 class + policy-
+            # registry key + per-algo kwargs. mlp_v1/PPO continues to
+            # build PPO + "MlpPolicy" + net_arch=[256,256] so pre-S3
+            # runs stay bit-identical (parity test anchors this).
+            spec = make_policy_spec(
+                self._policy_type, DEFAULT_NET_ARCH, algorithm=self._algorithm
+            )
             if checkpoint_path:
                 self._model = spec.algo_class.load(
                     checkpoint_path,
                     env=env,
                     learning_rate=hp.get("learning_rate", 3e-4),
                 )
+            elif self._algorithm == "sac":
+                # SAC has an entirely different hyperparam surface
+                # (replay buffer, τ, target-entropy) — PPO's n_steps /
+                # gae_lambda / clip_range are meaningless here, so we
+                # don't forward them. Defaults come from
+                # ``SAC_DEFAULT_KWARGS`` (ADR 0017 §5); WS ``hyperparams``
+                # entries can still override the learning rate /
+                # batch-size / buffer-size knobs we expose to the FE.
+                from backend.rl.policy_factory import (
+                    SAC_DEFAULT_KWARGS,  # noqa: PLC0415
+                )
+
+                sac_kwargs = dict(SAC_DEFAULT_KWARGS)
+                # Allow the WS-level hyperparams blob to override the
+                # handful of SAC knobs that are reasonable to surface
+                # (learning rate is shared with PPO; batch/buffer/
+                # learning_starts stay optional).
+                for key in (
+                    "learning_rate",
+                    "batch_size",
+                    "buffer_size",
+                    "learning_starts",
+                    "gamma",
+                    "tau",
+                ):
+                    if key in hp:
+                        sac_kwargs[key] = hp[key]
+                self._model = spec.algo_class(
+                    policy=spec.policy_class_id,
+                    env=env,
+                    verbose=0,
+                    policy_kwargs=dict(spec.policy_kwargs),
+                    **sac_kwargs,
+                )
             else:
+                # PPO / RecurrentPPO construction — UNCHANGED from
+                # pre-S4. Do not refactor; the bit-parity test
+                # (``test_policy_mlp_v1_parity``) anchors this.
                 self._model = spec.algo_class(
                     policy=spec.policy_class_id,
                     env=env,
