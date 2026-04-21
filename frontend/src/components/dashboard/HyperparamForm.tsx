@@ -1,5 +1,5 @@
 import { useMemo, useState, type KeyboardEvent } from 'react'
-import type { Hyperparams, LeagueSampling, PolicyType, RewardModel, TrainingMode } from '../../lib/types'
+import type { Algorithm, Hyperparams, LeagueSampling, PolicyType, RewardModel, TrainingMode } from '../../lib/types'
 import { RESERVED_POLICY_TYPES } from '../../lib/types'
 import {
   HYPERPARAM_SCHEMA,
@@ -65,6 +65,15 @@ interface HyperparamFormProps {
    *  disabled "Coming soon" cells this sprint. */
   policyType: PolicyType
   onPolicyTypeChange: (next: PolicyType) => void
+
+  // ── v2.x Sprint 4 (algorithm selector) ────────────────────────
+  /** RL algorithm for the next training run (ADR 0017). Default
+   *  `ppo` preserves v1.x–v2.3 behaviour; `sac` is the S4 primary
+   *  target. No cross-field gate — ADR 0017 §4 pushes
+   *  `(algorithm, policy_type, reward_model)` validation to the
+   *  trainer's `NotImplementedError` path. */
+  algorithm: Algorithm
+  onAlgorithmChange: (next: Algorithm) => void
 }
 
 /**
@@ -106,6 +115,8 @@ export function HyperparamForm({
   onRewardModelChange,
   policyType,
   onPolicyTypeChange,
+  algorithm,
+  onAlgorithmChange,
 }: HyperparamFormProps) {
   // Advanced group collapsed by default per Designer §2. Basic is
   // always open (no collapse affordance needed).
@@ -161,6 +172,18 @@ export function HyperparamForm({
         onChange={onTitleChange}
         disabled={disabled}
         onValidationChange={onTitleValidationChange}
+      />
+
+      {/*
+        Algorithm selector — v2.x Sprint 4 (ADR 0017 §8). Topmost
+        regime switch because the algorithm choice gates what the
+        other regime selectors mean (SAC replay vs PPO rollouts);
+        reward + policy nest inside the (`algorithm, *, *`) cell.
+      */}
+      <AlgorithmSelector
+        value={algorithm}
+        onChange={onAlgorithmChange}
+        disabled={disabled}
       />
 
       {/*
@@ -750,6 +773,93 @@ function PolicyTypeSelector({ value, onChange, disabled }: PolicyTypeSelectorPro
                   aria-label="coming soon"
                 >
                   {t('training.policy_type.comingsoon_badge')}
+                </span>
+              )}
+              <span id={tipId} className="sr-only">
+                {t(tipKey)}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─── Algorithm selector (v2.x Sprint 4) ─────────────────────────
+//
+// Sibling to the reward_model + policy_type selectors. Same
+// segmented-control primitive (reused CSS classes). Two cells
+// (PPO, SAC) — PPO carries the Recommended badge as the stable
+// baseline; SAC ships in S4 without a "new" badge because ADR
+// §6's success criteria (sample-efficiency + final quality) land
+// first, at which point the spec can flip the default.
+
+interface AlgorithmSelectorProps {
+  value: Algorithm
+  onChange: (next: Algorithm) => void
+  disabled: boolean
+}
+
+const ALGORITHM_OPTIONS: Array<{
+  value: Algorithm
+  badge: 'recommended' | null
+}> = [
+  { value: 'ppo', badge: 'recommended' },
+  { value: 'sac', badge: null },
+]
+
+function AlgorithmSelector({ value, onChange, disabled }: AlgorithmSelectorProps) {
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    const idx = ALGORITHM_OPTIONS.findIndex(o => o.value === value)
+    if (idx < 0) return
+    const delta = e.key === 'ArrowLeft' ? -1 : 1
+    const next = ALGORITHM_OPTIONS[(idx + delta + ALGORITHM_OPTIONS.length) % ALGORITHM_OPTIONS.length]
+    e.preventDefault()
+    if (!disabled) onChange(next.value)
+  }
+
+  return (
+    <div
+      className="reward-model-selector algorithm-selector"
+      role="group"
+      aria-labelledby="algorithm-label"
+    >
+      <span id="algorithm-label" className="reward-model-label">
+        {t('training.algorithm.label')}
+      </span>
+      <div
+        className="reward-model-segmented"
+        role="radiogroup"
+        aria-labelledby="algorithm-label"
+        onKeyDown={onKeyDown}
+      >
+        {ALGORITHM_OPTIONS.map(opt => {
+          const active = opt.value === value
+          const labelKey = `training.algorithm.options.${opt.value}.label`
+          const tipKey = `training.algorithm.options.${opt.value}.tooltip`
+          const tipId = `algorithm-tip-${opt.value}`
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-describedby={tipId}
+              tabIndex={active ? 0 : -1}
+              disabled={disabled}
+              onClick={() => onChange(opt.value)}
+              title={t(tipKey)}
+              className={`reward-model-option${active ? ' reward-model-option--active' : ''}`}
+            >
+              <span className="reward-model-option-label">{t(labelKey)}</span>
+              {opt.badge === 'recommended' && (
+                <span
+                  className="reward-model-badge reward-model-badge--recommended"
+                  aria-label="recommended"
+                >
+                  {t('training.algorithm.recommended_badge')}
                 </span>
               )}
               <span id={tipId} className="sr-only">

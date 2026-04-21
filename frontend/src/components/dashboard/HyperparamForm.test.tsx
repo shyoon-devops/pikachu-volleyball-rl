@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { HyperparamForm } from './HyperparamForm'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
-import type { LeagueSampling, PolicyType, RewardModel, TrainingMode } from '../../lib/types'
+import type { Algorithm, LeagueSampling, PolicyType, RewardModel, TrainingMode } from '../../lib/types'
 
 // getTrainingTitles is mocked so TitleInput's debounced dup-check
 // doesn't fire real network during tests (jsdom's fetch is a stub).
@@ -18,6 +18,7 @@ function renderForm(overrides: {
   leaguePoolSize?: number | null
   rewardModel?: RewardModel
   policyType?: PolicyType
+  algorithm?: Algorithm
 } = {}) {
   const onParamsChange = vi.fn()
   const onTitleChange = vi.fn()
@@ -26,6 +27,7 @@ function renderForm(overrides: {
   const onSamplingStrategyChange = vi.fn()
   const onRewardModelChange = vi.fn()
   const onPolicyTypeChange = vi.fn()
+  const onAlgorithmChange = vi.fn()
 
   render(
     <HyperparamForm
@@ -44,6 +46,8 @@ function renderForm(overrides: {
       onRewardModelChange={onRewardModelChange}
       policyType={overrides.policyType ?? 'mlp_v1'}
       onPolicyTypeChange={onPolicyTypeChange}
+      algorithm={overrides.algorithm ?? 'ppo'}
+      onAlgorithmChange={onAlgorithmChange}
     />,
   )
 
@@ -55,6 +59,7 @@ function renderForm(overrides: {
     onSamplingStrategyChange,
     onRewardModelChange,
     onPolicyTypeChange,
+    onAlgorithmChange,
   }
 }
 
@@ -189,6 +194,8 @@ describe('HyperparamForm', () => {
         onRewardModelChange={vi.fn()}
         policyType="mlp_v1"
         onPolicyTypeChange={vi.fn()}
+        algorithm="ppo"
+        onAlgorithmChange={vi.fn()}
       />,
     )
     const input = byLabelPrefix('n_envs')
@@ -216,6 +223,8 @@ describe('HyperparamForm', () => {
         onRewardModelChange={vi.fn()}
         policyType="mlp_v1"
         onPolicyTypeChange={vi.fn()}
+        algorithm="ppo"
+        onAlgorithmChange={vi.fn()}
       />,
     )
     // Basic reset button lives alongside its "BASIC" heading.
@@ -366,6 +375,48 @@ describe('HyperparamForm — Policy-type selector (v2.x Sprint 3)', () => {
       screen.getByRole('radio', { name: /^Transformer/ }),
     ]
     for (const r of policyRadios) {
+      expect((r as HTMLButtonElement).disabled).toBe(true)
+    }
+  })
+})
+
+// v2.x Sprint 4 — Algorithm selector (ADR 0017 §8).
+describe('HyperparamForm — Algorithm selector (v2.x Sprint 4)', () => {
+  it('renders the two algorithm options with PPO as the default', () => {
+    renderForm()
+    const ppo = screen.getByRole('radio', { name: /^PPO/ })
+    const sac = screen.getByRole('radio', { name: /^SAC/ })
+    expect(ppo).toBeInTheDocument()
+    expect(sac).toBeInTheDocument()
+    expect(ppo.getAttribute('aria-checked')).toBe('true')
+    expect(sac.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('clicking SAC fires onAlgorithmChange("sac")', () => {
+    const { onAlgorithmChange } = renderForm()
+    fireEvent.click(screen.getByRole('radio', { name: /^SAC/ }))
+    expect(onAlgorithmChange).toHaveBeenCalledWith('sac')
+  })
+
+  it('reflects the controlled value — sac as checked', () => {
+    renderForm({ algorithm: 'sac' })
+    expect(screen.getByRole('radio', { name: /^SAC/ }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('radio', { name: /^PPO/ }).getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('surfaces the SAC tooltip via the title attribute', () => {
+    renderForm()
+    const sac = screen.getByRole('radio', { name: /^SAC/ })
+    expect(sac.getAttribute('title')).toMatch(/sample efficiency/i)
+  })
+
+  it('disables every algorithm option when the form is disabled', () => {
+    renderForm({ disabled: true })
+    const radios = [
+      screen.getByRole('radio', { name: /^PPO/ }),
+      screen.getByRole('radio', { name: /^SAC/ }),
+    ]
+    for (const r of radios) {
       expect((r as HTMLButtonElement).disabled).toBe(true)
     }
   })

@@ -24,6 +24,7 @@ import type {
   Hyperparams,
   LeagueSampling,
   LeagueUpdatePayload,
+  Algorithm,
   PolicyType,
   RewardModel,
   TrainingMode,
@@ -97,6 +98,7 @@ export function Dashboard() {
   // stable across bot_ladder / self_play / reward-model switches.
   const [rewardModel, setRewardModel] = useState<RewardModel>('shaped_v1')
   const [policyType, setPolicyType] = useState<PolicyType>('mlp_v1')
+  const [algorithm, setAlgorithm] = useState<Algorithm>('ppo')
 
   /**
    * Fetch the current league standings once on mount + after every
@@ -273,6 +275,11 @@ export function Dashboard() {
       // handler boundary — the selector disables them, so the only
       // way a reserved value lands here is a programmatic mutation.
       policy_type: policyType,
+      // v2.x Sprint 4 (ADR 0017): RL algorithm. PPO default; SAC
+      // is runtime-gated for reserved `(sac, lstm_v1, *)` and
+      // `(sac, gru_v1|transformer_v1, *)` triples via the trainer's
+      // NotImplementedError — FE does not pre-gate per ADR §4.
+      algorithm: algorithm,
     })
   }
 
@@ -421,6 +428,8 @@ export function Dashboard() {
             onRewardModelChange={setRewardModel}
             policyType={policyType}
             onPolicyTypeChange={setPolicyType}
+            algorithm={algorithm}
+            onAlgorithmChange={setAlgorithm}
           />
         )}
       </section>

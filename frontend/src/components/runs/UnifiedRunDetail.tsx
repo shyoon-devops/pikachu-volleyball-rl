@@ -173,6 +173,15 @@ export function UnifiedRunDetail() {
                       : '—'}
                   </dd>
                 </div>
+                {/* Algorithm — full label (v2.x Sprint 4, ADR 0017
+                    §8 — HyperparamsSummary gains an Algorithm row;
+                    drill-down mirrors the same visual treatment). */}
+                <div className="unified-run-overview-meta-item">
+                  <dt>Algorithm</dt>
+                  <dd className="text-mono">
+                    {(run?.algorithm ?? 'ppo').toUpperCase()}
+                  </dd>
+                </div>
                 {/* Reward-model regime — full label, no chip styling
                     (DESIGN-REWARD-MODEL-SELECTOR.md §4). */}
                 <div className="unified-run-overview-meta-item">

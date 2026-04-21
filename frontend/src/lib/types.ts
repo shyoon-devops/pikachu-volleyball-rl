@@ -353,6 +353,14 @@ export interface TrainingRun {
    * back to the `mlp_v1` display default at the component layer.
    */
   policyType?: PolicyType | null
+  /**
+   * RL algorithm the run was launched with (v2.x Sprint 4,
+   * ADR 0017). BE decorates every `/api/training/runs` row via
+   * the ADR-§9 one-shot Mongo backfill (`algorithm = "ppo"` for
+   * pre-S4 rows). `parseAlgorithm` gates the value; unknowns
+   * collapse to the `ppo` display default.
+   */
+  algorithm?: Algorithm | null
 }
 
 export interface EvalResult {
@@ -587,6 +595,29 @@ export const RESERVED_POLICY_TYPES = ['gru_v1', 'transformer_v1'] as const satis
 export function parsePolicyType(v: unknown): PolicyType | null {
   return typeof v === 'string' && (POLICY_TYPES as readonly string[]).includes(v)
     ? (v as PolicyType)
+    : null
+}
+
+/**
+ * RL algorithm the trainer instantiates (v2.x Sprint 4,
+ * ADR 0017 / `docs/adr/0017-sac-continuous-actor-critic.md`).
+ *
+ * `ppo` ships today (on-policy baseline). `sac × mlp_v1` is the
+ * S4 primary target (off-policy actor-critic, sample-efficiency
+ * win per ADR §6); `sac × lstm_v1` is runtime-gated by the
+ * trainer (no RecurrentSAC in sb3-contrib yet). No cross-field
+ * WS constraint — FE must not gate (ADR §4).
+ */
+export type Algorithm = 'ppo' | 'sac'
+
+/** All algorithm values in canonical display order (PPO → SAC). */
+export const ALGORITHMS = ['ppo', 'sac'] as const satisfies readonly Algorithm[]
+
+/** Runtime guard — unknown strings return `null`. Callers that
+ *  need the spec default should coalesce with `'ppo'`. */
+export function parseAlgorithm(v: unknown): Algorithm | null {
+  return typeof v === 'string' && (ALGORITHMS as readonly string[]).includes(v)
+    ? (v as Algorithm)
     : null
 }
 
