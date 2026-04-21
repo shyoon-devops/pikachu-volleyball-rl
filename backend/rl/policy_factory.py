@@ -48,6 +48,33 @@ LSTM_POLICY_KWARGS: dict[str, Any] = {
     "enable_critic_lstm": True,
 }
 
+# ADR 0017 §3: second boundary axis added in Sprint 4. ``ppo`` is
+# the default so every pre-S4 callsite (including the trainer + S3
+# parity tests) keeps its bit-identical PPO construction — the S4
+# factory change is purely additive.
+VALID_ALGORITHMS: tuple[str, ...] = ("ppo", "sac")
+IMPLEMENTED_ALGORITHMS: tuple[str, ...] = ("ppo", "sac")
+
+# ADR 0017 §5: SAC-Discrete defaults. Not WS-surfaced. Aligned with
+# the Christodoulou 2019 implementation conventions + SB3 SAC
+# hyperparam naming so readers recognise them. Buffer size kept at
+# the SB3 default (1M) — smaller values trade off sample reuse for
+# memory; we'd rather page-swap than silently collapse to a few
+# thousand steps.
+SAC_DEFAULT_KWARGS: dict[str, Any] = {
+    "learning_rate": 3e-4,
+    "buffer_size": 1_000_000,
+    "learning_starts": 10_000,
+    "batch_size": 256,
+    "tau": 0.005,
+    "gamma": 0.99,
+    "train_freq": 1,
+    "gradient_steps": 1,
+    "ent_coef": "auto",
+    "target_update_interval": 1,
+    "target_entropy": "auto",
+}
+
 
 @dataclass(frozen=True)
 class PolicySpec:
@@ -72,31 +99,55 @@ class PolicySpec:
     policy_kwargs: dict[str, Any]
 
 
-def make_policy_spec(policy_type: str, net_arch: list[int]) -> PolicySpec:
-    """Return the SB3 construction triple for a given ``policy_type``.
+def make_policy_spec(
+    policy_type: str,
+    net_arch: list[int],
+    *,
+    algorithm: str = "ppo",
+) -> PolicySpec:
+    """Return the SB3 construction triple for a given
+    ``(algorithm, policy_type)`` pair.
+
+    ``algorithm`` is keyword-only with an ``"ppo"`` default so every
+    pre-S4 callsite (trainer, S3 tests) keeps its bit-identical PPO
+    construction path — ADR 0017's S4 extension is additive.
 
     Parameters
     ----------
     policy_type:
-        One of :data:`VALID_POLICY_TYPES`. Unknown values raise
-        ``AssertionError`` because the WS validator and env constructor
-        are the boundary guardrails — reaching this function with an
-        unknown value means a caller bypassed them and we want the
-        loudest possible failure.
+        One of :data:`VALID_POLICY_TYPES`. Unknown → ``AssertionError``;
+        the WS validator + env constructor are the primary guardrails,
+        this assertion is the last-resort "caller bypassed us" signal.
     net_arch:
         Shared actor/critic hidden-layer sizes. Forwarded as
         ``policy_kwargs={"net_arch": net_arch, ...}``.
+    algorithm:
+        One of :data:`VALID_ALGORITHMS` (ADR 0017 §3). Unknown →
+        ``AssertionError``. Current implementation matrix:
+
+        * ``ppo × mlp_v1``   — SB3 PPO + ``"MlpPolicy"`` (S1/S2 default).
+        * ``ppo × lstm_v1``  — sb3-contrib RecurrentPPO + ``"MlpLstmPolicy"``
+          (ADR 0016).
+        * ``sac × mlp_v1``   — vendored :class:`SACDiscrete` +
+          ``"MlpPolicy"`` (ADR 0017 §7).
+        * ``sac × lstm_v1``  — **not implemented**. SB3 has no
+          ``RecurrentSAC``; sb3-contrib has no recurrent off-policy
+          algorithm. Deferred to S5 per ADR 0017 §4.
+        * Any ``algorithm × {gru_v1, transformer_v1}`` — inherits
+          ADR 0016's reserved-value gate (``NotImplementedError``).
 
     Raises
     ------
     AssertionError
-        ``policy_type`` is not in :data:`VALID_POLICY_TYPES`.
+        Either axis is outside its enum.
     NotImplementedError
-        ``policy_type`` is a reserved value (``gru_v1`` /
-        ``transformer_v1``) — these ship in a later sprint.
+        The ``(algorithm, policy_type)`` cell is reserved / deferred.
     """
     assert policy_type in VALID_POLICY_TYPES, (
         f"policy_type must be one of {VALID_POLICY_TYPES}, got {policy_type!r}"
+    )
+    assert algorithm in VALID_ALGORITHMS, (
+        f"algorithm must be one of {VALID_ALGORITHMS}, got {algorithm!r}"
     )
     if policy_type not in IMPLEMENTED_POLICY_TYPES:
         raise NotImplementedError(
@@ -107,7 +158,7 @@ def make_policy_spec(policy_type: str, net_arch: list[int]) -> PolicySpec:
     # Import lazily so modules that only need the enum constants
     # (schema validators, run-record writers) don't pay the SB3 /
     # sb3-contrib import cost at module-load time.
-    if policy_type == "mlp_v1":
+    if algorithm == "ppo" and policy_type == "mlp_v1":
         from stable_baselines3 import PPO  # noqa: PLC0415
 
         return PolicySpec(
@@ -116,15 +167,39 @@ def make_policy_spec(policy_type: str, net_arch: list[int]) -> PolicySpec:
             policy_kwargs={"net_arch": list(net_arch)},
         )
 
-    # lstm_v1: sb3-contrib RecurrentPPO. The registry key
-    # "MlpLstmPolicy" resolves to RecurrentActorCriticPolicy at
-    # construction time — we do NOT import the concrete class here
-    # because its import path varies across sb3-contrib releases and
-    # the string form is the stable public contract.
-    from sb3_contrib import RecurrentPPO  # noqa: PLC0415
+    if algorithm == "ppo" and policy_type == "lstm_v1":
+        # sb3-contrib RecurrentPPO. Registry key "MlpLstmPolicy"
+        # resolves to RecurrentActorCriticPolicy at construction —
+        # we do NOT import the concrete class here because its path
+        # varies across sb3-contrib releases; the string form is the
+        # stable public contract.
+        from sb3_contrib import RecurrentPPO  # noqa: PLC0415
 
-    return PolicySpec(
-        algo_class=RecurrentPPO,
-        policy_class_id="MlpLstmPolicy",
-        policy_kwargs={"net_arch": list(net_arch), **LSTM_POLICY_KWARGS},
+        return PolicySpec(
+            algo_class=RecurrentPPO,
+            policy_class_id="MlpLstmPolicy",
+            policy_kwargs={"net_arch": list(net_arch), **LSTM_POLICY_KWARGS},
+        )
+
+    if algorithm == "sac" and policy_type == "mlp_v1":
+        # Vendored SAC-Discrete (ADR 0017 §2/§7). sb3-contrib 2.8.0
+        # does NOT ship SAC-Discrete — we own ``backend/rl/sac_discrete.py``
+        # rather than pull a third-party package, which would lock
+        # us to someone else's release cadence.
+        from backend.rl.sac_discrete import SACDiscrete  # noqa: PLC0415
+
+        return PolicySpec(
+            algo_class=SACDiscrete,
+            policy_class_id="MlpPolicy",
+            policy_kwargs={"net_arch": list(net_arch)},
+        )
+
+    # Remaining cell is sac × lstm_v1 — ADR 0017 §4 explicitly
+    # defers it to S5 (no RecurrentSAC in SB3 or sb3-contrib).
+    # Raise with the pair so the FE/test surface gets a clear
+    # "why this combination" message.
+    raise NotImplementedError(
+        f"algorithm={algorithm!r} × policy_type={policy_type!r} is "
+        f"not implemented in v2.x (ADR 0017 §4). A GRU-head SAC "
+        f"variant is deferred to Sprint 5."
     )

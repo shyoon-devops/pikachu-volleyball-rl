@@ -90,6 +90,7 @@ class LoadedPolicyBot:
         rating: float = 1000.0,
         policy_loader: Callable[[str | Path], _PolicyLike] | None = None,
         policy_type: str = "mlp_v1",
+        algorithm: str = "ppo",
     ) -> None:
         self.model_path: Path = Path(model_path)
         self.checkpoint_id: str = str(checkpoint_id)
@@ -102,6 +103,10 @@ class LoadedPolicyBot:
         # field. Pre-Sprint-3 checkpoints backfill to ``"mlp_v1"`` at
         # the repository layer (see §9 migration).
         self.policy_type: str = str(policy_type)
+        # ADR 0017: algorithm axis. Pre-S4 checkpoints backfill to
+        # ``"ppo"``; SAC checkpoints dispatch to ``SACDiscrete.load``
+        # instead (replay buffers are not cross-portable, see §9).
+        self.algorithm: str = str(algorithm)
         self._policy: _PolicyLike | None = None
         self._policy_loader = policy_loader
         # Ball-trajectory delta observation expects the previous frame's
@@ -133,11 +138,21 @@ class LoadedPolicyBot:
         # Default: real SB3 load. Imported lazily so modules that just
         # want the mirroring helpers (or tests using a stub loader)
         # don't pay the SB3 import cost.
-        if self.policy_type == "lstm_v1":
-            # ADR 0016 §3: cross-arch load is blocked — PPO.load on an
-            # LSTM checkpoint fails at layer-shape mismatch, and vice
-            # versa. The repository backfill stamps policy_type on
-            # every pool entry so this branch is always correct.
+        #
+        # ADR 0016 + 0017: cross-arch + cross-algo load is blocked.
+        # Loading a PPO checkpoint as Recurrent/SAC (or vice versa)
+        # hits a layer-shape or buffer-format mismatch at unpickle.
+        # The repository backfill stamps (algorithm, policy_type) on
+        # every pool entry so dispatch is always correct.
+        if self.algorithm == "sac":
+            # SAC-Discrete has no recurrent variant (ADR 0017 §4),
+            # so policy_type is ignored on this branch — any SAC
+            # checkpoint loads via SACDiscrete regardless of the
+            # stored policy_type tag.
+            from backend.rl.sac_discrete import SACDiscrete  # noqa: PLC0415
+
+            self._policy = SACDiscrete.load(str(self.model_path))
+        elif self.policy_type == "lstm_v1":
             from sb3_contrib import RecurrentPPO  # noqa: PLC0415
 
             self._policy = RecurrentPPO.load(str(self.model_path))
