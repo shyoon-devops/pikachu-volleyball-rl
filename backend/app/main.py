@@ -28,7 +28,10 @@ from backend.app.services.eval_service import EvalServiceWrapper
 from backend.app.services.game_service import GameService
 from backend.app.services.indexes import ensure_indexes
 from backend.app.services.metrics_service import MetricsService
-from backend.app.services.migrations import backfill_training_runs_reward_model
+from backend.app.services.migrations import (
+    backfill_training_runs_policy_type,
+    backfill_training_runs_reward_model,
+)
 from backend.app.services.replay_service import ReplayService
 from backend.app.services.title_service import TrainingRunsService
 from backend.app.services.training_service import TrainingServiceWrapper
@@ -74,6 +77,13 @@ async def lifespan(app: FastAPI):
         await backfill_training_runs_reward_model(db)
     except Exception:  # noqa: BLE001 — logged; app continues
         logger.exception("backfill_training_runs_reward_model failed at startup")
+
+    # Sprint-3 companion: backfill policy_type (ADR 0016). Same
+    # $exists:False idempotence pattern so a redeploy is always safe.
+    try:
+        await backfill_training_runs_policy_type(db)
+    except Exception:  # noqa: BLE001 — logged; app continues
+        logger.exception("backfill_training_runs_policy_type failed at startup")
 
     app.state.mongo_client = client
     app.state.db = db

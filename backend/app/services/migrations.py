@@ -56,4 +56,41 @@ async def backfill_training_runs_reward_model(
     return count
 
 
-__all__ = ["backfill_training_runs_reward_model"]
+async def backfill_training_runs_policy_type(
+    db: AsyncIOMotorDatabase | None,
+) -> int:
+    """Backfill ``policy_type="mlp_v1"`` onto pre-Sprint-3 run docs.
+
+    ADR 0016 §9 mirror of the reward_model migration. Every pre-
+    Sprint-3 run used SB3's ``MlpPolicy`` so the backfill value is the
+    empirically-correct tag, not a stand-in. Matches
+    ``TrainingRunsService.register``'s default so a row backfilled here
+    is indistinguishable from a fresh Sprint-3 run that omitted the
+    kwarg.
+
+    Idempotent via the ``$exists: False`` filter; safe to invoke on
+    every app start. Mongo-less deployments no-op.
+    """
+    if db is None:
+        return 0
+    try:
+        result: Any = await db["training_runs"].update_many(
+            {"policy_type": {"$exists": False}},
+            {"$set": {"policy_type": "mlp_v1"}},
+        )
+    except Exception:  # noqa: BLE001 — non-fatal; startup continues
+        logger.exception("backfill_training_runs_policy_type failed")
+        return 0
+    count = int(getattr(result, "modified_count", 0) or 0)
+    if count:
+        logger.info(
+            "backfill_training_runs_policy_type: set mlp_v1 on %d docs",
+            count,
+        )
+    return count
+
+
+__all__ = [
+    "backfill_training_runs_reward_model",
+    "backfill_training_runs_policy_type",
+]
