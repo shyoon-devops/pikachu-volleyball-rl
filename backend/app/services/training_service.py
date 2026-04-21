@@ -24,6 +24,7 @@ class TrainingServiceWrapper:
         training_mode: str = "bot_ladder",
         opponent_provider: Any = None,
         reward_model: str = "shaped_v1",
+        policy_type: str = "mlp_v1",
     ) -> str:
         """Start a new training run.
 
@@ -52,6 +53,14 @@ class TrainingServiceWrapper:
         caller that omits it. The manager forwards to PikaEnv's
         constructor where the reward branching lives (AI Sprint-2
         scope); the BE contract is the pass-through.
+
+        ``policy_type`` (v2 Sprint-3, ADR 0016): selects the policy
+        architecture (``mlp_v1`` / ``lstm_v1`` / reserved
+        ``gru_v1`` / ``transformer_v1``). Default keeps v1.0.0's
+        ``MlpPolicy`` branch. AI's ``policy_factory.py`` consumes the
+        field in the trainer to dispatch ``(algo_class, policy_class,
+        policy_kwargs)``; the BE contract is the pass-through + run-
+        record tag.
         """
         return await self.manager.start(
             hyperparams=hyperparams,
@@ -63,6 +72,7 @@ class TrainingServiceWrapper:
             training_mode=training_mode,
             opponent_provider=opponent_provider,
             reward_model=reward_model,
+            policy_type=policy_type,
         )
 
     async def stop(self, *, force: bool = True) -> dict[str, Any]:

@@ -5,6 +5,7 @@ import { ScoreCell } from '../shared/ScoreCell'
 import { TimestampText } from '../shared/TimestampText'
 import { OpponentChip } from '../shared/OpponentChip'
 import { RewardModelChip } from '../shared/RewardModelChip'
+import { PolicyTypeChip } from '../shared/PolicyTypeChip'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { BatchTabBar } from '../game/BatchTabBar'
@@ -23,6 +24,7 @@ import type {
   Hyperparams,
   LeagueSampling,
   LeagueUpdatePayload,
+  PolicyType,
   RewardModel,
   TrainingMode,
 } from '../../lib/types'
@@ -94,6 +96,7 @@ export function Dashboard() {
   // We still spread the key on `training:start` so payload shape is
   // stable across bot_ladder / self_play / reward-model switches.
   const [rewardModel, setRewardModel] = useState<RewardModel>('shaped_v1')
+  const [policyType, setPolicyType] = useState<PolicyType>('mlp_v1')
 
   /**
    * Fetch the current league standings once on mount + after every
@@ -265,6 +268,11 @@ export function Dashboard() {
       // for payload-shape stability; BE Pydantic validates the
       // literal and rejects unknown values at the handler boundary.
       reward_model: rewardModel,
+      // v2.x Sprint 3 (ADR 0016): policy architecture. BE Pydantic
+      // rejects reserved values (`gru_v1`, `transformer_v1`) at the
+      // handler boundary — the selector disables them, so the only
+      // way a reserved value lands here is a programmatic mutation.
+      policy_type: policyType,
     })
   }
 
@@ -411,6 +419,8 @@ export function Dashboard() {
             leaguePoolSize={leaguePoolSize}
             rewardModel={rewardModel}
             onRewardModelChange={setRewardModel}
+            policyType={policyType}
+            onPolicyTypeChange={setPolicyType}
           />
         )}
       </section>
@@ -515,6 +525,11 @@ const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecor
         {/* Reward-model chip — 8 px gap, right of title (spec §4). */}
         <span className="recent-games-reward-chip">
           <RewardModelChip value={g.rewardModel} />
+        </span>
+        {/* Policy-type chip — 4 px gap, right of reward chip
+            (DESIGN-POLICY-TYPE-SELECTOR.md §4). */}
+        <span className="recent-games-policy-chip">
+          <PolicyTypeChip value={g.policyType} />
         </span>
       </td>
       <td>

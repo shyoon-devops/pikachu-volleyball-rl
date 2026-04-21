@@ -1,5 +1,6 @@
 import { useMemo, useState, type KeyboardEvent } from 'react'
-import type { Hyperparams, LeagueSampling, RewardModel, TrainingMode } from '../../lib/types'
+import type { Hyperparams, LeagueSampling, PolicyType, RewardModel, TrainingMode } from '../../lib/types'
+import { RESERVED_POLICY_TYPES } from '../../lib/types'
 import {
   HYPERPARAM_SCHEMA,
   type HyperparamFieldSchema,
@@ -56,6 +57,14 @@ interface HyperparamFormProps {
    *  preserves v1.0.0 behaviour. */
   rewardModel: RewardModel
   onRewardModelChange: (next: RewardModel) => void
+
+  // ── v2.x Sprint 3 (policy type selector) ──────────────────────
+  /** Policy architecture for the next training run (ADR 0016,
+   *  DESIGN-POLICY-TYPE-SELECTOR.md). Default `mlp_v1` preserves
+   *  v1.x / v2.0 behaviour; `gru_v1` + `transformer_v1` render as
+   *  disabled "Coming soon" cells this sprint. */
+  policyType: PolicyType
+  onPolicyTypeChange: (next: PolicyType) => void
 }
 
 /**
@@ -95,6 +104,8 @@ export function HyperparamForm({
   leaguePoolSize,
   rewardModel,
   onRewardModelChange,
+  policyType,
+  onPolicyTypeChange,
 }: HyperparamFormProps) {
   // Advanced group collapsed by default per Designer §2. Basic is
   // always open (no collapse affordance needed).
@@ -162,6 +173,18 @@ export function HyperparamForm({
       <RewardModelSelector
         value={rewardModel}
         onChange={onRewardModelChange}
+        disabled={disabled}
+      />
+
+      {/*
+        Policy-type selector — v2.x Sprint 3 (ADR 0016, Designer
+        spec docs/design/DESIGN-POLICY-TYPE-SELECTOR.md §1). Sits
+        directly below the reward selector so the two regime
+        switches stack as one "what × how" decision block.
+      */}
+      <PolicyTypeSelector
+        value={policyType}
+        onChange={onPolicyTypeChange}
         disabled={disabled}
       />
 
@@ -611,6 +634,122 @@ function RewardModelSelector({ value, onChange, disabled }: RewardModelSelectorP
                 >
                   <span aria-hidden="true" className="reward-model-badge-glyph">⚠</span>
                   {t('training.reward_model.experimental_badge')}
+                </span>
+              )}
+              <span id={tipId} className="sr-only">
+                {t(tipKey)}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ─── Policy-type selector (v2.x Sprint 3) ───────────────────────
+//
+// Same primitive as the reward selector: segmented control with
+// per-cell tooltip + badge, keyboard nav, full form-wide disable.
+// Two of the four cells (`gru_v1`, `transformer_v1`) are reserved
+// by ADR 0016 — they render as disabled "Coming soon" cells and
+// the keyboard handler skips past them so the user never lands on
+// an un-selectable value.
+
+interface PolicyTypeSelectorProps {
+  value: PolicyType
+  onChange: (next: PolicyType) => void
+  disabled: boolean
+}
+
+const POLICY_OPTIONS: Array<{
+  value: PolicyType
+  badge: 'recommended' | 'comingsoon' | null
+}> = [
+  { value: 'mlp_v1',         badge: 'recommended' },
+  { value: 'lstm_v1',        badge: null },
+  { value: 'gru_v1',         badge: 'comingsoon' },
+  { value: 'transformer_v1', badge: 'comingsoon' },
+]
+
+const RESERVED_POLICY_SET = new Set<PolicyType>(RESERVED_POLICY_TYPES)
+
+function PolicyTypeSelector({ value, onChange, disabled }: PolicyTypeSelectorProps) {
+  // Keyboard handler mirrors the reward selector but skips over
+  // reserved cells — stopping on a disabled option would leave the
+  // user with no visible focus target for the selectable values.
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    const idx = POLICY_OPTIONS.findIndex(o => o.value === value)
+    if (idx < 0) return
+    const delta = e.key === 'ArrowLeft' ? -1 : 1
+    // Walk until we land on a non-reserved option (guaranteed to
+    // terminate because `mlp_v1` and `lstm_v1` are always enabled).
+    let nextIdx = idx
+    for (let i = 0; i < POLICY_OPTIONS.length; i++) {
+      nextIdx = (nextIdx + delta + POLICY_OPTIONS.length) % POLICY_OPTIONS.length
+      if (!RESERVED_POLICY_SET.has(POLICY_OPTIONS[nextIdx].value)) break
+    }
+    e.preventDefault()
+    if (!disabled) onChange(POLICY_OPTIONS[nextIdx].value)
+  }
+
+  return (
+    <div
+      className="reward-model-selector policy-type-selector"
+      role="group"
+      aria-labelledby="policy-type-label"
+    >
+      <span id="policy-type-label" className="reward-model-label">
+        {t('training.policy_type.label')}
+      </span>
+      <div
+        className="reward-model-segmented policy-type-segmented"
+        role="radiogroup"
+        aria-labelledby="policy-type-label"
+        onKeyDown={onKeyDown}
+      >
+        {POLICY_OPTIONS.map(opt => {
+          const active = opt.value === value
+          const reserved = RESERVED_POLICY_SET.has(opt.value)
+          const cellDisabled = disabled || reserved
+          const labelKey = `training.policy_type.options.${opt.value}.label`
+          const tipKey = `training.policy_type.options.${opt.value}.tooltip`
+          const tipId = `policy-type-tip-${opt.value}`
+          const classes = [
+            'reward-model-option',
+            'policy-type-option',
+            active ? 'reward-model-option--active' : '',
+            reserved ? 'policy-type-option--reserved' : '',
+          ].filter(Boolean).join(' ')
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-describedby={tipId}
+              tabIndex={active ? 0 : -1}
+              disabled={cellDisabled}
+              onClick={() => { if (!cellDisabled) onChange(opt.value) }}
+              title={t(tipKey)}
+              className={classes}
+            >
+              <span className="reward-model-option-label">{t(labelKey)}</span>
+              {opt.badge === 'recommended' && (
+                <span
+                  className="reward-model-badge reward-model-badge--recommended"
+                  aria-label="recommended"
+                >
+                  {t('training.policy_type.recommended_badge')}
+                </span>
+              )}
+              {opt.badge === 'comingsoon' && (
+                <span
+                  className="reward-model-badge policy-type-badge--comingsoon"
+                  aria-label="coming soon"
+                >
+                  {t('training.policy_type.comingsoon_badge')}
                 </span>
               )}
               <span id={tipId} className="sr-only">

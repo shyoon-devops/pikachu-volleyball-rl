@@ -36,15 +36,19 @@ from backend.rl.env import ACTION_MAP
 
 
 class _PolicyLike(Protocol):
-    """Subset of ``stable_baselines3.PPO`` we actually call.
+    """Subset of SB3's model surface we actually call.
 
-    Kept as a Protocol so tests can inject a simple callable-wrapped
-    stub (returning (action, state)) without touching SB3.
+    Both PPO (mlp_v1) and RecurrentPPO (lstm_v1) satisfy this — PPO
+    ignores ``state`` / ``episode_start`` and just returns ``(action,
+    None)``, RecurrentPPO threads state through. Tests can inject a
+    plain callable-wrapped stub that returns ``(action, state)``.
     """
 
     def predict(
         self,
         observation: np.ndarray,
+        state: Any = None,
+        episode_start: Any = None,
         *,
         deterministic: bool = True,
     ) -> tuple[np.ndarray, Any]: ...
@@ -85,6 +89,7 @@ class LoadedPolicyBot:
         deterministic: bool = True,
         rating: float = 1000.0,
         policy_loader: Callable[[str | Path], _PolicyLike] | None = None,
+        policy_type: str = "mlp_v1",
     ) -> None:
         self.model_path: Path = Path(model_path)
         self.checkpoint_id: str = str(checkpoint_id)
@@ -93,6 +98,10 @@ class LoadedPolicyBot:
         self.id: str = self.checkpoint_id
         self.deterministic: bool = bool(deterministic)
         self.rating: float = float(rating)
+        # ADR 0016: dispatch PPO.load vs RecurrentPPO.load on this
+        # field. Pre-Sprint-3 checkpoints backfill to ``"mlp_v1"`` at
+        # the repository layer (see §9 migration).
+        self.policy_type: str = str(policy_type)
         self._policy: _PolicyLike | None = None
         self._policy_loader = policy_loader
         # Ball-trajectory delta observation expects the previous frame's
@@ -101,6 +110,16 @@ class LoadedPolicyBot:
         # ours).
         self._prev_ball_x: float = float(GROUND_WIDTH) / 2.0
         self._prev_ball_y: float = 0.0
+        # LSTM recurrent state (hidden, cell) tuple, threaded across
+        # ``predict`` calls within a single match. ``None`` means "new
+        # episode / first call" — SB3's RecurrentPPO.predict treats
+        # that as a hidden-state reset. For mlp_v1 the policy ignores
+        # this slot entirely, so the extra attribute is cheap.
+        self._lstm_state: Any = None
+        # Set on the first predict() after a reset so sb3-contrib's
+        # predict() routes through its episode-start branch exactly
+        # once. Flips False on the second call.
+        self._episode_starts: np.ndarray = np.array([True], dtype=bool)
 
     # ------------------------------------------------------------------
     # Lazy policy load
@@ -114,9 +133,18 @@ class LoadedPolicyBot:
         # Default: real SB3 load. Imported lazily so modules that just
         # want the mirroring helpers (or tests using a stub loader)
         # don't pay the SB3 import cost.
-        from stable_baselines3 import PPO  # noqa: PLC0415
+        if self.policy_type == "lstm_v1":
+            # ADR 0016 §3: cross-arch load is blocked — PPO.load on an
+            # LSTM checkpoint fails at layer-shape mismatch, and vice
+            # versa. The repository backfill stamps policy_type on
+            # every pool entry so this branch is always correct.
+            from sb3_contrib import RecurrentPPO  # noqa: PLC0415
 
-        self._policy = PPO.load(str(self.model_path))
+            self._policy = RecurrentPPO.load(str(self.model_path))
+        else:
+            from stable_baselines3 import PPO  # noqa: PLC0415
+
+            self._policy = PPO.load(str(self.model_path))
         return self._policy
 
     # ------------------------------------------------------------------
@@ -208,7 +236,29 @@ class LoadedPolicyBot:
     ) -> PlayerInput:
         policy = self._load()
         obs = self._build_obs(state, mirror=is_player2)
-        action_arr, _ = policy.predict(obs, deterministic=self.deterministic)
+        if self.policy_type == "lstm_v1":
+            # RecurrentPPO.predict threads (hidden, cell) across calls.
+            # ``state`` is None on the first call / after reset —
+            # sb3-contrib treats that identically to a zeroed hidden
+            # state. ``episode_start`` must be True on exactly the
+            # first tick of each episode so the buffer resets; we flip
+            # it False immediately after.
+            action_arr, new_state = policy.predict(
+                obs,
+                state=self._lstm_state,
+                episode_start=self._episode_starts,
+                deterministic=self.deterministic,
+            )
+            self._lstm_state = new_state
+            # After the first call of a match, every subsequent tick is
+            # mid-episode as far as the policy is concerned — only
+            # ``reset_history`` can flip this back.
+            if self._episode_starts.any():
+                self._episode_starts = np.array([False], dtype=bool)
+        else:
+            action_arr, _ = policy.predict(
+                obs, deterministic=self.deterministic
+            )
         # SB3 predict returns either a scalar or a length-1 array; coerce
         # to int either way so ACTION_MAP lookup is safe.
         try:
@@ -227,6 +277,14 @@ class LoadedPolicyBot:
 
     def reset_history(self) -> None:
         """Clear the per-match ball-delta history. Call from provider
-        on a new match if you want strict determinism."""
+        on a new match if you want strict determinism.
+
+        Also zeroes LSTM recurrent state (ADR 0016 §7) so an lstm_v1
+        opponent starts each match with a fresh hidden/cell pair —
+        otherwise carrying state across a match boundary would leak
+        the previous rally's intent estimate into a new match.
+        """
         self._prev_ball_x = float(GROUND_WIDTH) / 2.0
         self._prev_ball_y = 0.0
+        self._lstm_state = None
+        self._episode_starts = np.array([True], dtype=bool)

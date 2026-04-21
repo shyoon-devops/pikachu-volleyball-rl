@@ -730,6 +730,11 @@ async def _decorate_runs_with_hyperparams(
         run_doc = lookup.get(exp_id) or {}
         row["hyperparams"] = _normalize_hyperparams(run_doc.get("hyperparams"))
         row["reward_model"] = run_doc.get("reward_model") or "shaped_v1"
+        # policy_type (ADR 0016) piggy-backs on the same lookup. Legacy
+        # pre-S3 docs resolve to ``"mlp_v1"`` which also matches the
+        # startup backfill default, so a pre-S3 row is indistinguishable
+        # from one explicitly tagged mlp_v1.
+        row["policy_type"] = run_doc.get("policy_type") or "mlp_v1"
 
 
 def _overlay_running_status(

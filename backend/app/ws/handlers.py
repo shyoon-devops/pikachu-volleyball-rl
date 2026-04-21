@@ -179,6 +179,7 @@ async def _dispatch(
             "title": final_title,
             "slug": final_slug,
             "reward_model": params.reward_model,
+            "policy_type": params.policy_type,
         }
         if params.n_envs is not None:
             start_kwargs["n_envs"] = params.n_envs
@@ -233,6 +234,7 @@ async def _dispatch(
                 started_at=datetime.now(timezone.utc),
                 hyperparams=hp_snapshot,
                 reward_model=params.reward_model,
+                policy_type=params.policy_type,
             )
         except Exception:  # noqa: BLE001
             logger.exception("training_runs register failed for %s", experiment_id)
