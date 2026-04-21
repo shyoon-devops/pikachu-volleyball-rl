@@ -152,6 +152,29 @@ class LoadedPolicyBot:
             from backend.rl.sac_discrete import SACDiscrete  # noqa: PLC0415
 
             self._policy = SACDiscrete.load(str(self.model_path))
+        elif self.algorithm == "dreamer_v3":
+            # ADR 0018 §4 + §10: Dreamer's RSSM replaces the
+            # MLP/LSTM backbone — policy_type is ignored. The
+            # vendored ``DreamerAgent`` exposes an SB3-shaped
+            # predict() so the rest of this class's rollout code
+            # doesn't need to branch.
+            #
+            # DreamerAgent.load requires env= for shape info; the
+            # league pool doesn't thread a live env down here, so
+            # we hand it a minimal DummyVecEnv around the same
+            # Pika env the bot always runs against. This is a
+            # shape-only env (model weights never train inside
+            # LoadedPolicyBot), so no opponent_provider needed.
+            from backend.rl.dreamer_runner import DreamerAgent  # noqa: PLC0415
+            from backend.rl.env import PikachuVolleyballEnv  # noqa: PLC0415
+            from stable_baselines3.common.vec_env import DummyVecEnv  # noqa: PLC0415
+
+            shape_env = DummyVecEnv(
+                [lambda: PikachuVolleyballEnv(bot_level=1)]
+            )
+            self._policy = DreamerAgent.load(
+                str(self.model_path), env=shape_env, device="cpu",
+            )
         elif self.policy_type == "lstm_v1":
             from sb3_contrib import RecurrentPPO  # noqa: PLC0415
 

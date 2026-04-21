@@ -25,13 +25,14 @@ class TestAlgorithmEnumShape:
     ``reward_model`` do: one place changes them, the FE/BE contract
     follows."""
 
-    def test_valid_enum_contains_ppo_sac(self) -> None:
-        assert set(VALID_ALGORITHMS) == {"ppo", "sac"}
+    def test_valid_enum_contains_all_implemented(self) -> None:
+        # Enum grew from {ppo, sac} (S4) to {ppo, sac, dreamer_v3}
+        # (S5, ADR 0018). Any future enum addition without a matching
+        # factory cell is what this test catches.
+        assert set(VALID_ALGORITHMS) == {"ppo", "sac", "dreamer_v3"}
 
     def test_implemented_algorithms(self) -> None:
-        # Both ppo + sac ship in S4. Adding a reserved value here
-        # without a matching factory cell is what this test catches.
-        assert set(IMPLEMENTED_ALGORITHMS) == {"ppo", "sac"}
+        assert set(IMPLEMENTED_ALGORITHMS) == {"ppo", "sac", "dreamer_v3"}
 
     def test_sac_default_kwargs_pinned(self) -> None:
         # ADR 0017 §5: fixed knobs. Surfacing any of these on the WS
