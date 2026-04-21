@@ -499,6 +499,12 @@
   margin-left: 8px;
 }
 
+/* Policy-type chip slot — 4 px gap right of the reward chip
+   (DESIGN-POLICY-TYPE-SELECTOR.md §4). */
+.recent-games-policy-chip {
+  margin-left: 4px;
+}
+
 /* FC-R8a: Placeholder shown in place of BatchTabBar when no live
    env frames exist — either training is idle (no active run) or
    the first frame hasn't landed yet. Keeps the layout stable so

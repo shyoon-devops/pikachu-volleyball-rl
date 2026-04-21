@@ -515,3 +515,39 @@
   font-size: 11px;
   line-height: 1;
 }
+
+/* ── v2.x Sprint 3 — policy-type selector (spec §1, §2) ─────────
+   Sits directly below the reward selector so the two regime
+   switches visually stack. On narrow viewports the 4-cell row
+   wraps to 2×2 (spec §1). Reserved cells render disabled +
+   "Coming soon" badge. */
+
+.policy-type-selector {
+  margin-top: 12px;
+}
+
+.policy-type-segmented {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 767px) {
+  .policy-type-option {
+    /* 2×2 wrap at <768px — each cell takes half the row. */
+    flex: 1 1 calc(50% - 2px);
+  }
+}
+
+/* Reserved (gru_v1 / transformer_v1) — disabled + softened
+   opacity so the user reads them as "present but not yet
+   selectable". Tooltip copy ("Reserved — not yet trainable")
+   still surfaces on focus + hover (spec §2). */
+.policy-type-option--reserved {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.policy-type-badge--comingsoon {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}

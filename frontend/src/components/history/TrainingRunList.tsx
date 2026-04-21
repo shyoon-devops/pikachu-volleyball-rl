@@ -4,6 +4,7 @@ import { getTrainingRuns, getModels, slugifyTitle } from '../../lib/api'
 import type { TrainingRun } from '../../lib/types'
 import { TimestampText } from '../shared/TimestampText'
 import { RewardModelChip } from '../shared/RewardModelChip'
+import { PolicyTypeChip } from '../shared/PolicyTypeChip'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import './TrainingRunList.css'
 
@@ -50,7 +51,8 @@ function runsShallowEqual(a: TrainingRun, b: TrainingRun): boolean {
     a.winRate === b.winRate &&
     a.avgRallyLength === b.avgRallyLength &&
     a.status === b.status &&
-    a.rewardModel === b.rewardModel
+    a.rewardModel === b.rewardModel &&
+    a.policyType === b.policyType
   )
 }
 
@@ -352,6 +354,11 @@ const RunRow = memo(function RunRow({ run, query, linkBase, evalMode = false, ch
         <span className="training-run-list-reward-chip">
           <RewardModelChip value={run.rewardModel} />
         </span>
+        {/* Policy-type chip — 4 px gap, right of reward chip
+            (DESIGN-POLICY-TYPE-SELECTOR.md §4). */}
+        <span className="training-run-list-policy-chip">
+          <PolicyTypeChip value={run.policyType} />
+        </span>
       </td>
       <td className="training-run-list-cell-started">
         <TimestampText ts={run.startedAt} />
@@ -407,6 +414,9 @@ const RunCard = memo(function RunCard({ run, query, linkBase, evalMode = false, 
           <HighlightedText text={safeTitle} query={query} />
           <span className="training-run-list-reward-chip">
             <RewardModelChip value={run.rewardModel} />
+          </span>
+          <span className="training-run-list-policy-chip">
+            <PolicyTypeChip value={run.policyType} />
           </span>
         </span>
         <StatusChip status={run.status ?? 'done'} />
