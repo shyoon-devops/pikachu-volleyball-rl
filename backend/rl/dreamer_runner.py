@@ -33,20 +33,12 @@ from stable_baselines3.common.logger import Logger
 # Hafner 2023 defaults so CPU smoke tests run in under a minute;
 # production GPU runs override via the factory's kwargs.
 DREAMER_DEFAULT_KWARGS: dict[str, Any] = {
-    "rssm_hidden_size": 512,
-    "latent_dim": 32,           # categorical classes per axis
-    "latent_axes": 32,          # number of categorical axes (32×32 = 1024-d latent)
-    "world_model_lr": 1e-4,
-    "actor_lr": 3e-5,
-    "critic_lr": 3e-5,
-    "imagine_horizon": 15,
-    "batch_size": 16,
-    "sequence_length": 64,
-    "replay_capacity": 1_000_000,
-    "train_every": 16,          # env steps per gradient step
-    "discount": 0.99,
-    "kl_scale": 1.0,
-    "free_bits": 1.0,           # minimum KL per-axis (nats)
+    # latent: 32 axes × 32 classes = 1024-d; train_every in env steps.
+    "rssm_hidden_size": 512, "latent_dim": 32, "latent_axes": 32,
+    "world_model_lr": 1e-4, "actor_lr": 3e-5, "critic_lr": 3e-5,
+    "imagine_horizon": 15, "batch_size": 16, "sequence_length": 64,
+    "replay_capacity": 1_000_000, "train_every": 16,
+    "discount": 0.99, "kl_scale": 1.0, "free_bits": 1.0,
 }
 
 
@@ -67,12 +59,10 @@ def _mlp(in_dim: int, hidden: int, out_dim: int) -> nn.Sequential:
 
 
 class _SequenceReplayBuffer:
-    """Trajectory replay — Dreamer trains on sub-sequences.
-
-    ``n_streams`` supports one open episode per VecEnv sub-env so
-    parallel trajectories don't splice into a single sequence. Each
-    stream closes to the shared completed-pool on its own ``done``.
-    """
+    """Trajectory replay. ``n_streams`` supports one open episode
+    per VecEnv sub-env so parallel trajectories don't splice into
+    a single sequence. Each stream closes to the shared
+    completed-pool on its own ``done``."""
 
     def __init__(self, capacity: int, n_streams: int = 1) -> None:
         self.capacity = capacity
@@ -261,18 +251,15 @@ class DreamerAgent:
         seed: int | None = None,
         **dreamer_kwargs: Any,
     ) -> None:
-        # env may be a VecEnv; peel one layer so obs / action spaces
-        # are the single-env shapes Dreamer expects.
+        # Peel VecEnv to get single-env spaces.
         base_env = env.envs[0] if hasattr(env, "envs") else env
         obs_space = base_env.observation_space
         act_space = base_env.action_space
         assert isinstance(obs_space, spaces.Box), (
-            "DreamerAgent requires a Box observation space; "
-            f"got {type(obs_space).__name__}"
+            f"requires Box obs; got {type(obs_space).__name__}"
         )
         assert isinstance(act_space, spaces.Discrete), (
-            "DreamerAgent requires a Discrete action space; "
-            f"got {type(act_space).__name__}"
+            f"requires Discrete action; got {type(act_space).__name__}"
         )
 
         self.env = env
@@ -283,8 +270,17 @@ class DreamerAgent:
         # every algo. Per-env action + n_streams buffer fix the
         # n_envs>1 crash from the 2026-04-22 QA regression.
         self.num_envs = int(getattr(env, "num_envs", 1))
+        # SB3 BaseAlgorithm interface surface — callbacks read these
+        # via ``self.model.<attr>``. bench-B 2026-04-23 crashed on
+        # ``training_env`` (→ ``model.get_env()``) in EnvFrameCallback
+        # / EnvResultCallback. Mirror BaseAlgorithm so stock SB3
+        # callbacks work with no special-casing. VecNormalize isn't
+        # used in this pipeline → explicit None keeps callbacks that
+        # check the SB3 eval-path attr from AttributeError-ing.
+        self.observation_space = obs_space
+        self.action_space = act_space
+        self._vec_normalize_env = None
 
-        # Merge caller overrides onto the ADR-pinned defaults.
         cfg = {**DREAMER_DEFAULT_KWARGS, **dreamer_kwargs}
         self.cfg = cfg
         self.device = th.device("cuda" if device == "auto" and th.cuda.is_available() else (device if device != "auto" else "cpu"))
@@ -319,16 +315,13 @@ class DreamerAgent:
 
     # Phase 1 — env interaction
     def _collect_step(self, obs: np.ndarray) -> np.ndarray:
-        """Pick actions for every parallel env, step the VecEnv,
-        stash per-env transitions.
+        """Per-env actor pass → VecEnv.step → per-stream replay.
 
-        QA 2026-04-22 hit a crash here under SubprocVecEnv n_envs=8
-        — old shape was ``env.step(np.array([action]))`` (length-1)
-        against an n_envs-wide VecEnv. Fix: per-env actor pass
-        building a full ``(n_envs,)`` action array. Per-env
-        independent forwards (not batched) — the skeleton's RSSM
-        posterior init is (1, H) and rewriting the batch shape is
-        out of scope for a crash-fix patch.
+        QA 2026-04-22: ``env.step(np.array([action]))`` (length-1)
+        vs n_envs=8 VecEnv crashed. Fix: per-env forwards building a
+        ``(n_envs,)`` action array, each sub-env routes into its own
+        replay stream. Independent forwards (not batched) — RSSM
+        posterior init is (1, H), batch-rewrite deferred to v3.x.
         """
         if obs.ndim == 1:
             obs = obs.reshape(1, -1)
@@ -348,9 +341,9 @@ class DreamerAgent:
                     th.distributions.Categorical(logits=logits).sample().item()
                 )
 
-        # VecEnv step returns 4-tuple (obs, rew, done, info) —
-        # DummyVecEnv / SubprocVecEnv both normalise away
-        # Gymnasium's 5-tuple terminated/truncated split.
+        # VecEnv.step → 4-tuple (obs, rew, done, info); newer
+        # Gymnasium's 5-tuple term/trunc gets normalised by
+        # DummyVecEnv / SubprocVecEnv but handle both.
         stepped = self.env.step(actions)
         if len(stepped) == 4:
             new_obs, rew, done, _info = stepped
@@ -469,13 +462,11 @@ class DreamerAgent:
         callback: Any = None,
         progress_bar: bool = False,
     ) -> "DreamerAgent":
-        """Drive the three-phase loop. ``total_timesteps`` is in
-        env-step units matching SB3 — each ``_collect_step`` consumes
-        ``num_envs`` steps toward the budget. SB3 ``BaseCallback``
-        protocol wired: init → training_start → on_step per
-        ``_collect_step`` → training_end. QA bench-B 2026-04-23 found
-        dispatch missing: 2M runs had no intermediate checkpoints
-        and dashboards showed ``current_step=0``."""
+        """Three-phase loop; ``total_timesteps`` in env-step units
+        (each ``_collect_step`` consumes ``num_envs`` steps). SB3
+        ``BaseCallback`` protocol wired: init → training_start →
+        on_step per _collect_step → training_end. QA bench-B
+        2026-04-23 hit dispatch-missing bug."""
         obs = self.env.reset()
         if isinstance(obs, tuple):  # gymnasium new API
             obs = obs[0]
@@ -499,8 +490,7 @@ class DreamerAgent:
                 self._train_actor_critic()
                 self._n_updates += 1
                 steps_since_train = 0
-            # on_step fires once per _collect_step (matches SB3's
-            # PPO/SAC cadence). False return aborts learn().
+            # on_step fires once per _collect_step; False → abort.
             if callback is not None and callback.on_step() is False:
                 early_stop = True
         if callback is not None:
@@ -588,6 +578,12 @@ class DreamerAgent:
         agent.num_timesteps = int(payload.get("num_timesteps", 0))
         agent._n_updates = int(payload.get("_n_updates", 0))
         return agent
+
+    def get_env(self) -> Any:
+        """BaseAlgorithm.get_env mirror — SB3 callbacks read
+        ``self.training_env`` via ``self.model.get_env()``. Returns
+        the VecEnv (or None if we ever null it out)."""
+        return self.env
 
     # Entropy-like API for parity with SB3 when callbacks poke it.
     def set_training_mode(self, mode: bool) -> None:
