@@ -505,35 +505,41 @@ class DreamerAgent:
         deterministic: bool = True,
     ) -> tuple[np.ndarray, Any]:
         """SB3-shaped predict. ``state`` / ``episode_start`` ignored
-        — skeleton resets the posterior per-call. In deterministic
-        mode the categorical latent collapses to its argmax one-hot
-        so repeated calls on the same obs give identical actions,
-        matching PPO / SACDiscrete's contract (LoadedPolicyBot
-        relies on this for reproducible replay / league matches)."""
-        obs_t = th.from_numpy(np.asarray(observation)).float().to(self.device)
-        if obs_t.ndim == 1:
+        — skeleton resets posterior per-call. Matches BaseAlgorithm
+        contract for Discrete: single obs ``(obs_dim,)`` → 0-d int
+        (``int(action)`` works — bench-B 2026-04-23 crashed here
+        when we returned ``(1,)``), batched ``(B, obs_dim)`` →
+        ``(B,)``. Deterministic mode argmaxes the categorical latent
+        so repeated calls on the same obs give identical actions
+        (LoadedPolicyBot + demo-game rollouts rely on this)."""
+        obs_arr = np.asarray(observation)
+        single = obs_arr.ndim == 1
+        obs_t = th.from_numpy(obs_arr).float().to(self.device)
+        if single:
             obs_t = obs_t.unsqueeze(0)
         with th.no_grad():
             B = obs_t.shape[0]
             h = self.rssm.initial_state(B, self.device)
             emb = self.rssm.embed(obs_t)
             post_logits = self.rssm.post_head(th.cat([h, emb], dim=-1))
-            shape = (B, self.rssm.latent_axes, self.rssm.latent_dim)
-            post_logits_grid = post_logits.view(*shape)
             if deterministic:
-                # Argmax-one-hot per axis — reproducible for the
-                # same obs + weights, matching SB3 predict contract.
-                idx = th.argmax(post_logits_grid, dim=-1)
-                latent = F.one_hot(idx, self.rssm.latent_dim).float()
-                latent = latent.view(B, self.rssm.latent_axes * self.rssm.latent_dim)
+                # Argmax-one-hot per axis — reproducible.
+                grid = post_logits.view(B, self.rssm.latent_axes, self.rssm.latent_dim)
+                idx = th.argmax(grid, dim=-1)
+                latent = F.one_hot(idx, self.rssm.latent_dim).float().view(B, -1)
             else:
                 latent, _ = self.rssm._one_hot_latent(post_logits)
             logits = self.actor(h, latent)
-            if deterministic:
-                a = th.argmax(logits, dim=-1)
-            else:
-                a = th.distributions.Categorical(logits=logits).sample()
-        return a.cpu().numpy().astype(np.int64), None
+            a = th.argmax(logits, dim=-1) if deterministic else (
+                th.distributions.Categorical(logits=logits).sample()
+            )
+        actions = a.cpu().numpy().astype(np.int64)
+        # SB3 contract: collapse batch axis for single-obs inputs so
+        # ``int(action)`` works at the callsite (LiveFrameCallback,
+        # ACTION_MAP lookup, LoadedPolicyBot).
+        if single:
+            actions = actions.squeeze(0)
+        return actions, state
 
     def save(self, path: str | Path) -> None:
         """Zip wrapping a ``data.pt`` torch dump. Matches SB3's
