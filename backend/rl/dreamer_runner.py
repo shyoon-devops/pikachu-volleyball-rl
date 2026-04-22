@@ -1,20 +1,15 @@
 """Vendored Dreamer V3 — minimal, SB3-compatible adapter.
 
-ADR 0018 §5 intended to pin ``NM512/dreamerv3-torch`` by git+SHA.
-Verification (2026-04-22): that repo has no setup.py / pyproject.toml
-— not a pip library. No PyTorch Dreamer V3 ships on PyPI (only
-Hafner's TF/JAX ``dreamerv3`` 1.5.0, which would drag JAX in).
-Vendoring in-tree is the only path that respects the ADR's
-PyTorch-stack decision.
-
-Compact Dreamer V3 skeleton: correct three-phase structure (env
-interaction → world-model train → AC imagine) on real tensors,
+ADR 0018 §5 intended to pin ``NM512/dreamerv3-torch`` by git+SHA,
+but that repo has no setup.py / pyproject.toml — not a pip library
+(2026-04-22). No PyTorch Dreamer V3 ships on PyPI (Hafner's 1.5.0
+is TF/JAX). Vendoring in-tree is the only path that respects the
+ADR's PyTorch-stack decision. The skeleton has correct three-phase
+structure (env interaction → world-model train → AC imagine)
 WITHOUT the full Hafner 2023 niceties (KL-balance schedule, symlog
-reward, two-hot encoding, prior ensembles). Those ship v3.x; S5
-is opt-in + experimental per ADR 0018 §8 to create room for the
-swap. API: ``DreamerAgent(env).learn / predict / save / load``
-all match SB3's shape so ``trainer.py`` + ``LoadedPolicyBot``
-dispatch on algorithm alone.
+reward, two-hot encoding, prior ensembles) — those ship v3.x; S5
+is opt-in + experimental per ADR 0018 §8. API matches SB3 shape
+so ``trainer.py`` + ``LoadedPolicyBot`` dispatch on algorithm alone.
 """
 
 from __future__ import annotations
@@ -31,6 +26,7 @@ import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
 from gymnasium import spaces
+from stable_baselines3.common.logger import Logger
 
 
 # ADR 0018 §7 — pinned defaults, NOT WS-surfaced. Reduced sizes vs
@@ -151,20 +147,17 @@ class _RSSM(nn.Module):
         self.action_dim = action_dim
 
     def _one_hot_latent(self, logits: th.Tensor) -> tuple[th.Tensor, th.Tensor]:
-        """Straight-through categorical sample along each latent axis.
-
-        Returns (sample, log_prob_grid) where sample is one-hot per
-        axis, log_prob_grid is log-softmax(logits) for the KL term.
-        """
+        """Straight-through categorical sample per latent axis.
+        Returns (one-hot sample, log-softmax logits for KL)."""
         shape = (*logits.shape[:-1], self.latent_axes, self.latent_dim)
         logits = logits.view(*shape)
         probs = F.softmax(logits, dim=-1)
         log_probs = F.log_softmax(logits, dim=-1)
-        # Straight-through: sample discrete but pass gradient through probs.
         sample = F.one_hot(
             th.distributions.Categorical(probs=probs).sample(),
             num_classes=self.latent_dim,
         ).float()
+        # Straight-through: discrete sample + gradient through probs.
         sample = sample + probs - probs.detach()
         flat_shape = (*logits.shape[:-2], self.latent_axes * self.latent_dim)
         return sample.view(*flat_shape), log_probs
@@ -206,10 +199,8 @@ class _RSSM(nn.Module):
         self, h: th.Tensor, latent: th.Tensor, action_onehot: th.Tensor,
     ) -> tuple[th.Tensor, th.Tensor]:
         """One rollout step using the PRIOR only — no obs visible."""
-        cell_in = th.cat([latent, action_onehot], dim=-1)
-        h_new = self.cell(cell_in, h)
-        prior_logits = self.prior_head(h_new)
-        latent_new, _ = self._one_hot_latent(prior_logits)
+        h_new = self.cell(th.cat([latent, action_onehot], dim=-1), h)
+        latent_new, _ = self._one_hot_latent(self.prior_head(h_new))
         return h_new, latent_new
 
 
@@ -296,10 +287,7 @@ class DreamerAgent:
         # Merge caller overrides onto the ADR-pinned defaults.
         cfg = {**DREAMER_DEFAULT_KWARGS, **dreamer_kwargs}
         self.cfg = cfg
-        self.device = th.device(
-            "cuda" if device == "auto" and th.cuda.is_available()
-            else (device if device != "auto" else "cpu")
-        )
+        self.device = th.device("cuda" if device == "auto" and th.cuda.is_available() else (device if device != "auto" else "cpu"))
 
         hidden = int(cfg["rssm_hidden_size"])
         latent_flat = int(cfg["latent_dim"]) * int(cfg["latent_axes"])
@@ -322,6 +310,9 @@ class DreamerAgent:
         )
         self._n_updates = 0
         self.num_timesteps = 0
+        # SB3 callbacks read ``self.model.logger.name_to_value`` — an
+        # empty Logger is all we need as a record sink.
+        self.logger = Logger(folder=None, output_formats=[])
         if seed is not None:
             th.manual_seed(seed)
             np.random.seed(seed)
@@ -381,9 +372,7 @@ class DreamerAgent:
     # Phase 2 — world-model train
     def _train_world_model(self) -> dict[str, float]:
         batch = self.buffer.sample(
-            int(self.cfg["batch_size"]),
-            int(self.cfg["sequence_length"]),
-            self.obs_dim,
+            int(self.cfg["batch_size"]), int(self.cfg["sequence_length"]), self.obs_dim,
         )
         if batch is None:
             return {"wm_loss": float("nan")}
@@ -423,12 +412,9 @@ class DreamerAgent:
         if not hasattr(self, "_last_trace"):
             return {"actor_loss": float("nan"), "critic_loss": float("nan")}
         h_seed, latent_seed = self._last_trace
-
-        B = h_seed.shape[0]
-        T = h_seed.shape[1]
         # Flatten batch × time as the rollout starting points.
-        h = h_seed.reshape(B * T, -1)
-        latent = latent_seed.reshape(B * T, -1)
+        h = h_seed.reshape(-1, h_seed.shape[-1])
+        latent = latent_seed.reshape(-1, latent_seed.shape[-1])
 
         H = int(self.cfg["imagine_horizon"])
         discount = float(self.cfg["discount"])
@@ -483,19 +469,27 @@ class DreamerAgent:
         callback: Any = None,
         progress_bar: bool = False,
     ) -> "DreamerAgent":
-        """Drive the three-phase loop. ``total_timesteps`` is counted
-        in env-step units matching SB3 convention — each
-        ``_collect_step`` consumes ``num_envs`` env steps toward the
-        budget, so ``learn(1M)`` means 1M real env steps regardless
-        of n_envs."""
+        """Drive the three-phase loop. ``total_timesteps`` is in
+        env-step units matching SB3 — each ``_collect_step`` consumes
+        ``num_envs`` steps toward the budget. SB3 ``BaseCallback``
+        protocol wired: init → training_start → on_step per
+        ``_collect_step`` → training_end. QA bench-B 2026-04-23 found
+        dispatch missing: 2M runs had no intermediate checkpoints
+        and dashboards showed ``current_step=0``."""
         obs = self.env.reset()
         if isinstance(obs, tuple):  # gymnasium new API
             obs = obs[0]
+        # BaseCallback handshake — CallbackList forwards to each child.
+        if callback is not None:
+            callback.init_callback(self)
+            callback.on_training_start(locals(), globals())
+
         train_every = int(self.cfg["train_every"])
         seq_len = int(self.cfg["sequence_length"])
         steps_since_train = 0
         collected = 0
-        while collected < total_timesteps:
+        early_stop = False
+        while collected < total_timesteps and not early_stop:
             obs = self._collect_step(obs)
             self.num_timesteps += self.num_envs
             collected += self.num_envs
@@ -505,6 +499,12 @@ class DreamerAgent:
                 self._train_actor_critic()
                 self._n_updates += 1
                 steps_since_train = 0
+            # on_step fires once per _collect_step (matches SB3's
+            # PPO/SAC cadence). False return aborts learn().
+            if callback is not None and callback.on_step() is False:
+                early_stop = True
+        if callback is not None:
+            callback.on_training_end()
         return self
 
     def predict(
@@ -546,10 +546,9 @@ class DreamerAgent:
         return a.cpu().numpy().astype(np.int64), None
 
     def save(self, path: str | Path) -> None:
-        """Write a zip containing a ``data.pt`` torch dump. Matches
-        SB3's ``model.zip`` layout closely enough that our
-        checkpoint-listing + slug-prefixed filenames keep working.
-        ``load`` rebuilds the class from the stored config."""
+        """Zip wrapping a ``data.pt`` torch dump. Matches SB3's
+        model.zip layout closely enough that checkpoint listing +
+        slug-prefixed filenames keep working."""
         p = Path(str(path))
         if not p.suffix:
             p = p.with_suffix(".zip")
@@ -576,8 +575,7 @@ class DreamerAgent:
             p = p.with_suffix(".zip")
         with zipfile.ZipFile(p, "r") as zf:
             raw = zf.read("data.pt")
-        # weights_only=False is intentional — payload contains a
-        # config dict alongside state_dicts, and this repo's
+        # weights_only=False: payload has cfg dict + state_dicts; our
         # save/load pair is the only writer.
         payload = th.load(io.BytesIO(raw), weights_only=False, map_location="cpu")
         assert env is not None, "DreamerAgent.load requires env= for shape info."
