@@ -7,7 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-v1.0.0 이후 scope. self-play league + SAC 전환은 차기 메이저 후보.
+v2.0.0 이후 scope. 차기 메이저 후보는 v3.x 주제 플레이스홀더 (retrospective 참조).
+
+## [2.0.0] — 2026-04-22 (v2.x — self-play league + reward simplification + LSTM + SAC + Dreamer V3 / dev HEAD f0290ac9)
+
+v1.0.0 이후 5 sprint (S1~S5) 누적 78 commit 의 메이저 릴리스. "알고리즘 선택지의 확장" 이 단일 축 — v1 의 PPO+MLP+shaped-reward 모노컬처를 self-play / learned-reward / LSTM / SAC / world-model 까지 선택 가능한 매트릭스로 개조. 기본 동작은 v1 과 동일 (default 필드 값 보존 — breaking 아님). QA 5/5 sprint regression GREEN.
+
+### Added — S1 Self-play League (ADR-0014, merge `d9099ef4`)
+
+- **OpponentProvider interface** — `backend/rl/opponent.py` 에 `RuleBot` / `LoadedPolicyBot` / `LeagueSampler` 3 impl. path-traversal hardening + Pydantic 기반 `LeagueCheckpoint` interop
+- **League registry** — `backend/app/models/league.py` Pydantic 모델 + `LeagueRepository` (manifest.json + Mongo sync) + Elo helpers (K-anneal + anchor pinning L1=600/L3=900/L5=1200)
+- **LeagueCallback** — match aggregation + `training:league_update` WS 브로드캐스트
+- **LeagueAdmissionCallback** — +25 Elo gate above pool median 으로만 admission
+- **REST endpoints** — `GET /api/league/standings`, `GET /api/league/checkpoints/{sha}`
+- **`training:start` 확장** — `training_mode: rule_ladder | self_play` + `sampling: uniform | elo_biased | champion`
+- **One-shot v1 migration** (`dafe7b4e`) — `scripts/seed_league_from_v1_models.py` 가 기존 `models/<exp>/*.zip` 을 `source="v1_legacy"` + `elo=1000.0` 로 시드
+- **FE surface** — HyperparamForm Opponent section (세그먼트 + 샘플링 라디오 + 풀 사이즈 칩), `/runs/{title}` League 서브탭 (pool status + top-10 + matches + Elo chart), Recent Games 상대 컬럼 + 현재 run Elo 배지, 평가 패널 분리 (vs Rule / vs Top-N)
+- **Updating overlay** — `training:update_start`/`training:update_end` WS 이벤트 (PPO gradient phase 동안 "updating…" 표시, heuristic fallback 유지)
+
+### Added — S2 Reward simplification (ADR-0015, merge `ff3f78a9` + `c87ff11b`)
+
+- **`reward_model` enum** (`3f5d5492`) — `shaped_v1` (기존, default) / `sparse_v1` (±1 terminal + ±0.1 per-point, 모든 shaping 제거) / `learned_shaped_v1` (terminal + IRL-learned shaping, Stage 2 Phase)
+- **`training:start` 확장** (`f274f008`) — `reward_model` 선택 필드 BE→env→run doc 전 경로 스레딩
+- **FE selector** (`e1983dc0`) — HyperparamForm reward_model 선택 + 런 리스트 칩 + 드릴다운 레이블
+
+### Added — S3 LSTM Recurrent Policy (ADR-0016, merge `fcc59487` + `0a3a8eef` + `55176323`)
+
+- **`policy_type` enum** (`d60c82ef`) — `mlp_v1` (기존, default) / `lstm_v1` (SB3-contrib RecurrentPPO)
+- **LSTM 정책** (`eb735fc3`) — hidden_size=256, n_lstm_layers=1, feature_extractor 이후 LSTM head
+- **`training:start` 확장** (`a08536b7`) — `policy_type` WS→manager→run doc 스레딩
+- **FE selector** (`d60c82ef`) — HyperparamForm policy_type + 런 리스트 칩 + 드릴다운 레이블
+- **Dependency** — `sb3-contrib>=2.3.0` (이미 존재, 업그레이드 아님; `RecurrentPPO` import 경로 활성화)
+
+### Added — S4 SAC actor-critic (ADR-0017, merge `0f5581af` + `2ee16ccf` + `fefce3ef`)
+
+- **`algorithm` enum** (`3cbfb09c`) — `ppo` (기존, default) / `sac`
+- **SAC-Discrete** (`1426fa8d`) — discrete action space 를 위한 SAC 구현, twin critics + entropy coefficient auto-tuning
+- **`training:start` 확장** (`75de6e82`) — `algorithm` WS→manager→run doc 스레딩
+- **Matrix 허용** — `sac × mlp_v1` 조합까지 허용 (`sac × lstm_v1` 은 S4 스코프 아님)
+- **FE selector** — 알고리즘 PPO/SAC 토글 + 드릴다운 레이블
+
+### Added — S5 Dreamer V3 world-model (ADR-0018, merge `f48ccb16` + `d9831954` + `f0290ac9`)
+
+- **`algorithm` 확장** (`313b8249`) — Literal 에 `dreamer_v3` 추가
+- **Dreamer V3 학습기** (`9d45facc`) — world-model + actor + critic 3 네트워크, latent dynamics 학습
+- **VecEnv shape mismatch fix** (`19c7e45d`) — `_collect_step` 에서 `n_envs>1` 시 배치 차원 오류 수정
+- **WM loss smoke test** (`104575a5`) — seed-fixed + wire sanity 로 회귀 방지
+- **FE selector** (`8b3e6326`) — 알고리즘 dreamer_v3 옵션 + 리스트 칩 + 풀 레이블
+- **Dependency** — `dreamerv3-torch` vendor pin (upstream 미공개 릴리스 → 레포 내 vendor)
+
+### Changed
+
+- **`training:start` payload schema** — `algorithm` / `policy_type` / `reward_model` 3 필드 추가. 모두 default = v1 동작 보존 (`ppo` / `mlp_v1` / `shaped_v1`). 기존 클라이언트는 필드 omit 해도 정상 동작
+- **Run 레코드 스키마** — `algorithm`, `policy_type`, `reward_model`, `training_mode`, `opponent_sampling` 5 필드 추가 (모두 Optional, legacy → None)
+- **HyperparamForm UI** — S1~S5 selector 추가 (Opponent / reward_model / policy_type / algorithm). 기본값 선택 시 UI 동작 v1 과 동일
+
+### Migrations
+
+- **Run 레코드 백필** — 기존 v1 run 은 default 값으로 백필: `reward_model=shaped_v1` + `policy_type=mlp_v1` + `algorithm=ppo` + `training_mode=rule_ladder`. 실행:
+  ```bash
+  docker compose exec backend python -m backend.scripts.migrate_games_bot_level --mode=v1-to-v2-defaults
+  ```
+- **League 풀 시드** — 기존 v1 체크포인트를 League 에 admit: `source="v1_legacy"`, `elo=1000.0` 시드, anchor (L1=600, L3=900, L5=1200) 무조건 삽입. 실행:
+  ```bash
+  docker compose exec backend python -m backend.scripts.seed_league_from_v1_models
+  ```
+- **WS payload 호환** — 신규 필드 모두 optional. v1 FE 가 v2 BE 에 접속 시 정상 (추가 필드 무시), v2 FE 가 v1 BE 에 접속 시는 None 으로 렌더
+
+### Dependencies
+
+- **`sb3-contrib` ≥ 2.3.0** — S3 RecurrentPPO 의존 (pyproject.toml 기존 pin 유지, 실제 import 경로 활성화)
+- **`dreamerv3-torch` vendor pin** — S5 world-model 의존성; upstream release 부재로 repo 내 `vendor/dreamerv3_torch/` 에 pin. PR 시 라이선스 NOTICE 동봉
+
+### Known Limitations
+
+- **Dreamer V3 Experimental** — v2.0.0 에서는 실험 단계. PPO+MLP+shaped 조합 대비 sample efficiency 는 확인되었으나 장기 안정성 미검증. GPU 권장 (CPU-only 환경에서는 현저히 느림)
+- **LSTM × SAC 조합** — S4 스코프 밖. `policy_type=lstm_v1 × algorithm=sac` 선택 시 스키마 valid 하지만 runtime 실패
+- **Dreamer checkpoint format** — SB3 `.zip` 과 호환 안 됨 (별도 `.pt` state_dict). League 는 `source="dreamer_v3"` 태그로 구분 렌더링, PPO ↔ Dreamer cross-load 불가
+
+### Breaking Changes
+
+None. 모든 신규 필드는 default 로 v1 동작을 보존. 기존 클라이언트/체크포인트/DB 문서는 그대로 작동.
+
+### Rollback
+
+- Target: `v1.0.0`. v2 feature 5 종 전부 재노출되지 않음. DB 에 새로 쌓인 `algorithm=sac` / `reward_model=sparse_v1` 등의 run 은 v1 FE 에서 None 으로 렌더됨 (해독 불능 아님). Dreamer 체크포인트만 v1 에서 load 불가 (filter out 필요)
+
+### References
+
+- [docs/release-notes/RELEASE-NOTES-v2.0.md](release-notes/RELEASE-NOTES-v2.0.md)
+- [docs/migrations/v1-to-v2.md](migrations/v1-to-v2.md)
+- [docs/retrospective/v2.x-retrospective.md](retrospective/v2.x-retrospective.md)
+- ADRs [0014](adr/0014-self-play-league.md), [0015](adr/0015-reward-simplification.md), [0016](adr/0016-lstm-recurrent-policy.md), [0017](adr/0017-sac-continuous-actor-critic.md), [0018](adr/0018-dreamer-v3-world-model.md)
 
 ## [1.0.0] - 2026-04-19 (v1.x — faithful port + unified runs + refactor sprint / dev HEAD 547ff663)
 

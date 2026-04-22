@@ -119,7 +119,7 @@ function matchSideEffectRoute(
 // ── Probe component ─────────────────────────────────────
 
 function Probe() {
-  const { status, connectionState, metrics, recentGames, send } = useTrainingState()
+  const { status, connectionState, metrics, recentGames, updatingPolicy, send } = useTrainingState()
   return (
     <div>
       <span data-testid="state">{status.state}</span>
@@ -132,6 +132,8 @@ function Probe() {
       <span data-testid="latest-game-timestamp">
         {recentGames[0]?.timestamp ?? ''}
       </span>
+      <span data-testid="updating">{updatingPolicy.active ? 'yes' : 'no'}</span>
+      <span data-testid="updating-long">{updatingPolicy.longGap ? 'yes' : 'no'}</span>
       <button onClick={() => send('training:stop')}>Stop</button>
       <button onClick={() => send('training:pause')}>Pause</button>
       <button onClick={() => send('training:resume')}>Resume</button>
@@ -1188,5 +1190,284 @@ describe('useTrainingState — game:result timestamp fallback (R1, 2026-04-18)',
     expect(screen.getByTestId('latest-game-timestamp').textContent).toBe(
       '2026-04-18T01:00:00Z',
     )
+  })
+})
+
+// Updating-policy gap detector (Designer spec f02a9785).
+describe('useTrainingState — updating-policy gap detector', () => {
+  const FRAME_PAYLOAD = {
+    player1: { x: 0, y: 0, vx: 0, vy: 0, is_jumping: false, is_diving: false, is_power_hitting: false },
+    player2: { x: 0, y: 0, vx: 0, vy: 0, is_jumping: false, is_diving: false, is_power_hitting: false },
+    ball: { x: 0, y: 0, vx: 0, vy: 0, rotation: 0 },
+    score1: 0,
+    score2: 0,
+    frame: 1,
+  }
+
+  /**
+   * Drive the poll effect with fake timers installed from the
+   * start of the test so the interval registers against the fake
+   * scheduler. Mounting first with real timers would register
+   * the interval on the real clock; advanceTimers wouldn't fire it.
+   */
+  function installRunningFetchRouter(state: 'running' | 'stopped' = 'running') {
+    return installFetchRouter(url => {
+      if (url.startsWith('/api/training/status')) {
+        return { ok: true, payload: { state, current_step: 0, current_episode: 0 } }
+      }
+      if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
+      if (url.startsWith('/api/training/metrics/aggregate')) {
+        return { ok: true, payload: EMPTY_METRICS_PAYLOAD }
+      }
+      if (url.startsWith('/api/training/timeseries')) {
+        return { ok: true, payload: { points: [] } }
+      }
+      return { ok: false, status: 404, payload: {} }
+    })
+  }
+
+  async function waitForRunning() {
+    // Wait for effect flush that lifts status to running and registers
+    // the poll interval under the fake scheduler.
+    for (let i = 0; i < 20; i++) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+      if (screen.getByTestId('state').textContent === 'running') return
+    }
+    throw new Error('timed out waiting for status=running')
+  }
+
+  it('flips active=true after ~3s of frame silence while running (heuristic fallback)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    installRunningFetchRouter()
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    const ws = MockWebSocket.instances[0]
+    act(() => { ws.simulateOpen() })
+    await waitForRunning()
+
+    act(() => { ws.simulateMessage('training:frame', FRAME_PAYLOAD) })
+    expect(screen.getByTestId('updating').textContent).toBe('no')
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3500) })
+    expect(screen.getByTestId('updating').textContent).toBe('yes')
+    expect(screen.getByTestId('updating-long').textContent).toBe('no')
+    vi.useRealTimers()
+  })
+
+  it('flips back to false the instant a fresh frame arrives', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    installRunningFetchRouter()
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    const ws = MockWebSocket.instances[0]
+    act(() => { ws.simulateOpen() })
+    await waitForRunning()
+
+    act(() => { ws.simulateMessage('training:frame', FRAME_PAYLOAD) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(3500) })
+    expect(screen.getByTestId('updating').textContent).toBe('yes')
+
+    act(() => { ws.simulateMessage('training:frame', FRAME_PAYLOAD) })
+    expect(screen.getByTestId('updating').textContent).toBe('no')
+    vi.useRealTimers()
+  })
+
+  it('escalates longGap=true after an 8s silence', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    installRunningFetchRouter()
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    const ws = MockWebSocket.instances[0]
+    act(() => { ws.simulateOpen() })
+    await waitForRunning()
+
+    act(() => { ws.simulateMessage('training:frame', FRAME_PAYLOAD) })
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3500) })
+    expect(screen.getByTestId('updating-long').textContent).toBe('no')
+    await act(async () => { await vi.advanceTimersByTimeAsync(7000) })
+    expect(screen.getByTestId('updating-long').textContent).toBe('yes')
+    vi.useRealTimers()
+  })
+
+  it('clears the flag when the WebSocket disconnects (spec §5)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    installRunningFetchRouter()
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    const ws = MockWebSocket.instances[0]
+    act(() => { ws.simulateOpen() })
+    await waitForRunning()
+
+    act(() => { ws.simulateMessage('training:frame', FRAME_PAYLOAD) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(3500) })
+    expect(screen.getByTestId('updating').textContent).toBe('yes')
+
+    // Simulated disconnect — hook clears the flag so the existing
+    // connection-lost banner can own the state.
+    act(() => { ws.simulateClose() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+    expect(screen.getByTestId('updating').textContent).toBe('no')
+    vi.useRealTimers()
+  })
+
+  it('stays off while training is stopped (even if no frames stream)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    installRunningFetchRouter('stopped')
+
+    render(
+      <TrainingStateProvider>
+        <Probe />
+      </TrainingStateProvider>,
+    )
+
+    const ws = MockWebSocket.instances[0]
+    act(() => { ws.simulateOpen() })
+    // Flush pending micro/macrotasks without advancing far.
+    await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+    expect(screen.getByTestId('state').textContent).toBe('stopped')
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(screen.getByTestId('updating').textContent).toBe('no')
+    vi.useRealTimers()
+  })
+})
+
+// Fix-A FE: explicit update_start / update_end events drive the
+// overlay immediately; heuristic stays as a safety-net.
+describe('useTrainingState — update_start / update_end events', () => {
+  const FRAME_PAYLOAD = {
+    player1: { x: 0, y: 0, vx: 0, vy: 0, is_jumping: false, is_diving: false, is_power_hitting: false },
+    player2: { x: 0, y: 0, vx: 0, vy: 0, is_jumping: false, is_diving: false, is_power_hitting: false },
+    ball: { x: 0, y: 0, vx: 0, vy: 0, rotation: 0 },
+    score1: 0, score2: 0, frame: 1,
+  }
+
+  function installRouter() {
+    return installFetchRouter(url => {
+      if (url.startsWith('/api/training/status')) {
+        return { ok: true, payload: { state: 'running', current_step: 0, current_episode: 0 } }
+      }
+      if (url.startsWith('/api/games')) return { ok: true, payload: EMPTY_GAMES_PAYLOAD }
+      if (url.startsWith('/api/training/metrics/aggregate')) {
+        return { ok: true, payload: EMPTY_METRICS_PAYLOAD }
+      }
+      if (url.startsWith('/api/training/timeseries')) {
+        return { ok: true, payload: { points: [] } }
+      }
+      return { ok: false, status: 404, payload: {} }
+    })
+  }
+
+  async function waitForRunning() {
+    for (let i = 0; i < 20; i++) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+      if (screen.getByTestId('state').textContent === 'running') return
+    }
+    throw new Error('timed out waiting for status=running')
+  }
+
+  it('activates the overlay immediately on training:update_start', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    installRouter()
+    render(<TrainingStateProvider><Probe /></TrainingStateProvider>)
+    const ws = MockWebSocket.instances[0]
+    act(() => { ws.simulateOpen() })
+    await waitForRunning()
+
+    expect(screen.getByTestId('updating').textContent).toBe('no')
+    act(() => {
+      ws.simulateMessage('training:update_start', {
+        experiment_id: 'exp-42',
+        step: 200_000,
+      })
+    })
+    // No poll advance needed — the event handler flips state on the
+    // same tick it fires.
+    expect(screen.getByTestId('updating').textContent).toBe('yes')
+    vi.useRealTimers()
+  })
+
+  it('deactivates the overlay immediately on training:update_end', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    installRouter()
+    render(<TrainingStateProvider><Probe /></TrainingStateProvider>)
+    const ws = MockWebSocket.instances[0]
+    act(() => { ws.simulateOpen() })
+    await waitForRunning()
+
+    act(() => {
+      ws.simulateMessage('training:update_start', { experiment_id: 'exp-42', step: 1 })
+    })
+    expect(screen.getByTestId('updating').textContent).toBe('yes')
+
+    act(() => {
+      ws.simulateMessage('training:update_end', { experiment_id: 'exp-42', step: 1 })
+    })
+    expect(screen.getByTestId('updating').textContent).toBe('no')
+    vi.useRealTimers()
+  })
+
+  it('event-driven overlay survives a stale frame (frame does NOT flip off)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    installRouter()
+    render(<TrainingStateProvider><Probe /></TrainingStateProvider>)
+    const ws = MockWebSocket.instances[0]
+    act(() => { ws.simulateOpen() })
+    await waitForRunning()
+
+    act(() => {
+      ws.simulateMessage('training:update_start', { experiment_id: 'exp-42', step: 1 })
+    })
+    expect(screen.getByTestId('updating').textContent).toBe('yes')
+
+    // A queued frame lands mid-gradient-update. With event source
+    // authoritative, the overlay stays up until update_end.
+    act(() => { ws.simulateMessage('training:frame', FRAME_PAYLOAD) })
+    expect(screen.getByTestId('updating').textContent).toBe('yes')
+
+    act(() => {
+      ws.simulateMessage('training:update_end', { experiment_id: 'exp-42', step: 1 })
+    })
+    expect(screen.getByTestId('updating').textContent).toBe('no')
+    vi.useRealTimers()
+  })
+
+  it('heuristic fallback still fires when no update_start event arrives', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    installRouter()
+    render(<TrainingStateProvider><Probe /></TrainingStateProvider>)
+    const ws = MockWebSocket.instances[0]
+    act(() => { ws.simulateOpen() })
+    await waitForRunning()
+
+    act(() => { ws.simulateMessage('training:frame', FRAME_PAYLOAD) })
+    // Under the new 3s threshold, 2.5s must stay OFF.
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500) })
+    expect(screen.getByTestId('updating').textContent).toBe('no')
+    // Cross 3s → heuristic kicks in.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(screen.getByTestId('updating').textContent).toBe('yes')
+    vi.useRealTimers()
   })
 })

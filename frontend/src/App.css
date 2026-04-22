@@ -209,3 +209,27 @@ main:focus {
     padding-bottom: calc(var(--navbar-height) + env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* v2.x Sprint 1 — self-play mode badge (docs/design/SELF-PLAY-UX.md §6).
+   Small pulsing chip inline-attached to the Training Runs nav entry
+   when a self-play run is active. */
+.app-self-play-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  background: var(--color-warning-dim, rgba(234, 179, 8, 0.15));
+  border: 1px solid var(--color-warning, #eab308);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  color: var(--color-warning, #eab308);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  animation: app-self-play-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes app-self-play-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}

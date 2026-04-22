@@ -1,0 +1,39 @@
+/* Reward-model list chip (v2.x Sprint 2 — spec §4). Existing
+   tokens only; no new palette. */
+
+.reward-model-chip {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.reward-model-chip--neutral {
+  color: var(--color-text-muted);
+}
+
+.reward-model-chip--muted-italic {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.reward-model-chip--warning {
+  color: var(--color-warning, #eab308);
+}
+
+/* Full-label variant — drill-down metadata block (spec §4).
+   No chip styling, inline with the surrounding copy. */
+.reward-model-chip-full {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}

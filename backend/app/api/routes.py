@@ -356,6 +356,87 @@ async def training_level_get(request: Request):
     return {"level": training_service.status()["bot_level"]}
 
 
+@router.get("/league/standings")
+@endpoint_guard("league_standings")
+@cache_ttl(seconds=5, max_entries=4, include=("limit",))
+async def league_standings(
+    request: Request,
+    limit: int = Query(default=10, ge=1, le=100),
+):
+    """Top-N league pool standings (v2 Sprint-1 B-impl-4).
+
+    Returns a ``LeagueStandings`` envelope: top-N rows by Elo
+    (ties broken by games-desc), plus ``champion_id`` /
+    ``generation`` / ``pool_size`` / ``total_checkpoints``. See
+    docs/adr/0014-self-play-league.md §8 ("API").
+    """
+    repo = getattr(request.app.state, "league_repository", None)
+    if repo is None:
+        # Older deployments may not have wired the repository yet —
+        # an empty envelope is a better FE experience than a 503
+        # because the dashboard can still render the empty state.
+        from backend.app.models.league import LEAGUE_POOL_SIZE, LeagueStandings
+
+        return LeagueStandings(
+            top=[], champion_id=None, generation=0,
+            pool_size=LEAGUE_POOL_SIZE, total_checkpoints=0,
+        )
+    return await repo.standings_envelope(limit=limit)
+
+
+@router.get("/league/checkpoint/{checkpoint_id}")
+@endpoint_guard("league_checkpoint_detail")
+async def league_checkpoint_detail(
+    request: Request,
+    checkpoint_id: str,
+    head_to_head_limit: int = Query(default=10, ge=1, le=100),
+):
+    """Single checkpoint detail + recent head-to-head summary.
+
+    Head-to-head lookup is served from the ``games`` collection
+    (``experiment_id`` filter) — we show the most-recent N matches
+    the pool entry participated in. Checkpoint id must be URL-safe
+    (Pydantic league schema bounds it at ≤200 chars) so we skip the
+    extra path-traversal check.
+    """
+    if not checkpoint_id or len(checkpoint_id) > 200:
+        raise HTTPException(status_code=400, detail="Invalid checkpoint_id")
+    repo = getattr(request.app.state, "league_repository", None)
+    if repo is None:
+        raise HTTPException(status_code=503, detail="League repository not available")
+    checkpoint = await repo.get_checkpoint(checkpoint_id)
+    if checkpoint is None:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+
+    # Head-to-head via games collection — filter by experiment_id
+    # (null-safe: anchor rows have no experiment and return []).
+    recent_matches: list[dict] = []
+    if checkpoint.experiment_id:
+        game_service = getattr(request.app.state, "game_service", None)
+        if game_service is not None:
+            try:
+                resp = await game_service.get_games(
+                    page=1, limit=head_to_head_limit,
+                )
+                # Filter to this experiment on the response side —
+                # GameService doesn't have an experiment_id filter
+                # yet, and the page-1 top-N is bounded so the cost
+                # is O(limit) not O(collection).
+                recent_matches = [
+                    g for g in (resp.data if hasattr(resp, "data") else [])
+                    if g.get("experiment_id") == checkpoint.experiment_id
+                ][:head_to_head_limit]
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "league_checkpoint_detail: h2h lookup failed for %s",
+                    checkpoint_id,
+                )
+    return {
+        "checkpoint": checkpoint.model_dump(mode="json"),
+        "head_to_head": recent_matches,
+    }
+
+
 @router.get("/training/titles")
 @endpoint_guard("training_titles")
 async def training_titles(
@@ -626,12 +707,15 @@ def _normalize_hyperparams(stored: dict[str, Any] | None) -> dict[str, Any]:
 async def _decorate_runs_with_hyperparams(
     request: Request, rows: list[dict[str, Any]]
 ) -> None:
-    """Join hyperparams onto each aggregation row in place.
+    """Join hyperparams + reward_model onto each aggregation row in place.
 
     Bulk ``$in`` lookup so the query cost is O(1) regardless of page
     size. Rows without a training_runs record (pre-T10 games, demo-only
     experiments) get the canonical defaults via normalize so FE never
-    sees a missing key.
+    sees a missing key. ``reward_model`` (ADR 0015) piggy-backs on the
+    same lookup — legacy rows resolve to ``"shaped_v1"`` which also
+    matches the migration backfill default, so the FE can't tell a
+    pre-S2 row from a v1.0.0-era run explicitly tagged that way.
     """
     runs_service = getattr(request.app.state, "training_runs_service", None)
     exp_ids = [row.get("experiment_id") for row in rows if row.get("experiment_id")]
@@ -645,6 +729,16 @@ async def _decorate_runs_with_hyperparams(
         exp_id = row.get("experiment_id") or ""
         run_doc = lookup.get(exp_id) or {}
         row["hyperparams"] = _normalize_hyperparams(run_doc.get("hyperparams"))
+        row["reward_model"] = run_doc.get("reward_model") or "shaped_v1"
+        # policy_type (ADR 0016) piggy-backs on the same lookup. Legacy
+        # pre-S3 docs resolve to ``"mlp_v1"`` which also matches the
+        # startup backfill default, so a pre-S3 row is indistinguishable
+        # from one explicitly tagged mlp_v1.
+        row["policy_type"] = run_doc.get("policy_type") or "mlp_v1"
+        # algorithm (ADR 0017 Sprint-4). Same defaulting story — pre-S4
+        # rows were all PPO so the backfill value ``"ppo"`` doubles as
+        # the legacy-row display.
+        row["algorithm"] = run_doc.get("algorithm") or "ppo"
 
 
 def _overlay_running_status(

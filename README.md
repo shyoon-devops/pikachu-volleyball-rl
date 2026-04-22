@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/shyoon-devops/pikachu-volleyball-rl/actions"><img src="https://github.com/shyoon-devops/pikachu-volleyball-rl/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=white" alt="React">
   <img src="https://img.shields.io/badge/SB3-PPO-FF6F00" alt="Stable-Baselines3">
@@ -31,7 +31,7 @@ PPO 에이전트가 Rule-based Bot(L1~L5)을 상대로 피카추 배구를 학�
 
 > Inspired by the original [Pikachu Volleyball](https://github.com/gorisanson/pikachu-volleyball) (1997).
 
-**Status**: v0.2.5 deployed to all 3 envs (dev/qa/prod, main reachable) · **v1.0.0 prepared on `v1.x-prep-pd`** — faithful port (physics/view/audio 1:1) + Evaluator E1-E10 (Elo + baseline comparator + batch eval + async report) + unified `/runs` navigation + refactor sprint A1-A8 — see [release notes](docs/RELEASE-NOTES-v1.0.0.md) · [retrospective](docs/RETROSPECTIVE-v1.0.0.md) · [deployment status](docs/DEPLOYMENT-STATUS.md) · [VERSIONS.yml](docs/VERSIONS.yml) · [INDEX](docs/INDEX.md). QA 19/19 PASS.
+**Status**: v1.0.0 deployed to all 3 envs (dev/qa/prod, main reachable) · **v2.0.0 prepared on `v2.0.0-docs`** — S1 self-play league + S2 reward_model selector (shaped/sparse/learned) + S3 LSTM recurrent policy + S4 SAC-Discrete algorithm + S5 Dreamer V3 world-model (Experimental). All selectors default to v1 behavior — breaking-free migration. See [release notes](docs/release-notes/RELEASE-NOTES-v2.0.md) · [migration](docs/migrations/v1-to-v2.md) · [retrospective](docs/retrospective/v2.x-retrospective.md) · [ADRs 0014-0018](docs/adr/README.md). QA 5/5 sprint regression PASS.
 
 ## Quick Start
 
@@ -97,7 +97,7 @@ Frontend 배포: `scripts/deploy-frontend.sh` — 로컬 빌드 후 yoonbian-2 r
 
 **Game Engine** — Physics-based 2D volleyball, **faithful 1:1 port** of `gorisanson/pikachu-volleyball` (1997). Full state machine including `slowMotion` / `afterEndOfRound` / `beforeStartOfNextRound`. 25fps game loop. Five difficulty bot levels (L1 beginner ~ L5 perfect).
 
-**RL Training** — PPO via SB3. 8 parallel SubprocVecEnv with per-env frame broadcast (`training:env_frame`) and per-env game save (`env_id` on `GameRecord`). Extended hyperparameter form — `total_timesteps` / `n_envs` / `n_epochs` / `ent_coef` / `gae_lambda`. Training runs tagged by user-entered title, propagated to model filename and downstream records.
+**RL Training** — **Algorithm matrix (v2)**: PPO / SAC-Discrete / Dreamer V3 world-model (Experimental) × MLP / LSTM policy × shaped_v1 / sparse_v1 / learned_shaped_v1 reward. Opponent mode: Rule ladder (L1~L5) or self-play league with Elo-ranked sampling. SB3 + sb3-contrib RecurrentPPO + vendored dreamerv3-torch. 8 parallel SubprocVecEnv with per-env frame broadcast (`training:env_frame`) and per-env game save. Extended hyperparameter form with all 5 selectors. Training runs tagged by user-entered title, propagated to model filename and downstream records.
 
 **Web Dashboard** — Unified `/runs` navigation with Overview / Games / Evaluation sub-tabs (v1.0 ADR-0013). Live game visualization (PixiJS, original view.js port). Replay player with seek/speed, bulk-delete multi-select, batch-tab multi-env live view.
 
@@ -216,5 +216,5 @@ This project is for educational and research purposes.
 ---
 
 <p align="center">
-  <sub>v1.0.0 &bull; <a href="CHANGELOG.md">Changelog</a> &bull; <a href="docs/RELEASE-NOTES-v1.0.0.md">Release Notes</a> &bull; <a href="docs/DEPLOYMENT-STATUS.md">Deployment Status</a></sub>
+  <sub>v2.0.0 &bull; <a href="CHANGELOG.md">Changelog</a> &bull; <a href="docs/release-notes/RELEASE-NOTES-v2.0.md">Release Notes</a> &bull; <a href="docs/migrations/v1-to-v2.md">v1→v2 Migration</a> &bull; <a href="docs/DEPLOYMENT-STATUS.md">Deployment Status</a></sub>
 </p>

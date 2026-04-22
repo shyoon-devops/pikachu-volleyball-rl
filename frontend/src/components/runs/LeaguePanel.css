@@ -1,0 +1,273 @@
+.league-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.league-panel-error {
+  padding: var(--space-3);
+  background: var(--color-danger-dim);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.league-section-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+}
+
+.league-empty {
+  padding: var(--space-4);
+  text-align: center;
+  background: var(--color-bg-card);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+/* ── Pool status bar ────────────────────────────────────── */
+.league-pool-status {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-3);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.league-pool-status-bar {
+  height: 8px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.league-pool-status-fill {
+  height: 100%;
+  background: var(--color-accent);
+  transition: width var(--duration-normal) var(--ease-out);
+}
+
+.league-pool-status-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.league-pool-chip {
+  padding: 4px 10px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.league-pool-champion {
+  color: var(--color-text-secondary);
+}
+
+.league-pool-champion-label {
+  color: var(--color-text-muted);
+  margin-right: 4px;
+}
+
+.league-pool-champion-id {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-semibold);
+}
+
+.league-pool-generation {
+  padding: 2px 8px;
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.1));
+  border-radius: var(--radius-sm);
+  color: var(--color-accent);
+  font-weight: var(--weight-semibold);
+}
+
+.league-pool-empty-hint {
+  color: var(--color-warning, #eab308);
+  font-style: italic;
+}
+
+/* ── Leaderboard ────────────────────────────────────────── */
+.league-leaderboard-wrapper {
+  padding: 0;
+  overflow: hidden;
+}
+
+.league-leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.league-leaderboard-table th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-muted);
+  font-weight: var(--weight-medium);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
+}
+
+.league-leaderboard-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+}
+
+.league-rank-col {
+  width: 40px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.league-numeric {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.league-checkpoint-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.league-checkpoint-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+  display: inline-block;
+}
+
+.league-champion-crown {
+  font-size: 16px;
+}
+
+.league-source-chip {
+  padding: 2px 6px;
+  background: var(--color-bg-elevated);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.league-leaderboard-row--champion {
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.08));
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.league-leaderboard-row--champion:hover {
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.12));
+}
+
+/* ── Recent matches ─────────────────────────────────────── */
+.league-recent-wrapper {
+  padding: 0;
+}
+
+.league-recent-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.league-recent-table th {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
+}
+
+.league-recent-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+}
+
+.league-delta-up {
+  color: var(--color-success, #22c55e);
+  font-weight: var(--weight-semibold);
+}
+
+.league-delta-down {
+  color: var(--color-danger, #ef4444);
+  font-weight: var(--weight-semibold);
+}
+
+/* ── Elo chart snapshot ─────────────────────────────────── */
+.league-chart-card {
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.league-chart-range {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.league-chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 80px;
+  padding: 4px 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.league-chart-bar {
+  flex: 1;
+  background: var(--color-accent);
+  border-radius: 2px 2px 0 0;
+  min-height: 4px;
+  opacity: 0.7;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.league-chart-bar:hover {
+  opacity: 1;
+}
+
+.league-chart-bar--champion {
+  background: var(--color-warning, #eab308);
+  opacity: 1;
+}
+
+.league-chart-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-style: italic;
+}

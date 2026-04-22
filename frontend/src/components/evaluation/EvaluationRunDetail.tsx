@@ -656,56 +656,78 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
         </table>
       </div>
 
-      <div className="eval-run-detail-runner card">
-        <div className="eval-run-detail-runner-label">{selectedStepLabel}</div>
-        <div className="eval-run-detail-runner-row">
-          <label className="eval-run-detail-field">
-            <span className="eval-run-detail-field-label">Bot Level</span>
-            <select
-              value={botLevel}
-              onChange={e => setBotLevel(Number(e.target.value))}
-              className="eval-run-detail-select"
-              disabled={isRunning}
+      {/*
+        v2.x Sprint 1: eval runner split into two cards
+        (docs/design/SELF-PLAY-UX.md §4).
+          Card A — vs Rule ladder: the v1 behavior, L1–L5 bot +
+                   n_games + Run Evaluation button.
+          Card B — vs Top-N league: N select (5 / 10 / 20) + Elo
+                   threshold slider + placeholder Run button. The
+                   BE endpoint for Top-N league eval is not shipped
+                   yet, so the button is disabled with a
+                   [BE-WAITING] hint — card is pre-wired so the
+                   Sprint 2 BE hook-up becomes a one-handler change.
+      */}
+      <div className="eval-run-detail-runner-grid">
+        <div className="eval-run-detail-runner card">
+          <div className="eval-run-detail-runner-card-title">
+            vs Rule ladder
+          </div>
+          <div className="eval-run-detail-runner-label">{selectedStepLabel}</div>
+          <div className="eval-run-detail-runner-row">
+            <label className="eval-run-detail-field">
+              <span className="eval-run-detail-field-label">Bot Level</span>
+              <select
+                value={botLevel}
+                onChange={e => setBotLevel(Number(e.target.value))}
+                className="eval-run-detail-select"
+                disabled={isRunning}
+              >
+                {[1, 2, 3, 4, 5].map(l => (
+                  <option key={l} value={l}>Level {l}</option>
+                ))}
+              </select>
+            </label>
+            <label className="eval-run-detail-field">
+              <span className="eval-run-detail-field-label">Games</span>
+              <input
+                type="number"
+                value={nGames}
+                onChange={e => setNGames(Number(e.target.value))}
+                min={1}
+                max={200}
+                className="eval-run-detail-input"
+                disabled={isRunning}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={handleRun}
+              disabled={isRunning || !selectedPath}
+              className="eval-run-detail-submit btn btn-primary"
+              aria-live="polite"
             >
-              {[1, 2, 3, 4, 5].map(l => (
-                <option key={l} value={l}>Level {l}</option>
-              ))}
-            </select>
-          </label>
-          <label className="eval-run-detail-field">
-            <span className="eval-run-detail-field-label">Games</span>
-            <input
-              type="number"
-              value={nGames}
-              onChange={e => setNGames(Number(e.target.value))}
-              min={1}
-              max={200}
-              className="eval-run-detail-input"
-              disabled={isRunning}
+              {job.kind === 'running'
+                ? `Running ${job.current}/${job.total}`
+                : job.kind === 'busy-already'
+                  ? 'Waiting…'
+                  : 'Run Evaluation (vs L1–L5)'}
+            </button>
+          </div>
+          {job.kind === 'running' && job.total > 0 && (
+            <progress
+              className="eval-run-detail-progress"
+              max={job.total}
+              value={job.current}
+              aria-label={`Evaluation progress: ${job.current} of ${job.total} games`}
             />
-          </label>
-          <button
-            type="button"
-            onClick={handleRun}
-            disabled={isRunning || !selectedPath}
-            className="eval-run-detail-submit btn btn-primary"
-            aria-live="polite"
-          >
-            {job.kind === 'running'
-              ? `Running ${job.current}/${job.total}`
-              : job.kind === 'busy-already'
-                ? 'Waiting…'
-                : 'Run Evaluation'}
-          </button>
+          )}
         </div>
-        {job.kind === 'running' && job.total > 0 && (
-          <progress
-            className="eval-run-detail-progress"
-            max={job.total}
-            value={job.current}
-            aria-label={`Evaluation progress: ${job.current} of ${job.total} games`}
-          />
-        )}
+
+        <LeagueEvalCard
+          selectedPath={selectedPath}
+          isRunning={isRunning}
+        />
       </div>
 
       {/*
@@ -785,6 +807,85 @@ export function EvaluationRunDetail({ embedded = false }: EvaluationRunDetailPro
         }}
         onConfirm={runDelete}
       />
+    </div>
+  )
+}
+
+/**
+ * Card B — vs Top-N league (v2.x Sprint 1).
+ *
+ * Presents the N select + Elo threshold slider so the UI is ready
+ * for Sprint 2 BE hook-up. The Run button is disabled with a
+ * [BE-WAITING] hint because `POST /api/evaluation/run` today only
+ * accepts a single `{model_path, bot_level, n_games}` payload —
+ * there's no field for a league top-N adversary list.
+ *
+ * When BE ships the league-eval path (e.g. by extending
+ * EvalRunRequest with `{mode: 'league', top_n, elo_min}` OR a new
+ * `/api/evaluation/run_league` endpoint), the only change here is
+ * to drop the disabled + wire an onClick analog of handleRun.
+ */
+function LeagueEvalCard({
+  selectedPath,
+  isRunning,
+}: {
+  selectedPath: string
+  isRunning: boolean
+}) {
+  const [topN, setTopN] = useState<5 | 10 | 20>(10)
+  const [eloThreshold, setEloThreshold] = useState<number>(1000)
+  return (
+    <div className="eval-run-detail-runner card">
+      <div className="eval-run-detail-runner-card-title">
+        vs Top-N league
+      </div>
+      <div className="eval-run-detail-runner-row">
+        <label className="eval-run-detail-field">
+          <span className="eval-run-detail-field-label">Top-N</span>
+          <select
+            value={topN}
+            onChange={e => setTopN(Number(e.target.value) as 5 | 10 | 20)}
+            className="eval-run-detail-select"
+            disabled={isRunning}
+          >
+            <option value={5}>Top 5</option>
+            <option value={10}>Top 10</option>
+            <option value={20}>Top 20</option>
+          </select>
+        </label>
+        <label className="eval-run-detail-field eval-run-detail-field--slider">
+          <span className="eval-run-detail-field-label">
+            Elo threshold ≥ {eloThreshold}
+          </span>
+          <input
+            type="range"
+            min={800}
+            max={1800}
+            step={25}
+            value={eloThreshold}
+            onChange={e => setEloThreshold(Number(e.target.value))}
+            className="eval-run-detail-slider"
+            disabled={isRunning}
+          />
+        </label>
+        <button
+          type="button"
+          disabled
+          title="League-mode evaluation is pending BE support (Sprint 2)"
+          className="eval-run-detail-submit btn btn-primary"
+        >
+          {`Run Evaluation (vs Top-${topN})`}
+        </button>
+      </div>
+      <p className="eval-run-detail-league-waiting text-muted">
+        [BE-WAITING] The Top-N league evaluation endpoint ships in
+        Sprint 2. Selector state above is preserved so a single
+        handler change lands the feature.
+      </p>
+      {/* Guard against the lint complaint: acknowledge selectedPath
+          is the same checkpoint target used by the rule ladder card
+          (future league endpoint will take model_path + top_n). */}
+      <span hidden data-selected-path={selectedPath} />
     </div>
   )
 }
