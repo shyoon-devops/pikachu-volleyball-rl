@@ -3,6 +3,10 @@ import { Link } from 'react-router-dom'
 import { EnvChip } from '../shared/EnvChip'
 import { ScoreCell } from '../shared/ScoreCell'
 import { TimestampText } from '../shared/TimestampText'
+import { OpponentChip } from '../shared/OpponentChip'
+import { RewardModelChip } from '../shared/RewardModelChip'
+import { PolicyTypeChip } from '../shared/PolicyTypeChip'
+import { AlgorithmChip } from '../shared/AlgorithmChip'
 import { GameCanvas } from '../game/GameCanvas'
 import { GameOverlay } from '../game/GameOverlay'
 import { BatchTabBar } from '../game/BatchTabBar'
@@ -10,11 +14,22 @@ import { ErrorBoundary } from '../ErrorBoundary'
 import { MetricsChart } from './MetricsChart'
 import { TrainingControls } from './TrainingControls'
 import { HyperparamForm } from './HyperparamForm'
+import { UpdatingOverlay } from './UpdatingOverlay'
 import type { TitleValidationState } from './TitleInput'
+import { getLeagueStandings } from '../../lib/api'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
 import { DashboardSkeleton } from './DashboardSkeleton'
 import { useTrainingState } from '../../hooks/useTrainingState'
-import type { GameRecord, Hyperparams } from '../../lib/types'
+import type {
+  GameRecord,
+  Hyperparams,
+  LeagueSampling,
+  LeagueUpdatePayload,
+  Algorithm,
+  PolicyType,
+  RewardModel,
+  TrainingMode,
+} from '../../lib/types'
 import {
   formatBotLevel,
   formatRallyCount,
@@ -44,7 +59,7 @@ const MAX_N_ENVS = 16
 const CANVAS_FADE_MS = 180
 
 export function Dashboard() {
-  const { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, send } = useTrainingState()
+  const { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, leagueUpdate, trainingMode, updatingPolicy, send } = useTrainingState()
 
   // Hyperparams live at the Dashboard so the single Start button in
   // <TrainingControls /> can submit them. Do NOT re-introduce a second
@@ -67,6 +82,40 @@ export function Dashboard() {
    */
   const [title, setTitle] = useState('')
   const [titleValidation, setTitleValidation] = useState<TitleValidationState>({ kind: 'ok' })
+
+  // v2.x Sprint 1 — opponent selection. `bot_ladder` is the BE
+  // default; `pfsp` matches the ADR-0014 default sampler. State lives
+  // here so `handleStart` can include mode + sampling on the
+  // `training:start` payload (BE-impl-7 WsTrainingStartPayload).
+  const [opponentMode, setOpponentMode] = useState<TrainingMode>('bot_ladder')
+  const [samplingStrategy, setSamplingStrategy] = useState<LeagueSampling>('pfsp')
+  const [leaguePoolSize, setLeaguePoolSize] = useState<number | null>(null)
+
+  // v2.x Sprint 2 — reward model regime (ADR 0015 / Designer spec
+  // DESIGN-REWARD-MODEL-SELECTOR.md). Default `shaped_v1` preserves
+  // v1.0.0 behaviour; the BE WsTrainingStartPayload defaults to the
+  // same enum member so an omitted field here would be equivalent.
+  // We still spread the key on `training:start` so payload shape is
+  // stable across bot_ladder / self_play / reward-model switches.
+  const [rewardModel, setRewardModel] = useState<RewardModel>('shaped_v1')
+  const [policyType, setPolicyType] = useState<PolicyType>('mlp_v1')
+  const [algorithm, setAlgorithm] = useState<Algorithm>('ppo')
+
+  /**
+   * Fetch the current league standings once on mount + after every
+   * training:start (pool entries admit on save). Only needed to
+   * populate the opponent-section pool chip; null-on-failure keeps
+   * the chip in "— / 32" until the standings endpoint responds.
+   */
+  useEffect(() => {
+    let cancelled = false
+    getLeagueStandings(1)
+      .then(s => {
+        if (!cancelled) setLeaguePoolSize(s.totalCheckpoints)
+      })
+      .catch(() => { /* best-effort — chip renders placeholder */ })
+    return () => { cancelled = true }
+  }, [])
 
   /**
    * Track the prior status.title so we can toast when BE echoes a
@@ -212,6 +261,26 @@ export function Dashboard() {
       ...topLevel,
       hyperparams: hyperparamsBlob,
       title: wireTitle,
+      // v2.x Sprint 1: opponent selection flows to BE-impl-7's
+      // WsTrainingStartPayload. `sampling` is ignored by BE when
+      // mode=bot_ladder but we still send it so the payload shape
+      // is stable and a mid-session switch doesn't churn keys.
+      mode: opponentMode,
+      sampling: samplingStrategy,
+      // v2.x Sprint 2 (ADR 0015): reward-model regime. Always sent
+      // for payload-shape stability; BE Pydantic validates the
+      // literal and rejects unknown values at the handler boundary.
+      reward_model: rewardModel,
+      // v2.x Sprint 3 (ADR 0016): policy architecture. BE Pydantic
+      // rejects reserved values (`gru_v1`, `transformer_v1`) at the
+      // handler boundary — the selector disables them, so the only
+      // way a reserved value lands here is a programmatic mutation.
+      policy_type: policyType,
+      // v2.x Sprint 4 (ADR 0017): RL algorithm. PPO default; SAC
+      // is runtime-gated for reserved `(sac, lstm_v1, *)` and
+      // `(sac, gru_v1|transformer_v1, *)` triples via the trainer's
+      // NotImplementedError — FE does not pre-gate per ADR §4.
+      algorithm: algorithm,
     })
   }
 
@@ -273,6 +342,20 @@ export function Dashboard() {
         />
 
         {/*
+          v2.x Sprint 1 — current-run league line (§3).
+          Renders "Elo N · #rank of pool" when the live run
+          appears in the league top-N. Hidden entirely when the
+          run isn't in the top, when no league update has landed,
+          or when the run is in bot_ladder mode.
+        */}
+        {trainingMode === 'self_play' && (
+          <CurrentRunLeagueLine
+            experimentId={status.experimentId ?? null}
+            leagueUpdate={leagueUpdate}
+          />
+        )}
+
+        {/*
           Local ErrorBoundary (FC-R6C, 2026-04-18): a refresh
           before any WS frame lands occasionally threw inside the
           canvas + batch-tab subtree ("Something unexpected..."
@@ -296,6 +379,12 @@ export function Dashboard() {
                 Waiting for game frames...
               </div>
             )}
+            <UpdatingOverlay
+              show={updatingPolicy.active}
+              longGap={updatingPolicy.longGap}
+              source={updatingPolicy.source}
+              step={updatingPolicy.step}
+            />
           </div>
 
           {effectiveNEnvs > 0 ? (
@@ -331,6 +420,17 @@ export function Dashboard() {
             title={title}
             onTitleChange={setTitle}
             onTitleValidationChange={setTitleValidation}
+            opponentMode={opponentMode}
+            onOpponentModeChange={setOpponentMode}
+            samplingStrategy={samplingStrategy}
+            onSamplingStrategyChange={setSamplingStrategy}
+            leaguePoolSize={leaguePoolSize}
+            rewardModel={rewardModel}
+            onRewardModelChange={setRewardModel}
+            policyType={policyType}
+            onPolicyTypeChange={setPolicyType}
+            algorithm={algorithm}
+            onAlgorithmChange={setAlgorithm}
           />
         )}
       </section>
@@ -371,16 +471,15 @@ export function Dashboard() {
                     */}
                     {([
                       ['Time'],
-                      // FC-R6G (2026-04-18): GameRecord.title (BE T1,
-                      // commit a7351e57) carries the human training
-                      // label. Legacy rows render "—".
                       ['Title'],
                       ['Env'],
-                      // FC-R6D (2026-04-18): em-dash values are
-                      // BE-WAITING — the field isn't on
-                      // GameRecord yet. Surface a tooltip so users
-                      // understand the column isn't broken.
                       ['Episode', 'Pending BE support — field not yet saved per game'],
+                      // v2.x Sprint 1: Opponent column between Env/Episode
+                      // and Score (docs/design/SELF-PLAY-UX.md §3).
+                      // Until BE ships `opponent_checkpoint_id` on
+                      // `game:result`, every row renders the
+                      // `Rule L{bot_level}` fallback variant.
+                      ['Opponent'],
                       ['Bot Level'],
                       ['Score'],
                       ['Winner'],
@@ -433,11 +532,32 @@ const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecor
         ) : (
           '—'
         )}
+        {/* Algorithm chip — 8 px gap, right of title. Algorithm
+            leads because it's the most foundational regime choice
+            (v2.x Sprint 5, ADR 0018). */}
+        <span className="recent-games-algo-chip">
+          <AlgorithmChip value={g.algorithm} />
+        </span>
+        {/* Reward-model chip — 4 px gap, right of algorithm chip. */}
+        <span className="recent-games-reward-chip">
+          <RewardModelChip value={g.rewardModel} />
+        </span>
+        {/* Policy-type chip — 4 px gap, right of reward chip
+            (DESIGN-POLICY-TYPE-SELECTOR.md §4). */}
+        <span className="recent-games-policy-chip">
+          <PolicyTypeChip value={g.policyType} />
+        </span>
       </td>
       <td>
         <EnvChip envId={g.envId} />
       </td>
       <td className="text-muted">{formatEpisode(g.episode)}</td>
+      <td>
+        <OpponentChip
+          opponentCheckpointId={g.opponentCheckpointId}
+          botLevel={g.botLevel}
+        />
+      </td>
       <td>{formatBotLevel(g.botLevel)}</td>
       <ScoreCell s1={g.score1} s2={g.score2} />
       <td className={g.winner === 1 ? 'winner-agent' : 'winner-bot'}>
@@ -454,3 +574,40 @@ const RecentGameRow = memo(function RecentGameRow({ game: g }: { game: GameRecor
     </tr>
   )
 })
+
+/**
+ * Current-run league line (v2.x Sprint 1 — docs/design/SELF-PLAY-UX.md §3).
+ *
+ * Renders `Elo {N} · #{rank} of {poolSize}` when the live run's
+ * experiment id matches a row in the latest `training:league_update`
+ * top-N snapshot. If the experiment hasn't been admitted yet (or
+ * has but sits outside top-N), the line renders nothing — the
+ * League sub-tab carries the fuller detail.
+ *
+ * Rank is 1-based within the current top-N. When BE grows pool
+ * snapshots beyond 10, the FE can still show accurate rank without
+ * changes.
+ */
+function CurrentRunLeagueLine({
+  experimentId,
+  leagueUpdate,
+}: {
+  experimentId: string | null
+  leagueUpdate: LeagueUpdatePayload | null
+}) {
+  if (!experimentId || !leagueUpdate) return null
+  const idx = leagueUpdate.topN.findIndex(c => c.experimentId === experimentId)
+  if (idx < 0) return null
+  const entry = leagueUpdate.topN[idx]
+  return (
+    <div className="dashboard-current-run-league" role="status" aria-live="polite">
+      <span className="dashboard-current-run-league-elo">
+        {`Elo ${Math.round(entry.elo)}`}
+      </span>
+      <span className="dashboard-current-run-league-sep"> · </span>
+      <span className="dashboard-current-run-league-rank">
+        {`#${idx + 1} of ${leagueUpdate.poolSize}`}
+      </span>
+    </div>
+  )
+}

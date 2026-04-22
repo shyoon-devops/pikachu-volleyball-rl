@@ -493,6 +493,24 @@
   border-radius: 2px;
 }
 
+/* Algorithm chip slot — 8 px gap right of the title link
+   (v2.x Sprint 5, ADR 0018). Leads the three-chip stack. */
+.recent-games-algo-chip {
+  margin-left: 8px;
+}
+
+/* Reward-model chip slot — 4 px gap right of the algorithm chip
+   (DESIGN-REWARD-MODEL-SELECTOR.md §4). */
+.recent-games-reward-chip {
+  margin-left: 4px;
+}
+
+/* Policy-type chip slot — 4 px gap right of the reward chip
+   (DESIGN-POLICY-TYPE-SELECTOR.md §4). */
+.recent-games-policy-chip {
+  margin-left: 4px;
+}
+
 /* FC-R8a: Placeholder shown in place of BatchTabBar when no live
    env frames exist — either training is idle (no active run) or
    the first frame hasn't landed yet. Keeps the layout stable so
@@ -513,4 +531,33 @@
 
 .dashboard-batch-tab-placeholder--idle {
   font-style: italic;
+}
+
+/* v2.x Sprint 1 — current-run league line (§3).
+   Small mono line rendered under TrainingControls when the live
+   run has an admitted league entry. Hidden entirely otherwise. */
+.dashboard-current-run-league {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px 10px;
+  margin-top: var(--space-2);
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.1));
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-current-run-league-elo {
+  font-weight: var(--weight-semibold);
+}
+
+.dashboard-current-run-league-sep {
+  color: var(--color-text-muted);
+}
+
+.dashboard-current-run-league-rank {
+  color: var(--color-text-secondary);
 }

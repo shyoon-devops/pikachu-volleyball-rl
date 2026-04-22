@@ -271,6 +271,44 @@ export interface GameRecord {
    * `env_id` so the FE column can light up per row.
    */
   episode?: number
+  /**
+   * Opponent identifier for this match (v2.x Sprint 1).
+   *
+   * `null` / undefined means this game was fought against the rule
+   * bot at `botLevel` — the Recent Games Opponent column renders
+   * `Rule L{botLevel}` in that case (today's normal path).
+   *
+   * When BE-impl ships the self-play broadcast, this carries the
+   * opponent checkpoint id (the league pool slug, e.g.
+   * `run-baseline__abc12345__200000`) so the FE can render the
+   * `policy_<exp8>_<step>` chip variant. [BE-WAITING] for the
+   * `game:result` payload to carry this field.
+   */
+  opponentCheckpointId?: string | null
+  /**
+   * Reward-model regime of the training run that produced this
+   * game (v2.x Sprint 2). Denormalised off `TrainingRun.reward_model`
+   * by BE so the Recent Games widget can render the reward chip
+   * without a separate join. Follows the same `parseRewardModel`
+   * guard — unknown values degrade to the `shaped_v1` default.
+   */
+  rewardModel?: RewardModel | null
+  /**
+   * Policy architecture the run was launched with (v2.x Sprint 3,
+   * ADR 0016). Denormalised on `/api/games` so the Recent Games
+   * row can render the policy chip alongside the reward chip.
+   * `parsePolicyType` guards unknown values; reserved values
+   * (`gru_v1`, `transformer_v1`) are never persisted on a real
+   * run — the spec surfaces data drift as a danger-tone chip.
+   */
+  policyType?: PolicyType | null
+  /**
+   * RL algorithm the run was launched with. Denormalised on
+   * `/api/games` for list-surface chips (v2.x Sprint 5 — list
+   * chip lands in S5, after ADR 0018 expanded the enum to
+   * `ppo | sac | dreamer_v3`).
+   */
+  algorithm?: Algorithm | null
 }
 
 /**
@@ -304,6 +342,32 @@ export interface TrainingRun {
    * at the display layer — `snakeToCamel` handles the wire format.
    */
   hyperparams?: Partial<Hyperparams> | null
+  /**
+   * Reward-model regime the run was launched with (v2.x Sprint 2,
+   * ADR 0015). BE decorates every `/api/training/runs` row with
+   * this field (shaped_v1 default for pre-S2 legacy rows, per the
+   * Mongo backfill migration). The FE guards the value via
+   * `parseRewardModel` — rows arriving with an unknown string
+   * collapse to the `shaped_v1` display default rather than
+   * propagating the bad value.
+   */
+  rewardModel?: RewardModel | null
+  /**
+   * Policy architecture the run was launched with (v2.x Sprint 3,
+   * ADR 0016). BE decorates every `/api/training/runs` row with
+   * this field; pre-S3 rows default to `mlp_v1` via the Mongo
+   * backfill. `parsePolicyType` gates the value — unknowns fall
+   * back to the `mlp_v1` display default at the component layer.
+   */
+  policyType?: PolicyType | null
+  /**
+   * RL algorithm the run was launched with (v2.x Sprint 4,
+   * ADR 0017). BE decorates every `/api/training/runs` row via
+   * the ADR-§9 one-shot Mongo backfill (`algorithm = "ppo"` for
+   * pre-S4 rows). `parseAlgorithm` gates the value; unknowns
+   * collapse to the `ppo` display default.
+   */
+  algorithm?: Algorithm | null
 }
 
 export interface EvalResult {
@@ -405,6 +469,9 @@ export type WSServerMessageType =
   | 'training:frame'
   | 'training:status'
   | 'training:env_frame'
+  | 'training:league_update'
+  | 'training:update_start'
+  | 'training:update_end'
   | 'game:result'
   | 'replay:data'
 
@@ -451,3 +518,183 @@ export type WSMessage<T extends WSMessageType = WSMessageType> = {
 }
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected'
+
+// ── Self-play league (v2.x Sprint 1) ─────────────────────────────
+// Contracts tracked with ADR-0014 + docs/design/SELF-PLAY-UX.md.
+
+/** Training-mode toggle (wire value). ADR-0014 §1. */
+export type TrainingMode = 'bot_ladder' | 'self_play'
+
+/**
+ * Self-play sampling strategies (ADR-0014 §2). Only consumed when
+ * `training_mode === 'self_play'`. `pfsp` is the default (weights
+ * opponents by `(1 − winrate)^2`); `elo_proximity` matches by
+ * nearby Elo; `uniform` draws unbiased.
+ */
+export type LeagueSampling = 'uniform' | 'elo_proximity' | 'pfsp'
+
+/**
+ * Reward-model regime the trainer optimises (v2.x Sprint 2,
+ * ADR 0015 / docs/design/DESIGN-REWARD-MODEL-SELECTOR.md).
+ *
+ * The three literal values mirror the BE `WsTrainingStartPayload`
+ * enum (`backend/app/models/schemas.py`). The FE rejects any other
+ * value on the wire via `parseRewardModel` — BE-only additions
+ * will appear as the safe default until the FE adds the matching
+ * segmented-control cell.
+ */
+export type RewardModel = 'shaped_v1' | 'sparse_v1' | 'learned_shaped_v1'
+
+/** All reward-model values in canonical display order (Shaped →
+ *  Sparse → Learned shaped). Used by the segmented control and
+ *  the runtime-guard allow-list. */
+export const REWARD_MODELS = [
+  'shaped_v1',
+  'sparse_v1',
+  'learned_shaped_v1',
+] as const satisfies readonly RewardModel[]
+
+/**
+ * Runtime guard: accept only the three known enum values, `null`
+ * / `undefined` / unknown → `null`. Callers that need the spec's
+ * default behaviour should coalesce with `'shaped_v1'`; callers
+ * that must surface the drift (e.g. API decoders) can branch on
+ * `null` to log + degrade rather than silently backfill.
+ */
+export function parseRewardModel(v: unknown): RewardModel | null {
+  return typeof v === 'string' && (REWARD_MODELS as readonly string[]).includes(v)
+    ? (v as RewardModel)
+    : null
+}
+
+/**
+ * Policy architecture the trainer instantiates (v2.x Sprint 3,
+ * ADR 0016 / docs/design/DESIGN-POLICY-TYPE-SELECTOR.md).
+ *
+ * Four literal values mirror the BE `WsTrainingStartPayload`
+ * enum. `gru_v1` and `transformer_v1` are *reserved* — the BE
+ * rejects them at `training:start`, so they only ever appear as
+ * disabled "Coming soon" cells in the selector. Runtime guard
+ * rejects unknown values; decoded `null` collapses to the
+ * `mlp_v1` display default the same way reward_model does.
+ */
+export type PolicyType = 'mlp_v1' | 'lstm_v1' | 'gru_v1' | 'transformer_v1'
+
+/** All policy-type values in canonical display order (MLP → LSTM
+ *  → GRU → Transformer). Drives the segmented control + guard. */
+export const POLICY_TYPES = [
+  'mlp_v1',
+  'lstm_v1',
+  'gru_v1',
+  'transformer_v1',
+] as const satisfies readonly PolicyType[]
+
+/** Reserved (trainer-rejected) policy values. The selector marks
+ *  these as disabled "Coming soon" cells; no chip renders for
+ *  them on list surfaces. */
+export const RESERVED_POLICY_TYPES = ['gru_v1', 'transformer_v1'] as const satisfies readonly PolicyType[]
+
+/**
+ * Runtime guard: accept only the four known enum values; returns
+ * `null` for unknown / missing. Callers that need the spec default
+ * should coalesce with `'mlp_v1'`.
+ */
+export function parsePolicyType(v: unknown): PolicyType | null {
+  return typeof v === 'string' && (POLICY_TYPES as readonly string[]).includes(v)
+    ? (v as PolicyType)
+    : null
+}
+
+/**
+ * RL algorithm the trainer instantiates. Enum extended across
+ * sprints:
+ *   - S4 (ADR 0017) — `ppo` (on-policy baseline) + `sac`
+ *     (off-policy actor-critic).
+ *   - S5 (ADR 0018) — `dreamer_v3` (model-based world-model).
+ *     `policy_type` is orthogonal / ignored when
+ *     `algorithm === 'dreamer_v3'` (RSSM replaces MLP/LSTM as the
+ *     temporal feature extractor — ADR 0018 §4). Record still
+ *     persists caller's `policy_type` for audit parity.
+ *
+ * No cross-field WS constraint — FE must not pre-gate triples;
+ * runtime `NotImplementedError` in the trainer is the source of
+ * truth (ADR 0017 §4 / ADR 0018 §4).
+ */
+export type Algorithm = 'ppo' | 'sac' | 'dreamer_v3'
+
+/** All algorithm values in canonical display order (PPO → SAC →
+ *  Dreamer V3). Drives the segmented control + guard. */
+export const ALGORITHMS = ['ppo', 'sac', 'dreamer_v3'] as const satisfies readonly Algorithm[]
+
+/** Runtime guard — unknown strings return `null`. Callers that
+ *  need the spec default should coalesce with `'ppo'`. */
+export function parseAlgorithm(v: unknown): Algorithm | null {
+  return typeof v === 'string' && (ALGORITHMS as readonly string[]).includes(v)
+    ? (v as Algorithm)
+    : null
+}
+
+/** Source label for a pool entry (ADR-0014 §1). `anchor` rows are
+ *  the fixed-Elo L1/L3/L5 rule baselines that never update. */
+export type LeagueCheckpointSource = 'training' | 'v1_legacy' | 'anchor'
+
+/** One row of the league pool. Wire shape from BE-T4 league API is
+ *  snake_case; `snakeToCamel` produces these camelCase keys. */
+export interface LeagueCheckpoint {
+  id: string
+  elo: number
+  wins: number
+  losses: number
+  games: number
+  /** ISO-8601 UTC admission timestamp. */
+  admittedAt: string
+  step?: number | null
+  experimentId?: string | null
+  source: LeagueCheckpointSource
+}
+
+/** Envelope shape for `GET /api/league/standings`. */
+export interface LeagueStandings {
+  top: LeagueCheckpoint[]
+  championId: string | null
+  generation: number
+  poolSize: number
+  totalCheckpoints: number
+}
+
+/**
+ * Payloads for the PPO gradient-update lifecycle (Fix-A FE).
+ * BE emits `training:update_start` when the rollout finishes and
+ * the PPO `.learn()` call begins; `training:update_end` fires when
+ * the first post-update frame is ready. Both carry the owning
+ * experiment id so consumers can ignore stale events from a
+ * previous session. `step` may be null for legacy / edge-case
+ * emissions; the overlay renders without it in that case.
+ */
+export interface TrainingUpdateStartPayload {
+  experimentId: string
+  step?: number | null
+}
+
+export interface TrainingUpdateEndPayload {
+  experimentId: string
+  step?: number | null
+}
+
+/** Payload for the `training:league_update` WS broadcast
+ *  (every LEAGUE_BROADCAST_INTERVAL matches, BE handlers.py). */
+export interface LeagueUpdatePayload {
+  topN: LeagueCheckpoint[]
+  poolSize: number
+  championId: string | null
+  generation: number
+  totalMatches: number
+  sinceLastBroadcast: number
+  /** Recent match summaries for the Recent Matches panel. */
+  recent?: Array<{
+    opponentId: string
+    winner: string | null
+    duration: number
+    deltaElo: number
+  }>
+}

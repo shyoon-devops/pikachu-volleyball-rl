@@ -137,6 +137,82 @@ class MetricsCallback(BaseCallback):
         return True
 
 
+class UpdateWindowCallback(BaseCallback):
+    """Emit explicit WS events around the SB3 gradient-update window.
+
+    The freeze-analysis work on 2026-04-19 pinned PPO's per-rollout
+    ``train()`` phase as the 14-second synchronous blocker that was
+    showing up on the dashboard as "overlay didn't fire" stutters —
+    the FE was heuristic-timing the gap between ``env.step`` events
+    with a 1,500 ms threshold, which clipped the edges of the real
+    update window. Emitting explicit start/end events removes the
+    heuristic entirely:
+
+    * ``_on_rollout_end`` → enqueue ``training:update_start``.
+      SB3 calls this AFTER collect_rollouts finishes and BEFORE
+      ``train()`` runs, which is the exact moment the VecEnv goes
+      idle for the duration of the update.
+    * ``_on_rollout_start`` → enqueue ``training:update_end``.
+      SB3 calls this when a new rollout begins, i.e. just after
+      ``train()`` returns. The very first rollout has no preceding
+      update, so the first ``_on_rollout_start`` is skipped via the
+      ``_sent_first_start`` latch.
+
+    Emits on both bot_ladder and self_play paths — the gradient
+    update is a trainer-level phenomenon, not a league-specific one.
+    Payload carries ``experiment_id`` so the FE can disambiguate if
+    multiple runs stream in parallel (not a concern today, but the
+    contract was free to set).
+    """
+
+    def __init__(
+        self,
+        update_events_queue: asyncio.Queue[dict[str, Any]],
+        loop: asyncio.AbstractEventLoop,
+        experiment_id: str,
+        verbose: int = 0,
+    ) -> None:
+        super().__init__(verbose)
+        self.update_events_queue = update_events_queue
+        self.loop = loop
+        self.experiment_id = experiment_id
+        # First rollout has no prior gradient update — skip the first
+        # _on_rollout_start emit. After the flag flips True once, every
+        # subsequent rollout boundary emits normally.
+        self._sent_first_start: bool = False
+
+    def _on_rollout_start(self) -> None:
+        if not self._sent_first_start:
+            # Flag is set only after the first ``_on_rollout_end``
+            # fires — prevents a spurious ``update_end`` at the very
+            # start of training before any update has happened.
+            return
+        _safe_enqueue(
+            self.loop,
+            self.update_events_queue,
+            {
+                "type": "training:update_end",
+                "experiment_id": self.experiment_id,
+            },
+        )
+
+    def _on_rollout_end(self) -> None:
+        self._sent_first_start = True
+        _safe_enqueue(
+            self.loop,
+            self.update_events_queue,
+            {
+                "type": "training:update_start",
+                "experiment_id": self.experiment_id,
+            },
+        )
+
+    def _on_step(self) -> bool:
+        # No per-step work — rollout boundaries are the only cadence
+        # we care about. Required method on BaseCallback subclasses.
+        return True
+
+
 class CheckpointCallback(BaseCallback):
     """Saves model checkpoints every K steps.
 

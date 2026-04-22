@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import type { ConnectionState, GameRecord, GameState, TrainingMetrics, TrainingStatus } from '../../lib/types'
+import type { ConnectionState, GameRecord, GameState, LeagueUpdatePayload, TrainingMetrics, TrainingStatus } from '../../lib/types'
 import type { EnvFramesMap } from '../../hooks/useTrainingState'
 
 // Partial shape returned by useTrainingState — easy to swap per-test.
@@ -14,6 +14,14 @@ interface MockState {
   recentGames: GameRecord[]
   envFrames: EnvFramesMap
   gameResultSeq: number
+  leagueUpdate: LeagueUpdatePayload | null
+  trainingMode: 'bot_ladder' | 'self_play'
+  updatingPolicy: {
+    active: boolean
+    longGap: boolean
+    source: 'event' | 'heuristic' | null
+    step: number | null
+  }
   send: () => void
 }
 
@@ -26,6 +34,7 @@ const mockState: MockState = {
   recentGames: [],
   envFrames: {},
   gameResultSeq: 0,
+  leagueUpdate: null,
   send: vi.fn(),
 }
 
@@ -63,6 +72,9 @@ function resetMockState(overrides: Partial<MockState> = {}) {
     recentGames: [],
     envFrames: {},
     gameResultSeq: 0,
+    leagueUpdate: null,
+    trainingMode: 'bot_ladder' as const,
+    updatingPolicy: { active: false, longGap: false, source: null, step: null },
     send: vi.fn(),
     ...overrides,
   })
@@ -203,6 +215,153 @@ describe('Dashboard loading state', () => {
     // And the inverse — no top-level PPO-ctor leakage.
     expect(payload).not.toHaveProperty('learning_rate')
     expect(payload).not.toHaveProperty('gamma')
+  })
+
+  // ── v2.x Sprint 1: Opponent column + current-run league line + nav badge ──
+  it('Recent Games table adds the Opponent column with a Rule L{n} fallback chip', () => {
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'running', currentStep: 100, currentEpisode: 1 },
+      recentGames: [
+        {
+          id: 'g1',
+          gameId: 'uuid-1',
+          timestamp: '2026-04-18T10:00:00Z',
+          botLevel: 3,
+          score1: 15,
+          score2: 10,
+          winner: 1,
+          durationFrames: 4200,
+          rallyCount: 8,
+        } as GameRecord,
+      ],
+    })
+    renderDashboard()
+    expect(screen.getByRole('columnheader', { name: 'Opponent' })).toBeInTheDocument()
+    // Row renders the rule fallback since opponentCheckpointId is absent.
+    expect(screen.getByLabelText('Opponent: Rule L3')).toBeInTheDocument()
+  })
+
+  it('hides CurrentRunLeagueLine when trainingMode is bot_ladder', () => {
+    resetMockState({
+      connectionState: 'connected',
+      status: {
+        state: 'running',
+        currentStep: 100,
+        currentEpisode: 1,
+        experimentId: 'exp-live',
+      } as TrainingStatus,
+      trainingMode: 'bot_ladder',
+      leagueUpdate: {
+        topN: [
+          {
+            id: 'x',
+            elo: 1500,
+            wins: 30,
+            losses: 10,
+            games: 40,
+            admittedAt: '2026-04-18T00:00:00Z',
+            source: 'training',
+            experimentId: 'exp-live',
+          },
+        ],
+        poolSize: 12,
+        championId: 'x',
+        generation: 2,
+        totalMatches: 100,
+        sinceLastBroadcast: 64,
+      },
+    })
+    renderDashboard()
+    expect(screen.queryByText(/Elo 1500/)).toBeNull()
+  })
+
+  it('renders CurrentRunLeagueLine when self_play + experiment is in topN', () => {
+    resetMockState({
+      connectionState: 'connected',
+      status: {
+        state: 'running',
+        currentStep: 500,
+        currentEpisode: 2,
+        experimentId: 'exp-live',
+      } as TrainingStatus,
+      trainingMode: 'self_play',
+      leagueUpdate: {
+        topN: [
+          {
+            id: 'foo',
+            elo: 1800,
+            wins: 20,
+            losses: 5,
+            games: 25,
+            admittedAt: '2026-04-18T00:00:00Z',
+            source: 'training',
+            experimentId: 'other',
+          },
+          {
+            id: 'bar',
+            elo: 1500,
+            wins: 30,
+            losses: 10,
+            games: 40,
+            admittedAt: '2026-04-18T00:00:00Z',
+            source: 'training',
+            experimentId: 'exp-live',
+          },
+        ],
+        poolSize: 14,
+        championId: 'foo',
+        generation: 3,
+        totalMatches: 200,
+        sinceLastBroadcast: 64,
+      },
+    })
+    renderDashboard()
+    expect(screen.getByText(/Elo 1500/)).toBeInTheDocument()
+    expect(screen.getByText(/#2 of 14/)).toBeInTheDocument()
+  })
+
+  // ── v2.x Sprint 1: opponent mode + sampling in training:start ──
+  it('training:start payload includes mode + sampling (default bot_ladder + pfsp)', () => {
+    const send = vi.fn()
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      send,
+    })
+    renderDashboard()
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+    const [, payload] = send.mock.calls[0] as [string, Record<string, unknown>]
+    expect(payload.mode).toBe('bot_ladder')
+    // Default sampling is always sent for payload-shape stability, BE
+    // ignores it when mode=bot_ladder per handlers.py:_build_league_*.
+    expect(payload.sampling).toBe('pfsp')
+  })
+
+  // ── v2.x Sprint 4/5: algorithm in training:start (ADR 0017 §3,
+  // ADR 0018 §4 — enum now `ppo | sac | dreamer_v3`) ──
+  it('training:start payload carries ppo → sac → dreamer_v3 without any FE gate', () => {
+    const send = vi.fn()
+    resetMockState({
+      connectionState: 'connected',
+      status: { state: 'stopped', currentStep: 0, currentEpisode: 0 },
+      send,
+    })
+    renderDashboard()
+    // Default — first click sends ppo.
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+    const [, firstPayload] = send.mock.calls[0] as [string, Record<string, unknown>]
+    expect(firstPayload.algorithm).toBe('ppo')
+    // Switch to SAC.
+    fireEvent.click(screen.getByRole('radio', { name: /^SAC/ }))
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+    const [, secondPayload] = send.mock.calls[1] as [string, Record<string, unknown>]
+    expect(secondPayload.algorithm).toBe('sac')
+    // Switch to Dreamer V3 — the S5 enum extension.
+    fireEvent.click(screen.getByRole('radio', { name: /Dreamer V3/ }))
+    fireEvent.click(screen.getByRole('button', { name: /start training/i }))
+    const [, thirdPayload] = send.mock.calls[2] as [string, Record<string, unknown>]
+    expect(thirdPayload.algorithm).toBe('dreamer_v3')
   })
 
   // ── FC-R6G: title in training:start payload ──

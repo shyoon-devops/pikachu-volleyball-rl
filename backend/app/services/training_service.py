@@ -21,6 +21,11 @@ class TrainingServiceWrapper:
         n_envs: int = 8,
         title: str = "",
         slug: str = "",
+        training_mode: str = "bot_ladder",
+        opponent_provider: Any = None,
+        reward_model: str = "shaped_v1",
+        policy_type: str = "mlp_v1",
+        algorithm: str = "ppo",
     ) -> str:
         """Start a new training run.
 
@@ -33,6 +38,36 @@ class TrainingServiceWrapper:
         via ``title_service.allocate_title`` + ``slugify``; forwarding
         them here keeps the manager the single owner of the run's
         identity fields.
+
+        ``training_mode`` / ``opponent_provider`` (v2 Sprint-1): the
+        WS handler (B-impl-7) forwards both when ``mode="self_play"``
+        resolves to a live PFSPProvider; ``bot_ladder`` callers omit
+        them entirely. Defaults here match the manager's
+        ``bot_ladder`` / None contract so the old call shape keeps
+        working. Adding the kwargs was missed in the original
+        B-impl-7 commit — the WS handler crashed with TypeError on
+        any self_play request until this hotfix.
+
+        ``reward_model`` (v2 Sprint-2, ADR 0015): selects the reward
+        function variant (``shaped_v1`` / ``sparse_v1`` /
+        ``learned_shaped_v1``). Default keeps v1.0.0 behavior for any
+        caller that omits it. The manager forwards to PikaEnv's
+        constructor where the reward branching lives (AI Sprint-2
+        scope); the BE contract is the pass-through.
+
+        ``policy_type`` (v2 Sprint-3, ADR 0016): selects the policy
+        architecture (``mlp_v1`` / ``lstm_v1`` / reserved
+        ``gru_v1`` / ``transformer_v1``). Default keeps v1.0.0's
+        ``MlpPolicy`` branch. AI's ``policy_factory.py`` consumes the
+        field in the trainer to dispatch ``(algo_class, policy_class,
+        policy_kwargs)``; the BE contract is the pass-through + run-
+        record tag.
+
+        ``algorithm`` (v2 Sprint-4, ADR 0017): on- vs off-policy
+        learner (``ppo`` default / ``sac``). The AI Sprint-4 branch
+        extends ``policy_factory.make_policy_spec`` to dispatch on
+        both (algorithm × policy_type); the BE stays at pass-through
+        + run-record tag.
         """
         return await self.manager.start(
             hyperparams=hyperparams,
@@ -41,6 +76,11 @@ class TrainingServiceWrapper:
             n_envs=n_envs,
             title=title,
             slug=slug,
+            training_mode=training_mode,
+            opponent_provider=opponent_provider,
+            reward_model=reward_model,
+            policy_type=policy_type,
+            algorithm=algorithm,
         )
 
     async def stop(self, *, force: bool = True) -> dict[str, Any]:

@@ -1,0 +1,44 @@
+/* Policy-type list chip (v2.x Sprint 3 — DESIGN-POLICY-TYPE-SELECTOR.md §4).
+   Existing tokens only. Mirrors RewardModelChip primitive so both
+   chips sit in the same row with a 4 px gap (spec §4). */
+
+.policy-type-chip {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.policy-type-chip--neutral {
+  color: var(--color-text-muted);
+}
+
+/* LSTM signals a new regime, not a warning — uses accent text, no
+   chip-shaped background treatment. */
+.policy-type-chip--accent {
+  color: var(--color-accent);
+}
+
+/* Reserved values (gru_v1 / transformer_v1) that leak through the
+   runtime guard land here per spec §4 ("render --color-danger text
+   + tooltip rather than silently falling back to MLP styling"). */
+.policy-type-chip--danger {
+  color: var(--color-danger, #dc2626);
+}
+
+/* Full-label variant — drill-down metadata block (spec §5). No
+   chip styling, inline with the surrounding copy. */
+.policy-type-chip-full {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}

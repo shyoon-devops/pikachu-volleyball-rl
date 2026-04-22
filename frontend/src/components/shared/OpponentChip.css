@@ -1,0 +1,26 @@
+.opponent-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.opponent-chip--rule {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+
+.opponent-chip--policy {
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.12));
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+}

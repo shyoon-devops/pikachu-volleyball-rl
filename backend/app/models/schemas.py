@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -150,6 +151,70 @@ class WsTrainingStartPayload(BaseModel):
     # GAE lambda — advantage-estimator bias/variance knob. 0.9 is the
     # aggressively-biased end; 1.0 is plain discounted returns.
     gae_lambda: float | None = Field(default=None, ge=0.9, le=1.0)
+    # Opponent source — v2 Sprint-1 self-play league (ADR §5).
+    #   * ``"bot_ladder"`` (default) — FixedBotProvider(level=bot_level).
+    #     100% v1-compatible; no league wiring required.
+    #   * ``"self_play"`` — PFSPProvider over the league pool. Falls
+    #     back to bot_ladder at the handler layer if the pool is empty
+    #     or the required service isn't wired.
+    mode: Literal["bot_ladder", "self_play"] = "bot_ladder"
+    # Sampling strategy for ``mode="self_play"`` (ADR §2). The
+    # handler maps this onto ``PFSPProvider(..., strategy=sampling)``.
+    # ``"pfsp"`` default matches the ADR default. Ignored when
+    # mode="bot_ladder".
+    sampling: Literal["uniform", "elo_proximity", "pfsp"] = "pfsp"
+    # Reward function selector (ADR 0015 — reward simplification). The
+    # three enum members represent the staged transition away from
+    # hand-tuned shaping:
+    #   * ``"shaped_v1"`` (default) — v1.0.0 nine-term shaped reward.
+    #     Every existing caller without the field sees this branch.
+    #   * ``"sparse_v1"`` — terminal-only ±1 / ±0.1. Higher sample cost,
+    #     no farming paths (ADR §1).
+    #   * ``"learned_shaped_v1"`` — terminal + potential-based IRL
+    #     shaping (ADR §4). Policy-invariant per Ng-Harada-Russell.
+    # ``Literal`` rejects unknown values via Pydantic validation → the
+    # WS layer returns a 400 and the handler never runs. The AI-side
+    # env.py change consumes the field in ``_compute_reward``; the BE
+    # contract is just to thread the selector through start → runs.
+    reward_model: Literal["shaped_v1", "sparse_v1", "learned_shaped_v1"] = (
+        "shaped_v1"
+    )
+    # Policy architecture selector (ADR 0016 — Sprint 3). Mirrors the
+    # reward_model plumbing:
+    #   * ``"mlp_v1"`` (default) — v1.0.0 SB3 ``MlpPolicy``. Every pre-
+    #     Sprint-3 caller stays on this branch so behavior is unchanged.
+    #   * ``"lstm_v1"`` — ``RecurrentPPO`` with an LSTM backbone
+    #     (sb3-contrib). Non-trivial path — AI's ``policy_factory.py``
+    #     dispatches (algo_class, policy_class, policy_kwargs).
+    #   * ``"gru_v1"`` / ``"transformer_v1"`` — reserved. Pydantic
+    #     accepts them so the FE/CI surface is stable, but the trainer
+    #     raises ``NotImplementedError`` at runtime (ADR §8). No cross-
+    #     field constraint with reward_model or algorithm.
+    # Unknown values are rejected by ``Literal`` → the WS layer returns
+    # a payload_invalid failure, the handler never runs.
+    policy_type: Literal[
+        "mlp_v1", "lstm_v1", "gru_v1", "transformer_v1"
+    ] = "mlp_v1"
+    # Algorithm selector (ADR 0017 Sprint-4, extended by ADR 0018
+    # Sprint-5). The membership list grows with each sprint; this is
+    # the extension-point the S4 ADR called out ("future additions
+    # extend this enum, not a new field"):
+    #   * ``"ppo"`` (default) — on-policy PPO, matches every run before
+    #     S4. Legacy callers stay here.
+    #   * ``"sac"`` — off-policy SAC-Discrete (Christodoulou 2019) per
+    #     ADR 0017 §2 option A. Paired typically with
+    #     ``policy_type="mlp_v1"`` (S4 matrix — ``sac × lstm_v1`` is
+    #     experimental; no RecurrentSAC exists in SB3).
+    #   * ``"dreamer_v3"`` — model-based world-model learner (ADR
+    #     0018). ``policy_type`` is still accepted at this boundary
+    #     but the AI-side factory ignores it at runtime (Dreamer
+    #     builds its own actor from the RSSM latent, not from an SB3
+    #     policy registry key). BE stays at pass-through; no new
+    #     migration since the S4 ``ppo`` backfill is already idempotent
+    #     and covers pre-S5 rows correctly.
+    # Unknown values → Pydantic Literal reject → WS payload_invalid
+    # → caller sees the 400-equivalent; the handler never runs.
+    algorithm: Literal["ppo", "sac", "dreamer_v3"] = "ppo"
 
 
 class WsSetLevelPayload(BaseModel):

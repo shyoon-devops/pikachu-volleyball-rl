@@ -4,9 +4,13 @@ import { ErrorBoundary } from '../ErrorBoundary'
 import { ReplayList } from '../replay/ReplayList'
 import { EvaluationRunDetail } from '../evaluation/EvaluationRunDetail'
 import { HyperparamsSummary } from '../history/HyperparamsSummary'
+import { LeaguePanel } from './LeaguePanel'
 import { getTrainingRuns } from '../../lib/api'
 import { useTrainingState } from '../../hooks/useTrainingState'
 import { TimestampText } from '../shared/TimestampText'
+import { RewardModelChip } from '../shared/RewardModelChip'
+import { PolicyTypeChip } from '../shared/PolicyTypeChip'
+import { AlgorithmChip } from '../shared/AlgorithmChip'
 import type { TrainingRun } from '../../lib/types'
 import './UnifiedRunDetail.css'
 
@@ -22,16 +26,17 @@ import './UnifiedRunDetail.css'
  * sub-tab from App.tsx.
  */
 
-type SubTab = 'overview' | 'games' | 'eval'
+type SubTab = 'overview' | 'games' | 'eval' | 'league'
 
 const TABS: Array<{ key: SubTab; label: string }> = [
   { key: 'overview', label: 'Overview' },
   { key: 'games', label: 'Games' },
   { key: 'eval', label: 'Evaluation' },
+  { key: 'league', label: 'League' },
 ]
 
 function parseTab(raw: string | null): SubTab {
-  if (raw === 'games' || raw === 'eval' || raw === 'overview') return raw
+  if (raw === 'games' || raw === 'eval' || raw === 'overview' || raw === 'league') return raw
   return 'overview'
 }
 
@@ -169,6 +174,32 @@ export function UnifiedRunDetail() {
                       : '—'}
                   </dd>
                 </div>
+                {/* Algorithm — full label (v2.x Sprint 4, ADR 0017;
+                    Dreamer V3 label added in S5 per ADR 0018). Uses
+                    the AlgorithmChip `full` variant so the label
+                    formatting stays consistent across surfaces. */}
+                <div className="unified-run-overview-meta-item">
+                  <dt>Algorithm</dt>
+                  <dd>
+                    <AlgorithmChip value={run?.algorithm} variant="full" />
+                  </dd>
+                </div>
+                {/* Reward-model regime — full label, no chip styling
+                    (DESIGN-REWARD-MODEL-SELECTOR.md §4). */}
+                <div className="unified-run-overview-meta-item">
+                  <dt>Reward model</dt>
+                  <dd>
+                    <RewardModelChip value={run?.rewardModel} variant="full" />
+                  </dd>
+                </div>
+                {/* Policy architecture — full label, no chip styling
+                    (DESIGN-POLICY-TYPE-SELECTOR.md §5). */}
+                <div className="unified-run-overview-meta-item">
+                  <dt>Policy</dt>
+                  <dd>
+                    <PolicyTypeChip value={run?.policyType} variant="full" />
+                  </dd>
+                </div>
               </dl>
             )}
             <HyperparamsSummary hyperparams={run?.hyperparams} />
@@ -188,6 +219,12 @@ export function UnifiedRunDetail() {
         {activeTab === 'eval' && (
           <ErrorBoundary>
             <EvaluationRunDetail embedded />
+          </ErrorBoundary>
+        )}
+
+        {activeTab === 'league' && (
+          <ErrorBoundary>
+            <LeaguePanel />
           </ErrorBoundary>
         )}
       </div>

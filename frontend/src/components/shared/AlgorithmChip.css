@@ -1,0 +1,40 @@
+/* Algorithm list chip (v2.x Sprint 5). Same primitive as
+   RewardModelChip + PolicyTypeChip — the three chips sit in
+   the same title cell with a 4 px gap each. */
+
+.algorithm-chip {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.algorithm-chip--neutral {
+  color: var(--color-text-muted);
+}
+
+.algorithm-chip--accent {
+  color: var(--color-accent);
+}
+
+/* Dreamer V3 — Experimental this sprint, so the chip picks up
+   the warning tone that matches the selector's badge colour. */
+.algorithm-chip--warning {
+  color: var(--color-warning, #eab308);
+}
+
+/* Full-label variant — drill-down metadata block. */
+.algorithm-chip-full {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
