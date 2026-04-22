@@ -21,8 +21,13 @@ Short, durable records — **one decision per file**. ADRs can be `Accepted`, `S
 | [0011](adr/0011-faithful-port-with-parity-test.md) | Faithful port with parity test as acceptance criterion | Accepted |
 | [0012](adr/0012-refactor-sprint-area-by-area-with-parity-gates.md) | Refactor sprint — area-by-area with strict parity gates | Accepted |
 | [0013](adr/0013-unified-runs-navigation.md) | Unified Training Runs navigation replacing /history + /evaluation split | Accepted |
+| [0014](adr/0014-self-play-league.md) | Self-play League (v2.x Sprint 1) | Accepted |
+| [0015](adr/0015-reward-simplification.md) | Reward simplification (v2.x Sprint 2) | Accepted |
+| [0016](adr/0016-lstm-recurrent-policy.md) | LSTM recurrent policy (v2.x Sprint 3) | Accepted |
+| [0017](adr/0017-sac-continuous-actor-critic.md) | SAC actor-critic (v2.x Sprint 4) | Accepted |
+| [0018](adr/0018-dreamer-v3-world-model.md) | Dreamer V3 world-model (v2.x Sprint 5) | Accepted (Experimental) |
 
-Next ADR number: **0014**.
+Next ADR number: **0019**.
 
 ## Design specs (`design/`)
 
@@ -94,6 +99,13 @@ Per-version release notes. See the `releases/` directory; TEMPLATE.md lists the 
 - [RETROSPECTIVE-v1.0.0.md](RETROSPECTIVE-v1.0.0.md) — cycle retrospective (well / learned / improve)
 - [API-REFERENCE-v1.0.0.md](API-REFERENCE-v1.0.0.md) — REST / WS / MongoDB schema changes since v0.2.5
 - [CHANGELOG.md § 1.0.0](../CHANGELOG.md#100---2026-04-19)
+
+## v2.0.0 release artifacts
+
+- [release-notes/RELEASE-NOTES-v2.0.md](release-notes/RELEASE-NOTES-v2.0.md) — user-facing overview of the 5-sprint algorithm matrix
+- [migrations/v1-to-v2.md](migrations/v1-to-v2.md) — default-safe migration guide + optional backfill scripts
+- [retrospective/v2.x-retrospective.md](retrospective/v2.x-retrospective.md) — 5-sprint retrospective
+- [CHANGELOG.md § 2.0.0](../CHANGELOG.md#200--2026-04-22)
 
 ## How to add a new ADR
 
