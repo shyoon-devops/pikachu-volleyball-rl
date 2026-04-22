@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,14 +28,21 @@ from backend.app.services.eval_service import EvalServiceWrapper
 from backend.app.services.game_service import GameService
 from backend.app.services.indexes import ensure_indexes
 from backend.app.services.metrics_service import MetricsService
+from backend.app.services.migrations import (
+    backfill_training_runs_algorithm,
+    backfill_training_runs_policy_type,
+    backfill_training_runs_reward_model,
+)
 from backend.app.services.replay_service import ReplayService
 from backend.app.services.title_service import TrainingRunsService
 from backend.app.services.training_service import TrainingServiceWrapper
 from backend.app.ws.handlers import (
     env_frames_push_loop,
     frames_push_loop,
+    league_push_loop,
     metrics_push_loop,
     results_push_loop,
+    update_events_push_loop,
     ws_endpoint,
 )
 from backend.app.ws.manager import ConnectionManager
@@ -63,6 +71,28 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 — logged and swallowed intentionally
         logger.exception("ensure_indexes failed at startup; continuing without indexes")
 
+    # One-shot data migration: backfill reward_model on pre-v2.x
+    # training_runs docs (ADR 0015). Idempotent — no-op after the
+    # first successful run.
+    try:
+        await backfill_training_runs_reward_model(db)
+    except Exception:  # noqa: BLE001 — logged; app continues
+        logger.exception("backfill_training_runs_reward_model failed at startup")
+
+    # Sprint-3 companion: backfill policy_type (ADR 0016). Same
+    # $exists:False idempotence pattern so a redeploy is always safe.
+    try:
+        await backfill_training_runs_policy_type(db)
+    except Exception:  # noqa: BLE001 — logged; app continues
+        logger.exception("backfill_training_runs_policy_type failed at startup")
+
+    # Sprint-4 companion: backfill algorithm (ADR 0017). Idempotent
+    # alongside the reward_model + policy_type backfills.
+    try:
+        await backfill_training_runs_algorithm(db)
+    except Exception:  # noqa: BLE001 — logged; app continues
+        logger.exception("backfill_training_runs_algorithm failed at startup")
+
     app.state.mongo_client = client
     app.state.db = db
     app.state.game_service = GameService(db)
@@ -75,6 +105,12 @@ async def lifespan(app: FastAPI):
     app.state.training_runs_service = training_runs_service
     app.state.training_service.runs_service = training_runs_service
     app.state.eval_service = EvalServiceWrapper(db)
+    # League repository (v2 Sprint-1 B-impl-2). Wire early so the read
+    # endpoints work even before a training run kicks off.
+    from backend.app.services.league_repository import LeagueRepository
+    app.state.league_repository = LeagueRepository(
+        db, league_dir=os.getenv("LEAGUE_DIR", str(Path(model_dir) / "league")),
+    )
     app.state.ws_manager = ConnectionManager()
 
     push_tasks = [
@@ -92,6 +128,22 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(
             results_push_loop(
                 app.state.ws_manager, app.state.training_service, app.state.game_service
+            )
+        ),
+        asyncio.create_task(
+            league_push_loop(
+                app.state.ws_manager,
+                app.state.training_service,
+                app.state.league_repository,
+            )
+        ),
+        # Gradient-update window events — emits training:update_start
+        # at rollout-end and training:update_end at rollout-start so
+        # the FE overlay doesn't have to heuristic-time env.step gaps.
+        # See docs/diagnostics/FREEZE-ANALYSIS-20260419.md Fix A.
+        asyncio.create_task(
+            update_events_push_loop(
+                app.state.ws_manager, app.state.training_service
             )
         ),
     ]

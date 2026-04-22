@@ -125,6 +125,9 @@ class TrainingRunsService:
         bot_level: int,
         started_at,
         hyperparams: dict[str, Any] | None = None,
+        reward_model: str = "shaped_v1",
+        policy_type: str = "mlp_v1",
+        algorithm: str = "ppo",
     ) -> None:
         """Insert a run doc; tolerates a dead Mongo (best-effort).
 
@@ -133,6 +136,25 @@ class TrainingRunsService:
         here rather than on every ``GameRecord`` because the values
         don't change over the run; ``/api/training/runs`` joins on
         ``experiment_id`` at query time.
+
+        ``reward_model`` (ADR 0015 — v2 Sprint-2) records which reward
+        variant produced this run. Stored verbatim so a future ablation
+        report can group evaluator scorecards by reward function. The
+        default ``"shaped_v1"`` matches the migration backfill so a
+        legacy run inserted without the arg is indistinguishable from
+        a v1.0.0-era run tagged explicitly.
+
+        ``policy_type`` (ADR 0016 — v2 Sprint-3) records the policy
+        architecture for this run (``mlp_v1`` / ``lstm_v1`` / reserved
+        ``gru_v1`` / ``transformer_v1``). Enables the evaluator and
+        LoadedPolicyBot to pick the correct ``PPO.load`` vs
+        ``RecurrentPPO.load`` path later; the run-record write is the
+        source of truth. Default matches the migration backfill.
+
+        ``algorithm`` (ADR 0017 — v2 Sprint-4) records the learner
+        family (``ppo`` / ``sac``). Drives ``PPO.load`` vs ``SAC.load``
+        dispatch symmetrically to ``policy_type``; pre-S4 rows are
+        PPO by construction so the default matches the backfill.
 
         The in-memory manager remains the source of truth for the live
         run — Mongo is the persistence layer for the history + title
@@ -149,6 +171,9 @@ class TrainingRunsService:
                 "slug": slug,
                 "bot_level": int(bot_level),
                 "started_at": started_at,
+                "reward_model": reward_model,
+                "policy_type": policy_type,
+                "algorithm": algorithm,
             }
             if hyperparams:
                 # Pass through as-is so a new field the caller adds

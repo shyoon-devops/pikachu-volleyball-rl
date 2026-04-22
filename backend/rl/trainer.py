@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import signal
@@ -24,8 +25,15 @@ from backend.rl.callbacks import (
     EnvResultCallback,
     LiveFrameCallback,
     MetricsCallback,
+    UpdateWindowCallback,
 )
 from backend.rl.env import PikachuVolleyballEnv
+from backend.rl.league_callback import LeagueCallback
+from backend.rl.policy_factory import (
+    VALID_ALGORITHMS,
+    VALID_POLICY_TYPES,
+    make_policy_spec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +84,27 @@ class TrainingManager:
         # WS subscriber can never accumulate more than ``maxsize`` queued
         # snapshots. Drop-oldest is handled by _enqueue_with_drop.
         self.env_frames_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)
+        # League-update broadcast queue (v2 Sprint-1). The LeagueCallback
+        # (backend/rl/league_callback.py) pushes one record every 64
+        # matches; the WS side drains via league_push_loop and rebroadcasts
+        # as training:league_update. Bounded so a stalled FE subscriber
+        # can't blow memory — one flush-window of records at a time.
+        self.league_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=32)
+        # Gradient-update window events (training:update_start /
+        # training:update_end). Emitted by UpdateWindowCallback at
+        # SB3 rollout boundaries so the FE stops heuristic-timing the
+        # env.step gap; see docs/diagnostics/FREEZE-ANALYSIS-20260419.md
+        # Fix A. Bounded at a handful of records — these fire at most
+        # twice per rollout (start + end), so queue depth is always
+        # small even if the WS fan-out stalls briefly.
+        self.update_events_queue: asyncio.Queue[dict[str, Any]] = (
+            asyncio.Queue(maxsize=32)
+        )
 
-        self._model: PPO | None = None
+        # ``Any`` rather than ``PPO`` — ADR 0016 admits
+        # ``RecurrentPPO`` via the policy_factory; both expose the
+        # ``learn`` / ``save`` / ``load`` surface we use below.
+        self._model: Any = None
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         # Pause is a distinct signal from stop: the training thread keeps its
@@ -88,6 +115,34 @@ class TrainingManager:
         self._experiment_id: str = ""
         self._bot_level: int = 1
         self._hyperparams: dict[str, Any] = {}
+        # Self-play league wiring: set in start(). Initialized here so
+        # direct _train_loop attribute reads (after the ``getattr`` →
+        # direct-access cleanup in the review follow-up) always find
+        # them even if the class is constructed but start() was never
+        # called (test isolation / introspection paths).
+        self._training_mode: str = "bot_ladder"
+        self._opponent_provider: Any = None
+        # Reward selector (ADR 0015). Default keeps v1.0.0 nine-term
+        # shaped reward; WS start payload overrides per-run. Stored
+        # on the manager so the run-record writer + env factories can
+        # both read it without replumbing kwargs everywhere.
+        self._reward_model: str = "shaped_v1"
+        # Policy architecture selector (ADR 0016). Default ``mlp_v1``
+        # matches SB3's MlpPolicy — the v1.0.0 baseline — so every
+        # callsite that doesn't opt in keeps identical behaviour
+        # (parity test anchors this). ``policy_factory.py`` consumes
+        # this to pick (algo_class, policy_class, policy_kwargs), and
+        # the resume + checkpoint-load paths branch PPO.load vs
+        # RecurrentPPO.load on the stored tag without re-plumbing
+        # kwargs; the run-record writer also reads it off the manager.
+        self._policy_type: str = "mlp_v1"
+        # Algorithm selector (ADR 0017 Sprint-4). Default ``ppo`` keeps
+        # the v1.0.0 on-policy PPO path unchanged; ``sac`` dispatches
+        # to the vendored SACDiscrete via the ``policy_factory``. The
+        # manager holds the tag so the run-record writer + resume
+        # path can both read it, and checkpoint resume branches on
+        # this tag (SACDiscrete.load vs PPO.load vs RecurrentPPO.load).
+        self._algorithm: str = "ppo"
         # Human title + its filesystem slug for this run. Both are set
         # by start() before the thread kicks off; callbacks that tag
         # result/frame payloads read them off this object at emit time.
@@ -109,6 +164,11 @@ class TrainingManager:
         n_envs: int = 8,
         title: str = "",
         slug: str = "",
+        training_mode: str = "bot_ladder",
+        opponent_provider: Any = None,
+        reward_model: str = "shaped_v1",
+        policy_type: str = "mlp_v1",
+        algorithm: str = "ppo",
     ) -> str:
         """Start a new training experiment. Returns experiment_id.
 
@@ -117,12 +177,65 @@ class TrainingManager:
         is handed in and stores it for downstream tagging. An empty
         title is permitted at this layer (legacy / test callers); the
         slug falls back to ``"run"`` via the title service.
+
+        ``training_mode`` selects the opponent source (v2.x Sprint-1):
+          * ``"bot_ladder"`` (default, v1.0.0-compatible) — each env gets
+            a ``FixedBotProvider(level=bot_level)`` built in-process.
+            Uses the same SubprocVecEnv path we shipped at v1.0.0 so
+            throughput is unchanged.
+          * ``"self_play"`` — the caller is expected to pass a shared
+            ``opponent_provider`` (typically ``PFSPProvider``) that
+            samples from the league pool. Runs on ``DummyVecEnv``
+            (in-process) so the provider's rating store and checkpoint
+            cache aren't duplicated across subprocesses. Trades a small
+            amount of throughput for correct shared-state semantics.
+
+        See docs/adr/0014-self-play-league.md §3 for the design.
         """
         if self.status == "running":
             raise RuntimeError("Training is already running")
+        if training_mode not in ("bot_ladder", "self_play"):
+            raise ValueError(
+                f"training_mode must be 'bot_ladder' or 'self_play', "
+                f"got {training_mode!r}"
+            )
+        if training_mode == "self_play" and opponent_provider is None:
+            raise ValueError(
+                "training_mode='self_play' requires an opponent_provider "
+                "(typically a PFSPProvider built over the league pool)"
+            )
+        # policy_type enum validation mirrors ``reward_model``: the WS
+        # validator is the primary boundary guardrail, but a bypass
+        # (test / notebook / direct call) should crash here too rather
+        # than silently degrade to MLP. Reserved values
+        # (``gru_v1`` / ``transformer_v1``) are explicitly permitted
+        # at this surface — ADR 0016 §8 calls for runtime gating
+        # inside the training loop via ``make_policy_spec``, not at
+        # the awaited entry point, so that the manager's
+        # ``_policy_type`` + run-record persistence still round-trips
+        # the caller's selection for audit/backfill purposes.
+        if policy_type not in VALID_POLICY_TYPES:
+            raise ValueError(
+                f"policy_type must be one of {VALID_POLICY_TYPES}, "
+                f"got {policy_type!r}"
+            )
+        # Algorithm enum validation (ADR 0017 §3). Same pattern as
+        # policy_type: reserved / unimplemented cells are runtime-
+        # gated inside the factory so the run-record writer still
+        # persists the caller's selection for audit.
+        if algorithm not in VALID_ALGORITHMS:
+            raise ValueError(
+                f"algorithm must be one of {VALID_ALGORITHMS}, "
+                f"got {algorithm!r}"
+            )
 
         self._experiment_id = str(uuid.uuid4())
         self._bot_level = bot_level
+        self._training_mode = training_mode
+        self._opponent_provider = opponent_provider
+        self._reward_model = reward_model
+        self._policy_type = policy_type
+        self._algorithm = algorithm
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **(hyperparams or {})}
         # Title + slug set BEFORE the thread starts so the first demo-
         # tick + result-drain both see them. Slug defaults keep legacy
@@ -291,6 +404,19 @@ class TrainingManager:
                 "current_step": self.current_step,
                 "bot_level": self._bot_level,
                 "hyperparams": self._hyperparams,
+                # ADR 0016: the resume path needs policy_type so the
+                # factory dispatches to RecurrentPPO.load instead of
+                # silently PPO.load-ing an LSTM checkpoint (which
+                # would hit a layer-shape mismatch mid-unpickle).
+                "policy_type": self._policy_type,
+                # ADR 0017 §9 + Sprint-4: resume also needs algorithm
+                # so the factory picks SACDiscrete.load vs PPO.load.
+                # Replay/rollout buffers are not portable across
+                # algorithms — a SAC checkpoint loaded through
+                # PPO.load would deserialize with a different
+                # actor-critic + buffer layout and either fail at
+                # unpickle or corrupt the first training step.
+                "algorithm": self._algorithm,
             }
             meta_path = Path(self.model_dir) / _INTERRUPTED_META_FILENAME
             meta_path.write_text(json.dumps(meta, indent=2))
@@ -337,6 +463,12 @@ class TrainingManager:
         self._experiment_id = exp_id
         self._bot_level = meta.get("bot_level", 1)
         self._hyperparams = {**DEFAULT_HYPERPARAMS, **meta.get("hyperparams", {})}
+        # Default to ``mlp_v1`` for metas written before Sprint 3 — the
+        # entire pre-LSTM universe is MLP, so missing key == MLP.
+        self._policy_type = meta.get("policy_type", "mlp_v1")
+        # Pre-Sprint-4 metas implicitly mean PPO — every run before
+        # S4 was PPO by construction.
+        self._algorithm = meta.get("algorithm", "ppo")
 
         checkpoint_path = str(
             Path(self.model_dir) / exp_id / "interrupted"
@@ -373,23 +505,150 @@ class TrainingManager:
         """Run SB3 PPO training (called from a background thread)."""
         try:
             bot_level = self._bot_level
-            env = make_vec_env(
-                PikachuVolleyballEnv,
-                n_envs=n_envs,
-                env_kwargs={"bot_level": bot_level},
-                vec_env_cls=SubprocVecEnv,
+            training_mode = self._training_mode
+            provider = self._opponent_provider
+            # Thread the reward selector (ADR 0015) into env construction.
+            # Guarded: the AI Sprint-2 branch adds ``reward_model`` to
+            # PikachuVolleyballEnv.__init__; until that merges the env
+            # still has the v1 signature, and blindly forwarding would
+            # TypeError before the BE and AI branches converge. Once
+            # merged the guard is a no-op since the kwarg is always
+            # accepted.
+            env_accepts_reward_model = (
+                "reward_model"
+                in inspect.signature(PikachuVolleyballEnv).parameters
             )
+            reward_kwargs: dict[str, Any] = (
+                {"reward_model": self._reward_model}
+                if env_accepts_reward_model
+                else {}
+            )
+            if training_mode == "self_play" and provider is not None:
+                # Shared in-process PFSP provider: DummyVecEnv keeps the
+                # rating store, checkpoint cache, and pool manifest
+                # singleton across all env workers. Sub-env index is
+                # passed to env_kwargs so the provider's mirror / PFSP
+                # sampling can stagger deterministically across workers.
+                #
+                # NB: ``make_vec_env`` auto-wraps each env in SB3's
+                # Monitor, which is what populates ``info["episode"]``
+                # on natural terminations — the key ``_PausePoke`` (and
+                # MetricsCallback) read to drive current_episode. We
+                # must apply the same wrap manually here; dropping
+                # Monitor was the root cause of self-play runs showing
+                # ``step`` incrementing while ``episode`` stayed at 0.
+                # noqa kept on the import line itself so ruff actually
+                # sees the PLC0415 suppression.
+                from stable_baselines3.common.monitor import Monitor  # noqa: PLC0415
+                from stable_baselines3.common.vec_env import DummyVecEnv  # noqa: PLC0415
+
+                def _make_one(i: int) -> Any:
+                    def _f() -> Any:
+                        base_env = PikachuVolleyballEnv(
+                            bot_level=bot_level,
+                            opponent_provider=provider,
+                            env_index=i,
+                            **reward_kwargs,
+                        )
+                        return Monitor(base_env)
+                    return _f
+
+                env = DummyVecEnv([_make_one(i) for i in range(n_envs)])
+            else:
+                env = make_vec_env(
+                    PikachuVolleyballEnv,
+                    n_envs=n_envs,
+                    env_kwargs={"bot_level": bot_level, **reward_kwargs},
+                    vec_env_cls=SubprocVecEnv,
+                )
 
             hp = self._hyperparams
+            # ADR 0016 + 0017: policy_factory owns SB3 class + policy-
+            # registry key + per-algo kwargs. mlp_v1/PPO continues to
+            # build PPO + "MlpPolicy" + net_arch=[256,256] so pre-S3
+            # runs stay bit-identical (parity test anchors this).
+            spec = make_policy_spec(
+                self._policy_type, DEFAULT_NET_ARCH, algorithm=self._algorithm
+            )
             if checkpoint_path:
-                self._model = PPO.load(
-                    checkpoint_path,
+                # DreamerAgent.load accepts env= but not learning_rate;
+                # SB3 .load accepts both. Split the call shape here.
+                if self._algorithm == "dreamer_v3":
+                    self._model = spec.algo_class.load(
+                        checkpoint_path, env=env,
+                    )
+                else:
+                    self._model = spec.algo_class.load(
+                        checkpoint_path,
+                        env=env,
+                        learning_rate=hp.get("learning_rate", 3e-4),
+                    )
+            elif self._algorithm == "dreamer_v3":
+                # ADR 0018 §6: Dreamer's constructor has its own
+                # hyperparam surface (RSSM hidden size, latent dims,
+                # imagine horizon, replay capacity) sourced from
+                # ``DREAMER_DEFAULT_KWARGS``. PPO's n_steps /
+                # gae_lambda / clip_range have no meaning here and
+                # MUST NOT be forwarded — would raise TypeError.
+                # WS ``hyperparams`` blob can still override the
+                # shared knobs (learning rates, batch_size).
+                from backend.rl.dreamer_runner import (  # noqa: PLC0415
+                    DREAMER_DEFAULT_KWARGS,
+                )
+
+                dreamer_kwargs = {}
+                for key in (
+                    "world_model_lr", "actor_lr", "critic_lr",
+                    "batch_size", "sequence_length", "imagine_horizon",
+                    "train_every",
+                ):
+                    if key in hp:
+                        dreamer_kwargs[key] = hp[key]
+                self._model = spec.algo_class(
                     env=env,
-                    learning_rate=hp.get("learning_rate", 3e-4),
+                    verbose=0,
+                    **dreamer_kwargs,
+                )
+            elif self._algorithm == "sac":
+                # SAC has an entirely different hyperparam surface
+                # (replay buffer, τ, target-entropy) — PPO's n_steps /
+                # gae_lambda / clip_range are meaningless here, so we
+                # don't forward them. Defaults come from
+                # ``SAC_DEFAULT_KWARGS`` (ADR 0017 §5); WS ``hyperparams``
+                # entries can still override the learning rate /
+                # batch-size / buffer-size knobs we expose to the FE.
+                from backend.rl.policy_factory import (
+                    SAC_DEFAULT_KWARGS,  # noqa: PLC0415
+                )
+
+                sac_kwargs = dict(SAC_DEFAULT_KWARGS)
+                # Allow the WS-level hyperparams blob to override the
+                # handful of SAC knobs that are reasonable to surface
+                # (learning rate is shared with PPO; batch/buffer/
+                # learning_starts stay optional).
+                for key in (
+                    "learning_rate",
+                    "batch_size",
+                    "buffer_size",
+                    "learning_starts",
+                    "gamma",
+                    "tau",
+                ):
+                    if key in hp:
+                        sac_kwargs[key] = hp[key]
+                self._model = spec.algo_class(
+                    policy=spec.policy_class_id,
+                    env=env,
+                    verbose=0,
+                    policy_kwargs=dict(spec.policy_kwargs),
+                    **sac_kwargs,
                 )
             else:
-                self._model = PPO(
-                    policy="MlpPolicy",
+                # PPO / RecurrentPPO construction — UNCHANGED from
+                # pre-S4. Do not refactor; the bit-parity test
+                # (``test_policy_mlp_v1_parity``) anchors this.
+                self._model = spec.algo_class(
+                    policy=spec.policy_class_id,
                     env=env,
                     learning_rate=hp.get("learning_rate", 3e-4),
                     n_steps=hp.get("n_steps", 2048),
@@ -400,7 +659,7 @@ class TrainingManager:
                     clip_range=hp.get("clip_range", 0.2),
                     ent_coef=hp.get("ent_coef", 0.01),
                     verbose=0,
-                    policy_kwargs={"net_arch": DEFAULT_NET_ARCH},
+                    policy_kwargs=dict(spec.policy_kwargs),
                 )
 
             callbacks = CallbackList([
@@ -437,6 +696,25 @@ class TrainingManager:
                     loop=loop,
                     manager=self,
                     drain_interval=hp.get("env_result_drain_interval", 4),
+                ),
+                # League aggregation — queues a broadcast record every
+                # LEAGUE_BROADCAST_INTERVAL (64) completed matches for
+                # the WS layer to drain + fan out as training:league_update.
+                # See backend/rl/league_callback.py and
+                # docs/adr/0014-self-play-league.md §4.
+                LeagueCallback(
+                    broadcast_queue=self.league_queue,
+                    loop=loop,
+                ),
+                # Gradient-update window events (Fix A from freeze diag
+                # 2026-04-19). Emits training:update_start at
+                # rollout-end and training:update_end at rollout-start
+                # so the FE overlay doesn't have to heuristic-time the
+                # env.step gap.
+                UpdateWindowCallback(
+                    update_events_queue=self.update_events_queue,
+                    loop=loop,
+                    experiment_id=self._experiment_id,
                 ),
                 _StopEventCallback(self._stop_event, self._pause_event, self),
             ])

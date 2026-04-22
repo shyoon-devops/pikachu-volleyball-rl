@@ -2,6 +2,8 @@ import type {
   GameRecord,
   GameState,
   EvalResult,
+  LeagueCheckpoint,
+  LeagueStandings,
   ModelInfo,
   PaginatedResponse,
   ReplayInfo,
@@ -366,4 +368,41 @@ export async function getTimeseries(
     `/api/training/timeseries?${params.toString()}`,
   )
   return Array.isArray(raw.points) ? (raw.points as TimeseriesPoint[]) : []
+}
+
+/**
+ * Self-play league standings (ADR-0014 §8). Top-N checkpoints by
+ * Elo plus the envelope fields the league sub-tab header renders
+ * (champion, generation, pool fill). 5 s cache on BE, safe to
+ * call every few seconds for live-ish updates.
+ */
+export async function getLeagueStandings(limit = 10): Promise<LeagueStandings> {
+  const raw = await request<Record<string, unknown>>(
+    `/api/league/standings?limit=${encodeURIComponent(limit)}`,
+  )
+  return snakeToCamel<LeagueStandings>(raw)
+}
+
+export interface LeagueCheckpointDetail {
+  checkpoint: LeagueCheckpoint
+  recentMatches: Array<{
+    gameId: string
+    timestamp: string
+    opponentId: string | null
+    winner: string | null
+    durationFrames: number
+    deltaElo: number | null
+  }>
+}
+
+/** Single checkpoint + head-to-head recent matches. */
+export async function getLeagueCheckpoint(
+  checkpointId: string,
+  headToHeadLimit = 10,
+): Promise<LeagueCheckpointDetail> {
+  const qs = new URLSearchParams({ head_to_head_limit: String(headToHeadLimit) })
+  const raw = await request<Record<string, unknown>>(
+    `/api/league/checkpoint/${encodeURIComponent(checkpointId)}?${qs.toString()}`,
+  )
+  return snakeToCamel<LeagueCheckpointDetail>(raw)
 }

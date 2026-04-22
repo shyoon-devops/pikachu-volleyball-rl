@@ -24,6 +24,8 @@ import type {
   GameRecord,
   ConnectionState,
   EnvFramePayload,
+  LeagueUpdatePayload,
+  TrainingMode,
   WSClientMessageType,
   WSMessage,
 } from '../lib/types'
@@ -73,6 +75,39 @@ export interface TrainingState {
   recentGames: GameRecord[]
   envFrames: EnvFramesMap
   /**
+   * Driver state for the UpdatingOverlay (Designer spec f02a9785
+   * + Fix-A FE for BE explicit events).
+   *
+   * `active` flips true when either:
+   *   - `training:update_start` arrives (event-driven, preferred) OR
+   *   - `status.state === 'running'` AND no frame has arrived for
+   *     > UPDATING_HEURISTIC_GAP_MS (3 s) — kept as a safety net so
+   *     older BE builds / dropped-event edges still show the
+   *     overlay.
+   * Flips back to false on `training:update_end`, on a fresh frame
+   * (only when the current source was heuristic), on WS
+   * disconnect, or when status leaves running.
+   *
+   * `longGap` becomes true after UPDATING_LONG_GAP_MS (8 s) of a
+   * still-active state; drives the alternate subtitle "This is
+   * taking longer than usual…" per spec §5.
+   *
+   * `source` lets the overlay choose its subtitle: `'event'` →
+   * "Gradient update in progress (step X)" when the BE signal is
+   * authoritative; `'heuristic'` → "Awaiting frames (server
+   * busy)" when we inferred the freeze from frame silence.
+   *
+   * `step` carries the BE-provided training step for the event
+   * path so the overlay can render the step number; null when the
+   * current source is heuristic.
+   */
+  updatingPolicy: {
+    active: boolean
+    longGap: boolean
+    source: 'event' | 'heuristic' | null
+    step: number | null
+  }
+  /**
    * Monotonic counter bumped every time a `game:result` WS payload
    * lands. Pages that render server-fetched lists (TrainingRunList,
    * level-2 ReplayList) can `useEffect(() => refetch(), [gameResultSeq])`
@@ -81,6 +116,24 @@ export interface TrainingState {
    * games — effectively infinite for the project lifetime.
    */
   gameResultSeq: number
+  /**
+   * Latest `training:league_update` broadcast (v2.x Sprint 1,
+   * ADR-0014 §8). `null` until BE emits the first update (every
+   * LEAGUE_BROADCAST_INTERVAL matches). League panels consume this
+   * directly for live pool-status + recent-matches rendering;
+   * REST `/api/league/standings` covers the cold-mount path.
+   */
+  leagueUpdate: LeagueUpdatePayload | null
+  /**
+   * Active training mode (v2.x Sprint 1). Tracked FE-side by
+   * observing the `mode` field on outgoing `training:start` payloads
+   * and resetting to `'bot_ladder'` on stop. BE `/api/training/status`
+   * does NOT yet expose the mode, so this is optimistic FE state —
+   * consumer components (nav badge, current-run Elo line) check this
+   * flag to gate self-play-only surfaces. [BE-WAITING] once status
+   * carries `training_mode`, prefer BE truth on reconnect.
+   */
+  trainingMode: TrainingMode
   send: (type: WSClientMessageType, payload?: unknown) => void
 }
 
@@ -88,6 +141,33 @@ function getWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${window.location.host}/ws`
 }
+
+/**
+ * Threshold + poll cadence for the "updating policy" heuristic.
+ *
+ * During a rollout the BE streams `training:frame` at ~30 Hz
+ * (broadcast_interval 4 vec steps ≈ 33 ms at 30 ticks/s). Once the
+ * rollout finishes, Stable-Baselines3's PPO.learn() enters a
+ * gradient-update phase that takes ~2–5 s and emits no frames.
+ *
+ * We declare "updating" after 1500 ms of silence — well past the
+ * normal broadcast spacing but fast enough that the UI catches the
+ * freeze visibly. The 500 ms poll gives ≤500 ms latency on the
+ * off-to-on transition; the on-to-off transition is instant
+ * (frame arrival triggers a React re-render).
+ */
+/**
+ * Heuristic safety-net threshold. Raised from the original 1.5 s
+ * (pre-Fix-A) to 3 s so the heuristic rarely triggers when the
+ * explicit `training:update_start/end` events are firing — those
+ * end-to-end arrive within a few ms of the freeze, well under this
+ * window. If an event is ever dropped (BE restart mid-update, WS
+ * hiccup), this still catches the freeze with a slight delay.
+ */
+const UPDATING_HEURISTIC_GAP_MS = 3000
+const UPDATING_POLL_MS = 500
+/** Spec §5: swap subtitle to the "taking longer" variant after 8 s. */
+const UPDATING_LONG_GAP_MS = 8000
 
 /**
  * Internal: subscribes to the WebSocket and derives training state.
@@ -112,6 +192,11 @@ export function useTrainingStateImpl(): TrainingState {
   // O(1); the BatchTabBar only re-renders chips whose entries changed
   // because React diffs by reference.
   const [envFrames, setEnvFrames] = useState<EnvFramesMap>({})
+  // v2.x Sprint 1 — latest league-update snapshot (ADR-0014 §8).
+  const [leagueUpdate, setLeagueUpdate] = useState<LeagueUpdatePayload | null>(null)
+  // v2.x Sprint 1 — FE-mirrored active training mode. See the
+  // TrainingState.trainingMode comment for the BE-WAITING path.
+  const [trainingMode, setTrainingMode] = useState<TrainingMode>('bot_ladder')
 
   const handleMetrics = useCallback((msg: WSMessage<'training:metrics'>) => {
     // A6: zod parse + transform replaces the unchecked snakeToCamel
@@ -160,9 +245,53 @@ export function useTrainingStateImpl(): TrainingState {
     }))
   }, [])
 
+  /**
+   * Monotonic clock of the last frame arrival (either demo
+   * `training:frame` or parallel `training:env_frame`). Kept on a
+   * ref because the poll-timer closure below doesn't need to
+   * re-register on every frame. `updatingPolicy` state is the
+   * React-visible derivative that the UI renders against.
+   *
+   * `0` means "no frame seen for the current running session";
+   * the effect below resets it to `0` on the stopped→running
+   * transition so a restart doesn't inherit a stale timestamp.
+   */
+  const lastFrameAtRef = useRef<number>(0)
+  type UpdatingPolicyState = {
+    active: boolean
+    longGap: boolean
+    source: 'event' | 'heuristic' | null
+    step: number | null
+  }
+  const [updatingPolicy, setUpdatingPolicy] = useState<UpdatingPolicyState>({
+    active: false,
+    longGap: false,
+    source: null,
+    step: null,
+  })
+  // Monotonic timestamp of the most recent event-path activation.
+  // Consumed by the long-gap poll to escalate the subtitle after
+  // UPDATING_LONG_GAP_MS of a still-active event-driven overlay.
+  const eventActivatedAtRef = useRef<number>(0)
+
+  const markFrameArrival = useCallback(() => {
+    lastFrameAtRef.current = Date.now()
+    // Frames flip the heuristic branch off instantly. Event-driven
+    // overlays stay up until `training:update_end` arrives: the BE
+    // sometimes pushes a stale / queued frame mid-gradient-update,
+    // and honouring that would flicker the overlay closed.
+    setUpdatingPolicy(prev => (prev.source === 'event' ? prev : {
+      active: false,
+      longGap: false,
+      source: null,
+      step: null,
+    }))
+  }, [])
+
   const handleFrame = useCallback((msg: WSMessage<'training:frame'>) => {
     setLatestFrame(snakeToCamel<GameState>(msg.payload))
-  }, [])
+    markFrameArrival()
+  }, [markFrameArrival])
 
   /**
    * `training:env_frame` arrives once per parallel env per broadcast
@@ -194,7 +323,8 @@ export function useTrainingStateImpl(): TrainingState {
       frame: snakeToCamel<GameState>(result.data.frame),
     }
     setEnvFrames(prev => ({ ...prev, [payload.envId]: payload }))
-  }, [])
+    markFrameArrival()
+  }, [markFrameArrival])
 
   const handleStatus = useCallback((msg: WSMessage<'training:status'>) => {
     // A6: schema enforces `state` is one of the three known values
@@ -251,6 +381,59 @@ export function useTrainingStateImpl(): TrainingState {
     setGameResultSeq(n => n + 1)
   }, [])
 
+  /**
+   * v2.x Sprint 1 — `training:league_update` subscriber. BE emits
+   * this every LEAGUE_BROADCAST_INTERVAL matches (currently 64)
+   * with a top-N snapshot, pool fill, champion, generation, and a
+   * recent-matches tail. The payload is passed through with
+   * `snakeToCamel` for camelCase alignment; null-ish fields are
+   * preserved as null rather than defaulted so the FE can tell
+   * "no champion yet" from "champion=''".
+   */
+  const handleLeagueUpdate = useCallback((msg: WSMessage<'training:league_update'>) => {
+    const next = snakeToCamel<LeagueUpdatePayload>(msg.payload)
+    setLeagueUpdate(next)
+  }, [])
+
+  /**
+   * Fix-A FE: explicit gradient-update events (BE contract).
+   *
+   * `training:update_start` — BE fires this the moment PPO.learn()
+   * begins. Flip the overlay on immediately so the user sees the
+   * freeze explained without waiting for the 3 s heuristic.
+   *
+   * `training:update_end` — fires when the first post-update frame
+   * is ready. Flip the overlay off; the React overlay layer honours
+   * the 400 ms minimum-visible floor so there's no flicker even
+   * when a gradient update finishes in <100 ms.
+   *
+   * The optional `experiment_id` field lets consumers ignore stale
+   * events from a previous session after a quick stop/restart.
+   * `step` (if present) flows into the overlay subtitle as
+   * "Gradient update in progress (step X)".
+   */
+  const handleUpdateStart = useCallback((msg: WSMessage<'training:update_start'>) => {
+    const payload = snakeToCamel<{
+      experimentId?: string
+      step?: number | null
+    }>(msg.payload)
+    eventActivatedAtRef.current = Date.now()
+    setUpdatingPolicy({
+      active: true,
+      longGap: false,
+      source: 'event',
+      step: typeof payload.step === 'number' ? payload.step : null,
+    })
+  }, [])
+
+  const handleUpdateEnd = useCallback(() => {
+    // The wire payload is unused — an `update_end` event is a pure
+    // trigger, the BE-side step snapshot already landed via the
+    // matching `update_start`.
+    eventActivatedAtRef.current = 0
+    setUpdatingPolicy({ active: false, longGap: false, source: null, step: null })
+  }, [])
+
   useEffect(() => {
     const unsubs = [
       subscribe('training:metrics', handleMetrics),
@@ -258,9 +441,89 @@ export function useTrainingStateImpl(): TrainingState {
       subscribe('training:env_frame', handleEnvFrame),
       subscribe('training:status', handleStatus),
       subscribe('game:result', handleGameResult),
+      subscribe('training:league_update', handleLeagueUpdate),
+      subscribe('training:update_start', handleUpdateStart),
+      subscribe('training:update_end', handleUpdateEnd),
     ]
     return () => { unsubs.forEach(u => u()) }
-  }, [subscribe, handleMetrics, handleFrame, handleEnvFrame, handleStatus, handleGameResult])
+  }, [
+    subscribe,
+    handleMetrics,
+    handleFrame,
+    handleEnvFrame,
+    handleStatus,
+    handleGameResult,
+    handleLeagueUpdate,
+    handleUpdateStart,
+    handleUpdateEnd,
+  ])
+
+  /**
+   * Updating-policy poll (Fix-A FE).
+   *
+   * Two responsibilities under the event-first contract:
+   *
+   *   (a) **Safety-net heuristic** — if no `training:update_start`
+   *       arrives but frames stop for UPDATING_HEURISTIC_GAP_MS
+   *       (3 s), flip the overlay on with `source='heuristic'`.
+   *       Raised from the original 1.5 s so the heuristic only
+   *       catches dropped-event edges; healthy sessions never hit
+   *       this path.
+   *
+   *   (b) **Long-gap escalation** — regardless of source, if the
+   *       overlay has been active for > UPDATING_LONG_GAP_MS
+   *       (8 s), set `longGap=true` so the overlay can swap the
+   *       subtitle to "This is taking longer than usual…".
+   *
+   * Teardown conditions unchanged from the pre-Fix-A version:
+   *   * status leaves `running` — paused / stopped / etc.
+   *   * WS disconnect — the existing connection-lost banner owns
+   *     the state; we don't stack blockers.
+   *
+   * Reset `lastFrameAtRef` only on the stopped→running transition
+   * so a fresh start doesn't inherit a frame timestamp from the
+   * previous session.
+   */
+  const prevRunningRef = useRef(false)
+  useEffect(() => {
+    const isRunning = status.state === 'running'
+    const isConnected = connectionState === 'connected'
+    if (!isRunning || !isConnected) {
+      setUpdatingPolicy({ active: false, longGap: false, source: null, step: null })
+      prevRunningRef.current = false
+      eventActivatedAtRef.current = 0
+      return
+    }
+    if (!prevRunningRef.current) {
+      lastFrameAtRef.current = 0
+    }
+    prevRunningRef.current = true
+    const tick = () => {
+      const now = Date.now()
+      setUpdatingPolicy(prev => {
+        // Event-driven path: only reason to update inside the tick
+        // is the long-gap escalation. Source stays 'event' and
+        // `step` is preserved; `markFrameArrival` won't clear it,
+        // only `training:update_end` does.
+        if (prev.source === 'event' && prev.active) {
+          const long = eventActivatedAtRef.current > 0
+            && now - eventActivatedAtRef.current > UPDATING_LONG_GAP_MS
+          return prev.longGap === long ? prev : { ...prev, longGap: long }
+        }
+        // Heuristic path: need a seen frame to compute the gap.
+        if (lastFrameAtRef.current === 0) return prev
+        const gap = now - lastFrameAtRef.current
+        if (gap <= UPDATING_HEURISTIC_GAP_MS) return prev
+        const long = gap > UPDATING_LONG_GAP_MS
+        if (prev.active && prev.source === 'heuristic' && prev.longGap === long) {
+          return prev
+        }
+        return { active: true, longGap: long, source: 'heuristic', step: null }
+      })
+    }
+    const id = setInterval(tick, UPDATING_POLL_MS)
+    return () => clearInterval(id)
+  }, [status.state, connectionState])
 
   // Sync authoritative training state from REST on mount and again whenever
   // the WebSocket reconnects. WS broadcasts `training:status` only when the
@@ -484,11 +747,20 @@ export function useTrainingStateImpl(): TrainingState {
   const send = useCallback((type: WSClientMessageType, payload?: unknown) => {
     wsSend(type, payload)
     switch (type) {
-      case 'training:start':
+      case 'training:start': {
         setStatus(prev => ({ ...prev, state: 'running' }))
+        // v2.x Sprint 1: remember the submitted mode so downstream
+        // surfaces (nav badge, current-run Elo line) can render the
+        // self-play-only indicators without BE echoing the field.
+        const mode = (payload as { mode?: unknown } | undefined)?.mode
+        if (mode === 'self_play' || mode === 'bot_ladder') {
+          setTrainingMode(mode)
+        }
         break
+      }
       case 'training:stop':
         setStatus(prev => ({ ...prev, state: 'stopped' }))
+        setTrainingMode('bot_ladder')
         stopTraining().catch(() => { /* REST not deployed → WS fallback */ })
         break
       case 'training:pause':
@@ -513,7 +785,7 @@ export function useTrainingStateImpl(): TrainingState {
     }
   }, [wsSend])
 
-  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, gameResultSeq, send }
+  return { connectionState, reconnectAttempt, status, metrics, latestFrame, recentGames, envFrames, gameResultSeq, leagueUpdate, trainingMode, updatingPolicy, send }
 }
 
 export const TrainingStateContext = createContext<TrainingState | null>(null)

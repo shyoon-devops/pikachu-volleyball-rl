@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { HyperparamForm } from './HyperparamForm'
 import { DEFAULT_HYPERPARAMS } from './hyperparamDefaults'
+import type { Algorithm, LeagueSampling, PolicyType, RewardModel, TrainingMode } from '../../lib/types'
 
 // getTrainingTitles is mocked so TitleInput's debounced dup-check
 // doesn't fire real network during tests (jsdom's fetch is a stub).
@@ -9,10 +10,24 @@ vi.mock('../../lib/api', () => ({
   getTrainingTitles: vi.fn().mockResolvedValue([]),
 }))
 
-function renderForm(overrides: { disabled?: boolean; title?: string } = {}) {
+function renderForm(overrides: {
+  disabled?: boolean
+  title?: string
+  opponentMode?: TrainingMode
+  samplingStrategy?: LeagueSampling
+  leaguePoolSize?: number | null
+  rewardModel?: RewardModel
+  policyType?: PolicyType
+  algorithm?: Algorithm
+} = {}) {
   const onParamsChange = vi.fn()
   const onTitleChange = vi.fn()
   const onTitleValidationChange = vi.fn()
+  const onOpponentModeChange = vi.fn()
+  const onSamplingStrategyChange = vi.fn()
+  const onRewardModelChange = vi.fn()
+  const onPolicyTypeChange = vi.fn()
+  const onAlgorithmChange = vi.fn()
 
   render(
     <HyperparamForm
@@ -22,10 +37,30 @@ function renderForm(overrides: { disabled?: boolean; title?: string } = {}) {
       title={overrides.title ?? ''}
       onTitleChange={onTitleChange}
       onTitleValidationChange={onTitleValidationChange}
+      opponentMode={overrides.opponentMode ?? 'bot_ladder'}
+      onOpponentModeChange={onOpponentModeChange}
+      samplingStrategy={overrides.samplingStrategy ?? 'pfsp'}
+      onSamplingStrategyChange={onSamplingStrategyChange}
+      leaguePoolSize={overrides.leaguePoolSize ?? null}
+      rewardModel={overrides.rewardModel ?? 'shaped_v1'}
+      onRewardModelChange={onRewardModelChange}
+      policyType={overrides.policyType ?? 'mlp_v1'}
+      onPolicyTypeChange={onPolicyTypeChange}
+      algorithm={overrides.algorithm ?? 'ppo'}
+      onAlgorithmChange={onAlgorithmChange}
     />,
   )
 
-  return { onParamsChange, onTitleChange, onTitleValidationChange }
+  return {
+    onParamsChange,
+    onTitleChange,
+    onTitleValidationChange,
+    onOpponentModeChange,
+    onSamplingStrategyChange,
+    onRewardModelChange,
+    onPolicyTypeChange,
+    onAlgorithmChange,
+  }
 }
 
 function expandAdvanced() {
@@ -114,7 +149,9 @@ describe('HyperparamForm', () => {
 
   it('tells the user where bot level is picked (single source of truth)', () => {
     renderForm()
-    expect(screen.getByText(/L1.?L5/)).toBeInTheDocument()
+    // Narrow to the hint paragraph — "L1–L5" now also appears in the
+    // Opponent section's "Rule-based (L1–L5)" segmented option.
+    expect(screen.getByText(/Bot level is picked/)).toBeInTheDocument()
   })
 
   // FC-R5 additions.
@@ -148,6 +185,17 @@ describe('HyperparamForm', () => {
         title=""
         onTitleChange={vi.fn()}
         onTitleValidationChange={vi.fn()}
+        opponentMode="bot_ladder"
+        onOpponentModeChange={vi.fn()}
+        samplingStrategy="pfsp"
+        onSamplingStrategyChange={vi.fn()}
+        leaguePoolSize={null}
+        rewardModel="shaped_v1"
+        onRewardModelChange={vi.fn()}
+        policyType="mlp_v1"
+        onPolicyTypeChange={vi.fn()}
+        algorithm="ppo"
+        onAlgorithmChange={vi.fn()}
       />,
     )
     const input = byLabelPrefix('n_envs')
@@ -166,6 +214,17 @@ describe('HyperparamForm', () => {
         title=""
         onTitleChange={vi.fn()}
         onTitleValidationChange={vi.fn()}
+        opponentMode="bot_ladder"
+        onOpponentModeChange={vi.fn()}
+        samplingStrategy="pfsp"
+        onSamplingStrategyChange={vi.fn()}
+        leaguePoolSize={null}
+        rewardModel="shaped_v1"
+        onRewardModelChange={vi.fn()}
+        policyType="mlp_v1"
+        onPolicyTypeChange={vi.fn()}
+        algorithm="ppo"
+        onAlgorithmChange={vi.fn()}
       />,
     )
     // Basic reset button lives alongside its "BASIC" heading.
@@ -178,5 +237,208 @@ describe('HyperparamForm', () => {
         n_epochs: 25, // unchanged
       }),
     )
+  })
+})
+
+// v2.x Sprint 1 — Opponent section (docs/design/SELF-PLAY-UX.md §1)
+describe('HyperparamForm — Opponent section (v2.x)', () => {
+  it('renders the segmented Rule-based vs Self-play control', () => {
+    renderForm()
+    expect(screen.getByRole('radio', { name: /Rule-based/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Self-play league/ })).toBeInTheDocument()
+  })
+
+  it('hides the sampling radios + pool chip when mode is bot_ladder', () => {
+    renderForm({ opponentMode: 'bot_ladder' })
+    expect(screen.queryByRole('radio', { name: /PFSP/ })).toBeNull()
+    expect(screen.queryByLabelText(/Pool size/)).toBeNull()
+  })
+
+  it('reveals sampling radios + pool chip when mode is self_play', () => {
+    renderForm({ opponentMode: 'self_play', leaguePoolSize: 12 })
+    expect(screen.getByRole('radio', { name: /PFSP/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Elo proximity/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Uniform/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('Pool size: 12 of 32')).toBeInTheDocument()
+  })
+
+  it('pool chip reads "— / 32" until the standings fetch lands', () => {
+    renderForm({ opponentMode: 'self_play', leaguePoolSize: null })
+    expect(screen.getByLabelText('Pool size: unknown of 32')).toBeInTheDocument()
+  })
+
+  it('clicking the Self-play segment fires onOpponentModeChange("self_play")', () => {
+    const { onOpponentModeChange } = renderForm({ opponentMode: 'bot_ladder' })
+    fireEvent.click(screen.getByRole('radio', { name: /Self-play league/ }))
+    expect(onOpponentModeChange).toHaveBeenCalledWith('self_play')
+  })
+
+  it('selecting a sampling radio fires onSamplingStrategyChange', () => {
+    const { onSamplingStrategyChange } = renderForm({
+      opponentMode: 'self_play',
+      samplingStrategy: 'pfsp',
+      leaguePoolSize: 0,
+    })
+    fireEvent.click(screen.getByRole('radio', { name: /Uniform/ }))
+    expect(onSamplingStrategyChange).toHaveBeenCalledWith('uniform')
+  })
+
+  it('fallback hint is surfaced in self-play branch so users know empty pools degrade cleanly', () => {
+    renderForm({ opponentMode: 'self_play', leaguePoolSize: 0 })
+    expect(screen.getByText(/auto-falls back to rule ladder/i)).toBeInTheDocument()
+  })
+})
+
+// v2.x Sprint 2 — Reward-model selector
+// (docs/design/DESIGN-REWARD-MODEL-SELECTOR.md §1, ADR 0015).
+describe('HyperparamForm — Reward-model selector (v2.x Sprint 2)', () => {
+  it('renders the three options as a radiogroup with Recommended + Experimental badges', () => {
+    renderForm()
+    const shaped = screen.getByRole('radio', { name: /Shaped \(v1\)/ })
+    const sparse = screen.getByRole('radio', { name: /^Sparse/ })
+    const learned = screen.getByRole('radio', { name: /Learned shaped/ })
+    expect(shaped).toBeInTheDocument()
+    expect(sparse).toBeInTheDocument()
+    expect(learned).toBeInTheDocument()
+    // shaped_v1 is the default, so it's the checked radio.
+    expect(shaped.getAttribute('aria-checked')).toBe('true')
+    // Badges resolve via i18n. "Recommended" recurs across the
+    // three regime selectors (reward/policy/algorithm) and
+    // "Experimental" recurs across reward + algorithm — we only
+    // assert *presence*, not uniqueness.
+    expect(screen.getAllByText('Recommended').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Experimental').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('clicking a non-default option fires onRewardModelChange with the enum value', () => {
+    const { onRewardModelChange } = renderForm()
+    fireEvent.click(screen.getByRole('radio', { name: /Learned shaped/ }))
+    expect(onRewardModelChange).toHaveBeenCalledWith('learned_shaped_v1')
+  })
+
+  it('disables every option when the form is disabled', () => {
+    renderForm({ disabled: true })
+    const radios = screen.getAllByRole('radio', { name: /(Shaped \(v1\)|^Sparse|Learned shaped)/ })
+    expect(radios).toHaveLength(3)
+    for (const r of radios) {
+      expect((r as HTMLButtonElement).disabled).toBe(true)
+    }
+  })
+})
+
+// v2.x Sprint 3 — Policy-type selector
+// (docs/design/DESIGN-POLICY-TYPE-SELECTOR.md §1, ADR 0016).
+describe('HyperparamForm — Policy-type selector (v2.x Sprint 3)', () => {
+  it('renders the four options with Recommended + Coming soon badges', () => {
+    renderForm()
+    const mlp = screen.getByRole('radio', { name: /MLP \(v1\)/ })
+    const lstm = screen.getByRole('radio', { name: /^LSTM/ })
+    const gru = screen.getByRole('radio', { name: /^GRU/ })
+    const transformer = screen.getByRole('radio', { name: /^Transformer/ })
+    expect(mlp).toBeInTheDocument()
+    expect(lstm).toBeInTheDocument()
+    expect(gru).toBeInTheDocument()
+    expect(transformer).toBeInTheDocument()
+    expect(mlp.getAttribute('aria-checked')).toBe('true')
+    // Coming soon badge appears twice (gru + transformer); Recommended
+    // appears for both reward (Shaped) and policy (MLP) selectors —
+    // we only assert presence of "Coming soon" since it's policy-only.
+    expect(screen.getAllByText('Coming soon')).toHaveLength(2)
+  })
+
+  it('marks reserved cells (gru / transformer) as disabled', () => {
+    renderForm()
+    const gru = screen.getByRole('radio', { name: /^GRU/ }) as HTMLButtonElement
+    const transformer = screen.getByRole('radio', { name: /^Transformer/ }) as HTMLButtonElement
+    expect(gru.disabled).toBe(true)
+    expect(transformer.disabled).toBe(true)
+  })
+
+  it('clicking LSTM fires onPolicyTypeChange("lstm_v1")', () => {
+    const { onPolicyTypeChange } = renderForm()
+    fireEvent.click(screen.getByRole('radio', { name: /^LSTM/ }))
+    expect(onPolicyTypeChange).toHaveBeenCalledWith('lstm_v1')
+  })
+
+  it('clicking a reserved cell does not fire onPolicyTypeChange', () => {
+    const { onPolicyTypeChange } = renderForm()
+    fireEvent.click(screen.getByRole('radio', { name: /^GRU/ }))
+    fireEvent.click(screen.getByRole('radio', { name: /^Transformer/ }))
+    expect(onPolicyTypeChange).not.toHaveBeenCalled()
+  })
+
+  it('disables every option when the form is disabled', () => {
+    renderForm({ disabled: true })
+    const policyRadios = [
+      screen.getByRole('radio', { name: /MLP \(v1\)/ }),
+      screen.getByRole('radio', { name: /^LSTM/ }),
+      screen.getByRole('radio', { name: /^GRU/ }),
+      screen.getByRole('radio', { name: /^Transformer/ }),
+    ]
+    for (const r of policyRadios) {
+      expect((r as HTMLButtonElement).disabled).toBe(true)
+    }
+  })
+})
+
+// v2.x Sprint 4 — Algorithm selector (ADR 0017 §8).
+describe('HyperparamForm — Algorithm selector (v2.x Sprint 4 + 5)', () => {
+  it('renders all three algorithm options with PPO as the default', () => {
+    renderForm()
+    const ppo = screen.getByRole('radio', { name: /^PPO/ })
+    const sac = screen.getByRole('radio', { name: /^SAC/ })
+    const dreamer = screen.getByRole('radio', { name: /Dreamer V3/ })
+    expect(ppo).toBeInTheDocument()
+    expect(sac).toBeInTheDocument()
+    expect(dreamer).toBeInTheDocument()
+    expect(ppo.getAttribute('aria-checked')).toBe('true')
+    expect(sac.getAttribute('aria-checked')).toBe('false')
+    expect(dreamer.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('clicking SAC fires onAlgorithmChange("sac")', () => {
+    const { onAlgorithmChange } = renderForm()
+    fireEvent.click(screen.getByRole('radio', { name: /^SAC/ }))
+    expect(onAlgorithmChange).toHaveBeenCalledWith('sac')
+  })
+
+  it('clicking Dreamer V3 fires onAlgorithmChange("dreamer_v3")', () => {
+    const { onAlgorithmChange } = renderForm()
+    fireEvent.click(screen.getByRole('radio', { name: /Dreamer V3/ }))
+    expect(onAlgorithmChange).toHaveBeenCalledWith('dreamer_v3')
+  })
+
+  it('reflects the controlled value — dreamer_v3 as checked', () => {
+    renderForm({ algorithm: 'dreamer_v3' })
+    expect(screen.getByRole('radio', { name: /Dreamer V3/ }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('radio', { name: /^PPO/ }).getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('surfaces the Dreamer V3 Experimental badge + tooltip', () => {
+    renderForm()
+    const dreamer = screen.getByRole('radio', { name: /Dreamer V3/ })
+    expect(dreamer.getAttribute('title')).toMatch(/model-based/i)
+    expect(dreamer.getAttribute('title')).toMatch(/3×|3x/)
+    // "Experimental" is also used by the reward selector (Learned shaped),
+    // so we assert *at least* one — the new algorithm badge adds one more.
+    expect(screen.getAllByText('Experimental').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('surfaces the SAC tooltip via the title attribute', () => {
+    renderForm()
+    const sac = screen.getByRole('radio', { name: /^SAC/ })
+    expect(sac.getAttribute('title')).toMatch(/sample efficiency/i)
+  })
+
+  it('disables every algorithm option when the form is disabled', () => {
+    renderForm({ disabled: true })
+    const radios = [
+      screen.getByRole('radio', { name: /^PPO/ }),
+      screen.getByRole('radio', { name: /^SAC/ }),
+      screen.getByRole('radio', { name: /Dreamer V3/ }),
+    ]
+    for (const r of radios) {
+      expect((r as HTMLButtonElement).disabled).toBe(true)
+    }
   })
 })

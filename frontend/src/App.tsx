@@ -8,6 +8,7 @@ import { VisualHarness } from './components/game/VisualHarness'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ConnectionIndicator } from './components/ConnectionIndicator'
 import { TrainingStateProvider } from './hooks/TrainingStateProvider'
+import { useTrainingState } from './hooks/useTrainingState'
 import './App.css'
 
 /**
@@ -53,6 +54,13 @@ function App() {
               */}
               <NavLink to="/runs" className={({ isActive }) => `app-nav-link${isActive ? ' active' : ''}`}>
                 Training Runs
+                {/*
+                  v2.x Sprint 1 — self-play mode badge (§6). Pulses
+                  next to the Training Runs nav entry whenever the
+                  live run is in self-play mode. Hidden in bot_ladder
+                  mode so the nav stays quiet on normal runs.
+                */}
+                <SelfPlayModeBadge />
               </NavLink>
             </nav>
             <div className="app-header-actions">
@@ -108,6 +116,26 @@ function App() {
         </div>
       </TrainingStateProvider>
     </BrowserRouter>
+  )
+}
+
+/**
+ * Self-play mode nav badge (v2.x Sprint 1 — SELF-PLAY-UX.md §6).
+ * Renders only while `useTrainingState().trainingMode === 'self_play'`
+ * so bot-ladder runs don't see it. Consumes the hook directly so the
+ * Training Runs NavLink keeps its existing a11y/active-link behavior.
+ */
+function SelfPlayModeBadge() {
+  const { trainingMode } = useTrainingState()
+  if (trainingMode !== 'self_play') return null
+  return (
+    <span
+      className="app-self-play-badge"
+      aria-label="Active run is in self-play mode"
+      title="Self-play league mode"
+    >
+      League
+    </span>
   )
 }
 

@@ -262,3 +262,292 @@
   color: var(--color-danger, #ef4444);
   margin-top: 2px;
 }
+
+/* ── Opponent section (v2.x Sprint 1) ───────────────────────────── */
+.hyperparam-form-group--opponent {
+  gap: var(--space-2);
+}
+
+.opponent-segmented {
+  display: flex;
+  gap: 0;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  height: 36px;
+}
+
+.opponent-segmented-option {
+  flex: 1;
+  padding: 0 var(--space-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.opponent-segmented-option:hover:not([disabled]):not(.opponent-segmented-option--active) {
+  color: var(--color-text-primary);
+}
+
+.opponent-segmented-option--active {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.opponent-segmented-option[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.opponent-sampling {
+  border: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.opponent-sampling-legend {
+  padding: 0;
+  margin-bottom: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.opponent-sampling-option {
+  display: grid;
+  grid-template-columns: 18px auto 1fr;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.opponent-sampling-option:hover {
+  border-color: var(--color-border-strong);
+}
+
+.opponent-sampling-option:has(input:checked) {
+  border-color: var(--color-accent);
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.08));
+}
+
+.opponent-sampling-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.opponent-sampling-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.opponent-pool-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.opponent-pool-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.opponent-k-factor {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.opponent-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ── Reward-model selector (v2.x Sprint 2) ─────────────────────── */
+/* docs/design/DESIGN-REWARD-MODEL-SELECTOR.md §1. Tokens only. */
+.reward-model-selector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.reward-model-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+}
+
+.reward-model-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  height: 36px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.reward-model-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 var(--space-3);
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  position: relative;
+  transition: background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+
+.reward-model-option + .reward-model-option {
+  border-left: 1px solid var(--color-border);
+}
+
+.reward-model-option:hover:not([disabled]):not(.reward-model-option--active) {
+  color: var(--color-text-primary);
+}
+
+.reward-model-option--active {
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+}
+
+/* 2 px inset accent underline on the active cell — spec §1. */
+.reward-model-option--active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: 2px;
+}
+
+.reward-model-option:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.reward-model-option[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* prefers-reduced-motion → no underline transition (spec §7). */
+@media (prefers-reduced-motion: reduce) {
+  .reward-model-option,
+  .reward-model-option--active::after {
+    transition: none !important;
+  }
+}
+
+.reward-model-option-label {
+  white-space: nowrap;
+}
+
+.reward-model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+.reward-model-badge--recommended {
+  background: var(--color-accent-dim, rgba(59, 130, 246, 0.15));
+  color: var(--color-accent);
+}
+
+.reward-model-badge--experimental {
+  background: var(--color-warning-dim, rgba(234, 179, 8, 0.15));
+  color: var(--color-warning, #eab308);
+}
+
+.reward-model-badge-glyph {
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* ── v2.x Sprint 3 — policy-type selector (spec §1, §2) ─────────
+   Sits directly below the reward selector so the two regime
+   switches visually stack. On narrow viewports the 4-cell row
+   wraps to 2×2 (spec §1). Reserved cells render disabled +
+   "Coming soon" badge. */
+
+.policy-type-selector {
+  margin-top: 12px;
+}
+
+.policy-type-segmented {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 767px) {
+  .policy-type-option {
+    /* 2×2 wrap at <768px — each cell takes half the row. */
+    flex: 1 1 calc(50% - 2px);
+  }
+}
+
+/* Reserved (gru_v1 / transformer_v1) — disabled + softened
+   opacity so the user reads them as "present but not yet
+   selectable". Tooltip copy ("Reserved — not yet trainable")
+   still surfaces on focus + hover (spec §2). */
+.policy-type-option--reserved {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.policy-type-badge--comingsoon {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}

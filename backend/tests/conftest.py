@@ -284,6 +284,16 @@ async def _test_lifespan(app):
     # be surfaced.
     app.state.training_service.last_frame = lambda: None
     app.state.eval_service = FakeEvalService()
+    # League repository (v2 Sprint-1) — Mongo-less + tmp manifest dir so
+    # each test starts from a clean slate without touching the real
+    # models/league/manifest.json on disk.
+    from tempfile import mkdtemp
+
+    from backend.app.services.league_repository import LeagueRepository
+
+    app.state.league_repository = LeagueRepository(
+        db=None, league_dir=mkdtemp(prefix="pytest-league-"),
+    )
     app.state.ws_manager = ConnectionManager()
     yield
     pass
