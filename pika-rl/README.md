@@ -31,7 +31,7 @@ python -c "from pika_rl.policy_factory import policy_factory; print('ok')"
 | `pika_rl.loaded_policy_bot` | `backend.rl.loaded_policy_bot` | League-pool opponent wrapper |
 | `pika_rl.callbacks` | `backend.rl.callbacks` | SB3 callback set (metrics, checkpoints, etc.) |
 | `pika_rl.evaluator` | `backend.rl.evaluator` | `ModelEvaluator` + algorithm-dispatched load |
-| `pika_rl.encoders` | **new** | `ObsEncoder` Protocol + MLP/CNN spec types |
+| `pika_rl.encoders` | **new** | `ObsEncoder` Protocol + MLP/CNN specs + `MineRLCNNEncoder` (NatureCNN, 64×64×3 → hidden) |
 
 ## Target (Phase 3)
 

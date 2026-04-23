@@ -108,3 +108,31 @@ RSSM 의 `embed` attribute 를 생성자 주입으로 바꿀 때 함께 작성. 
 3. MineRL repo 쪽 설계 문서 작성 — `pika_rl` 임포트 가정한
    MineRL 트레이너 스켈레톤.
 4. Phase 2 착수 시점은 MineRL Phase 1 (env 구축, 2주) 완료 후.
+
+## 8. Phase 2 Day 1 업데이트 (2026-04-23)
+
+MineRL Phase 1 이 Day 1 에 조기 완료 (45.94 step/s smoke 확인). 이 커밋은
+Phase 2 의 Pika-쪽 Day 1 태스크 — `MineRLCNNEncoder` 구체 구현 — 을
+`pika-rl-encoder-minerl` 브랜치에 착지. 구성:
+
+- `_NatureCNN` (Mnih 2015): 64×64 RGB → 1024-d features, 3-conv 스택.
+  IMPALA 대신 NatureCNN 을 고른 이유는 64×64 입력에서 파라미터/정확도
+  Pareto-최적 (Phase 0 research §7 ~1.7M 예산 대비 600k). IMPALA 로의
+  스왑은 `MineRLCNNEncoder(cnn=ImpalaCNN(...))` 주입 한 줄.
+- `MineRLCNNEncoder`: pov CNN + 선택적 inventory MLP → ``(B, hidden)``
+  embed. ``ObsEncoder`` Protocol 만족 (runtime-checkable). 프로젝션
+  레이어는 dry-forward probe 로 자동 사이즈 — 임의 CNN 백본 스왑 지원.
+- `inventory_dim=0` (Treechop 기본) 일 때 inv head 미할당 — 불필요한
+  ~10k 파라미터 + forward 절약. 미스매치 시 (inv 넘겼는데 dim=0, 또는
+  반대) silent no-op 대신 ValueError — MineRL env wrapper 버그 조기 탐지.
+- `pika-rl/tests/test_minerl_cnn_encoder.py` 15 cases all green (construction
+  + shape + uint8/float parity + inventory fusion + projection sizing +
+  param budget).
+
+**MineRL repo 측 Day 1 (별개 브랜치 `phase2-ppo-treechop` 예정)**:
+pika-rl 이 shim 단계라 외부 저장소에서 pip 설치 시 inner
+`backend.rl.*` import 가 실패하는 제약은 유효. MineRL repo 가 Day 1 에
+`train_ppo_treechop.py` 를 돌리려면 (a) pika-rl 을 git submodule 로
+포함해서 PYTHONPATH 에 Pika 워크트리도 추가, 또는 (b) Phase 3 code-move
+를 Phase 2 Day 1-2 로 앞당겨 독립 설치 가능하게. PM 판단 요청 — 전자가
+일정상 안전.
