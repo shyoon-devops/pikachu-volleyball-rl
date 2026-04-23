@@ -1,6 +1,6 @@
 # v2.0.0 bench-B — Dreamer V3 @ 2M Results
 
-**Status:** **FAIL — ADR 0018 §9 primary claim not met** (final-ckpt scope)
+**Status:** **FAIL — ADR 0018 §9 primary claim not met** (final + 5-point curve)
 **Date:** 2026-04-23 · **Branch:** `benchmarks/v200-bench-b-results`
 **Owner:** Evaluator · **Training exp8:** `3cb6ffd9` · **Refs:** ADR 0018 §9,
 ADR 0016 §1, plan `benchmarks/v200-dreamer-plan@4076129b`, harness hotfix
@@ -110,10 +110,76 @@ loop over intermediate checkpoints.
 - `docs/benchmarks/v200-bench-b-results.md` — this doc.
 - `docs/benchmarks/_bench_b_final_2M.json` — raw per-seed results (500
   trials/level × 3 levels, plus timing and config).
-- `docs/benchmarks/_run_bench_b_final.py` — scratch driver (calls
-  `run_batch` programmatically + Wilson CI math). Not production code; not
+- `docs/benchmarks/_bench_b_curve.json` — 5-point curve raw results (§8).
+- `docs/benchmarks/v200-bench-b-curve.png` — step-vs-winrate plot (§8).
+- `docs/benchmarks/_run_bench_b_final.py` — scratch driver (final, Wilson CI).
+- `docs/benchmarks/_run_bench_b_curve.py` — scratch driver (5-point curve,
+  reuses the 2M JSON so only 4 evals run fresh). Not production code; not
   intended to merge into `backend/`.
 
+## 8. Sample efficiency curve (5 points)
+
+Executed 2026-04-23 via `_run_bench_b_curve.py` — 4 intermediate checkpoints
+freshly evaluated (100k, 500k, 1M, 1.5M) + reused the 2M final JSON from §2.
+Total fresh matches: 6,000 (4 ckpts × 3 levels × 5 seeds × 100 games). Total
+curve wall-clock: ~8 min (much cheaper than the 5-6 h PM estimate —
+observed per-task throughput of 14 s held up across all steps). Zero
+failures.
+
+| step  | L1 winrate [95% CI]     | L3 winrate [95% CI]     | L5 winrate [95% CI]     |
+|-------|--------------------------|--------------------------|--------------------------|
+| 100k  |  0.0% [ 0.00,  0.76]     |  0.0% [ 0.00,  0.76]     |  0.0% [ 0.00,  0.76]     |
+| 500k  | 96.8% [94.86, 98.04]     | 20.8% [17.48, 24.56]     |  0.0% [ 0.00,  0.76]     |
+| 1M    | 95.8% [93.70, 97.22]     |  **1.8%** [ 0.92,  3.43] |  0.0% [ 0.00,  0.76]     |
+| 1.5M  | 98.4% [96.89, 99.17]     | 12.6% [10.00, 15.76]     |  0.0% [ 0.00,  0.76]     |
+| 2M    | 97.8% [96.10, 98.77]     | 21.0% [17.66, 24.78]     |  0.0% [ 0.00,  0.76]     |
+
+Plot: `docs/benchmarks/v200-bench-b-curve.png` (step in M, three lines with
+CI error bars; PPO §9 reference line at 0.62 dashed for scale).
+
+### Shape diagnosis
+
+- **L1:** rapid climb 0 → 96.8% between 100k and 500k, then flat plateau
+  96-98% through 2M. L1 is learned early and stable.
+- **L3:** rises to **21% ceiling by 500k**, then **not monotonic** —
+  collapses to 1.8% at 1M (non-overlapping CI with 500k's 20.8%, this is a
+  real regression not noise), recovers to 12.6% by 1.5M, returns to 21.0%
+  at 2M. No upward trend beyond the 500k value. **21% is the ceiling this
+  run reached.**
+- **L5:** exactly **0% across all five checkpoints** (500 trials each).
+  The policy never makes meaningful progress against L5 at any training
+  step.
+
+### Tuning issue vs architecture miss — **architecture / tuning, not
+undertraining**
+
+The curve shape rules out the "more training would help" hypothesis:
+L3 winrate at 2M (21.0%) is statistically indistinguishable from L3 at
+500k (20.8%); the 1.5M excursion through 1M (instability episode) shows
+the RSSM / actor-critic is prone to forgetting even what little it had.
+PPO `shaped_v1`'s 0.62 plateau is 3× above Dreamer's ceiling — that is
+not a gap a 2.5× step budget (Config C, 5M) is going to close at these
+defaults.
+
+Best leads for the gap (ordered by expected impact):
+
+1. **KL-balance + free-bits schedule.** ADR 0018 §7 pins paper defaults;
+   under-regularised RSSM may be collapsing the latent at mid-training
+   (consistent with the 1M L3 drop). Log `world_model_kl` across the run
+   — the §9 dashboard row exists for exactly this diagnosis.
+2. **Imagine-horizon mismatch.** `imagine_horizon=15` (ADR 0018 §7) vs a
+   rally median ≈150 frames means the actor trains on sub-rally windows
+   that don't see a full serve → return → slam cycle against the stronger
+   opponents. Worth a 32 / 48 / 64 ablation.
+3. **Entropy schedule / exploration floor.** L5=0% for 500 trials / point
+   suggests the actor isn't generating the diverse behaviour needed to
+   discover L5-beating trajectories in imagination. Paper-default entropy
+   bonus may be too aggressive a decay.
+
+Architecture miss is plausible but not conclusive — the RSSM's
+deterministic-physics-fit premise from ADR 0018 §1 is sound in principle.
+Before condemning the architecture, run the tuning sweep above.
+
 ---
-**Next dispatch needed from PM:** pick (1) / (2) / (3) from §6 or specify
-another path. No further evals queued.
+**Next dispatch needed from PM:** pick (1) / (2) / (3) from §6, or approve
+the tuning sweep described in §8. No further evals queued.
