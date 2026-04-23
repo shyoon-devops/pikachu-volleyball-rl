@@ -129,9 +129,9 @@ class _NatureCNN(nn.Module):
         return 64 * 4 * 4
 
     def forward(self, pov: th.Tensor) -> th.Tensor:
-        # MineRL ``pov`` arrives as uint8; normalise to [0, 1] here
-        # so the SB3 feature-extractor contract (float tensor to the
-        # downstream MLP) holds regardless of upstream dtype.
+        # Dtype normalisation — MineRL ``pov`` arrives as uint8 so
+        # the SB3 feature-extractor contract (float tensor to the
+        # downstream MLP) is upheld here regardless of upstream dtype.
         if pov.dtype == th.uint8:
             pov = pov.float() / 255.0
         return self.conv(pov)
@@ -210,6 +210,42 @@ class MineRLCNNEncoder(nn.Module):
             )
             return int(out.shape[1])
 
+    @staticmethod
+    def _ensure_nchw(pov: th.Tensor) -> th.Tensor:
+        """Coerce ``pov`` into the ``(B, C, H, W)`` layout ``Conv2d``
+        expects.
+
+        MineRL's raw ``pov`` observation is ``(H, W, C)`` / ``(B, H, W, C)``
+        (gym's HWC-last image convention); Conv2d wants channels-first.
+        Phase 2 Day 1 smoke (2026-04-23) crashed with ``Kernel size
+        can't be greater than actual input size`` because the 3-way
+        channel dim landed at position -1 and Conv2d treated the
+        64-wide H dimension as channel count, leaving W=3 for the
+        8×8 kernel to fail against.
+
+        Auto-detect rule: if the last dim is 3 or 4 (the only
+        channel counts MineRL / Atari-style obs produce — RGB, RGBA,
+        grayscale-stacked), permute. Unambiguous at 64×64 resolution
+        because no real input has H or W ≤ 4. Also accepts 3-D
+        ``(H, W, C)`` / ``(C, H, W)`` single-sample inputs by adding
+        the batch dim up front — useful for quick smoke scripts that
+        don't go through a VecEnv.
+        """
+        if pov.ndim == 3:
+            # Single sample (H, W, C) / (C, H, W) → prepend batch.
+            pov = pov.unsqueeze(0)
+        if pov.ndim != 4:
+            raise ValueError(
+                f"pov must be 3-D (H, W, C) / (C, H, W) or 4-D batched; "
+                f"got shape {tuple(pov.shape)}"
+            )
+        # Channel count is 3 / 4 for RGB / RGBA. If the last dim
+        # matches that, the tensor is NHWC — permute. If the second
+        # dim matches instead, it's already NCHW — leave alone.
+        if pov.shape[-1] in (3, 4) and pov.shape[1] not in (3, 4):
+            pov = pov.permute(0, 3, 1, 2).contiguous()
+        return pov
+
     def forward(
         self,
         pov: th.Tensor,
@@ -217,10 +253,14 @@ class MineRLCNNEncoder(nn.Module):
     ) -> th.Tensor:
         """Return the ``(B, hidden)`` embedding.
 
-        Accepts pov alone when ``inventory_dim=0`` — the MineRL
-        Treechop baseline doesn't need inventory signal. Raises
-        when an inventory is supplied to an encoder built without
-        the head (shape would silently mismatch otherwise)."""
+        ``pov`` is auto-reshaped to ``(B, C, H, W)`` regardless of
+        whether the caller hands us HWC (MineRL default) or CHW
+        (SB3 preprocessor). uint8 → float32 normalisation happens
+        inside the CNN. Accepts pov alone when ``inventory_dim=0``;
+        raises when an inventory tensor is supplied to an encoder
+        built without the head (shape mismatch would otherwise be
+        silent)."""
+        pov = self._ensure_nchw(pov)
         features = self.cnn(pov)
         if self.inv_head is not None:
             if inventory is None:

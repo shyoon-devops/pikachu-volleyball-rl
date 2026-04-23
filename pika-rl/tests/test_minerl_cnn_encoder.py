@@ -120,6 +120,66 @@ class TestProjectionSizing:
             MineRLCNNEncoder(cnn=_BadStub())
 
 
+class TestHWCAutoPermute:
+    """Phase 2 Day 1 regression (2026-04-23): MineRL ``pov`` arrives
+    as ``(B, 64, 64, 3)`` HWC but Conv2d expects NCHW — first smoke
+    crashed with "Kernel size can't be greater than actual input
+    size" because the 8×8 kernel hit the 3-wide channel dim. Encoder
+    now auto-permutes when the last dim looks like a channel count.
+    These cases pin the contract so the crash can't regress."""
+
+    def test_hwc_uint8_single_sample_input(self) -> None:
+        enc = MineRLCNNEncoder(hidden=256)
+        # Exact MineRL pov shape — single sample HWC uint8.
+        pov = th.randint(0, 256, (1, 64, 64, 3), dtype=th.uint8)
+        out = enc(pov)
+        assert out.shape == (1, 256)
+        assert out.dtype == th.float32
+
+    def test_hwc_uint8_batch_input(self) -> None:
+        enc = MineRLCNNEncoder(hidden=256)
+        pov = th.randint(0, 256, (4, 64, 64, 3), dtype=th.uint8)
+        out = enc(pov)
+        assert out.shape == (4, 256)
+        assert out.dtype == th.float32
+
+    def test_autograd_backward_does_not_crash(self) -> None:
+        """Phase 2 PPO will backprop through this encoder; the permute
+        + uint8→float path must preserve the autograd graph."""
+        enc = MineRLCNNEncoder(hidden=128)
+        pov = th.randint(0, 256, (2, 64, 64, 3), dtype=th.uint8)
+        out = enc(pov)
+        loss = out.sum()
+        loss.backward()
+        # Every parameter got a gradient.
+        for name, param in enc.named_parameters():
+            assert param.grad is not None, f"no grad on {name}"
+
+    def test_nchw_input_pass_through_unchanged(self) -> None:
+        """CHW input (SB3's preprocessed layout) must still work —
+        the permute is conditional on the last-dim heuristic, not
+        unconditional."""
+        enc = MineRLCNNEncoder(hidden=256)
+        pov = th.zeros(4, 3, 64, 64, dtype=th.float32)
+        out = enc(pov)
+        assert out.shape == (4, 256)
+
+    def test_3d_single_sample_auto_batches(self) -> None:
+        """Unbatched (H, W, C) input from a direct ``env.reset()``
+        smoke → encoder adds batch dim automatically so smoke
+        scripts work without wrapping every obs in ``obs[None]``."""
+        enc = MineRLCNNEncoder(hidden=128)
+        pov = th.randint(0, 256, (64, 64, 3), dtype=th.uint8)
+        out = enc(pov)
+        assert out.shape == (1, 128)
+
+    def test_non_4d_input_rejected(self) -> None:
+        enc = MineRLCNNEncoder()
+        bad = th.zeros(1, 2, 3, 64, 64)  # 5-D
+        with pytest.raises(ValueError, match="3-D .* or 4-D"):
+            enc(bad)
+
+
 class TestParameterCount:
     """Smoke-budget check against Phase 0 research §7 estimate
     (~1.7M params for NatureCNN baseline). Fires if a future
