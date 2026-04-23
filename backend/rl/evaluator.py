@@ -2,15 +2,71 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 import numpy as np
-from stable_baselines3 import PPO
 
 from backend.game.constants import MAX_SCORE, NET_PILLAR_X
 from backend.rl.env import PikachuVolleyballEnv
+
+logger = logging.getLogger(__name__)
+
+# Checkpoint-adjacent manifest file written by the trainer (when
+# available). Used to auto-detect ``algorithm`` so harness callers
+# don't have to thread it through every CLI invocation. Missing
+# manifest falls back to the explicit ``algorithm=`` arg.
+TRAINING_MANIFEST_FILENAME = "training_manifest.json"
+VALID_EVAL_ALGORITHMS: tuple[str, ...] = ("ppo", "sac", "dreamer_v3")
+
+
+def _detect_algorithm_from_manifest(model_path: str) -> str | None:
+    """Look for ``training_manifest.json`` in the ckpt's parent dir
+    and return its ``algorithm`` field. Returns None if missing or
+    unreadable — caller falls back to the explicit arg."""
+    try:
+        manifest = Path(model_path).resolve().parent / TRAINING_MANIFEST_FILENAME
+        if not manifest.is_file():
+            return None
+        data = json.loads(manifest.read_text())
+        algo = data.get("algorithm")
+        if isinstance(algo, str) and algo in VALID_EVAL_ALGORITHMS:
+            return algo
+        return None
+    except Exception:  # noqa: BLE001 — manifest is best-effort
+        logger.exception("failed to read %s near %s", TRAINING_MANIFEST_FILENAME, model_path)
+        return None
+
+
+def _load_model(
+    model_path: str, algorithm: str, env: Any = None,
+) -> Any:
+    """Dispatch checkpoint load on ``algorithm`` (ADR 0015/0017/0018).
+
+    Mirrors ``LoadedPolicyBot._load`` exactly so there's one contract
+    across the training-runtime and eval-harness sides. Raises
+    ``ValueError`` on unknown algorithm — caller must have validated.
+    """
+    if algorithm == "dreamer_v3":
+        from backend.rl.dreamer_runner import DreamerAgent  # noqa: PLC0415
+
+        return DreamerAgent.load(model_path, env=env, device="cpu")
+    if algorithm == "sac":
+        from backend.rl.sac_discrete import SACDiscrete  # noqa: PLC0415
+
+        return SACDiscrete.load(model_path)
+    if algorithm == "ppo":
+        from stable_baselines3 import PPO  # noqa: PLC0415
+
+        return PPO.load(model_path)
+    raise ValueError(
+        f"algorithm must be one of {VALID_EVAL_ALGORITHMS}, got {algorithm!r}"
+    )
 
 
 @dataclass
@@ -62,18 +118,52 @@ class ModelEvaluator:
         n_games: int = 50,
         *,
         progress_callback: Callable[[int, int], None] | None = None,
+        algorithm: str | None = None,
+        seed: int | None = None,
+        deterministic: bool = True,
     ) -> EvalResult:
         """Load a model and run N games against a bot. Return aggregated results.
 
+        ``algorithm`` — one of ``ppo`` / ``sac`` / ``dreamer_v3``. When
+        ``None``, the harness auto-detects by reading
+        ``training_manifest.json`` next to the checkpoint; if no
+        manifest is present, falls back to ``ppo`` for back-compat
+        with pre-Sprint-5 eval harness calls.
+
+        ``seed`` — optional seed forwarded to ``env.reset(seed=seed)``
+        and to ``torch``/``numpy`` global RNGs. Lets ``batch_evaluate
+        --seeds`` produce distinct trajectories across seeds for the
+        same checkpoint.
+
         ``progress_callback`` — optional ``(games_completed, total_games)``
-        hook invoked once per completed game, used by the async job
-        registry to surface per-game progress to HTTP clients. Exceptions
-        from the callback are caught and logged; they do NOT abort the
-        evaluation, because the callback is a best-effort observability
-        hook, not a load-bearing part of the evaluation.
+        hook invoked once per completed game. Exceptions from the
+        callback are caught; they do NOT abort the evaluation.
         """
-        model = PPO.load(model_path)
+        resolved_algo = (
+            algorithm
+            or _detect_algorithm_from_manifest(model_path)
+            or "ppo"
+        )
+        if resolved_algo not in VALID_EVAL_ALGORITHMS:
+            raise ValueError(
+                f"algorithm must be one of {VALID_EVAL_ALGORITHMS}, "
+                f"got {resolved_algo!r}"
+            )
         env = PikachuVolleyballEnv(bot_level=bot_level, max_steps=10000)
+        # Dreamer.load needs env= for shape info; pass our single env.
+        model = _load_model(model_path, resolved_algo, env=env)
+
+        # Seed the global RNGs too — Dreamer's categorical sampling in
+        # non-deterministic predict reads torch's global generator,
+        # and the env reset already consumes numpy's.
+        if seed is not None:
+            try:
+                import torch as th  # noqa: PLC0415
+
+                th.manual_seed(seed)
+            except Exception:  # noqa: BLE001 — torch unavailable in minimal test envs
+                pass
+            np.random.seed(seed)
 
         wins: list[int] = []
         scores: list[int] = []
@@ -82,14 +172,18 @@ class ModelEvaluator:
         episode_lengths: list[int] = []
 
         for game_idx in range(n_games):
-            obs, _ = env.reset()
+            # Per-game seed variation: offset the caller's seed by
+            # game index so two games in the same run diverge but
+            # the whole run is reproducible from the base seed.
+            reset_seed = (seed + game_idx) if seed is not None else None
+            obs, _ = env.reset(seed=reset_seed)
             rallies = 0
             prev_ball_side: bool | None = None  # True = right side
 
             terminated = False
             truncated = False
             while not terminated and not truncated:
-                action, _ = model.predict(obs, deterministic=True)
+                action, _ = model.predict(obs, deterministic=deterministic)
                 obs, _, terminated, truncated, info = env.step(int(action))
 
                 # Track rallies: count net crossings

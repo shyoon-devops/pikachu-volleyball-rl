@@ -28,15 +28,20 @@ logger = logging.getLogger(__name__)
 
 ALL_LEVELS: tuple[int, ...] = (1, 2, 3, 4, 5)
 DEFAULT_N_GAMES: int = 50
+DEFAULT_SEEDS: tuple[int, ...] = (42,)
 
 
 @dataclass(frozen=True)
 class BatchTask:
-    """A single (checkpoint, bot_level) evaluation unit."""
+    """A single (checkpoint, bot_level, seed) evaluation unit."""
 
     model_path: str
     bot_level: int
     n_games: int
+    seed: int = 42
+    # ``None`` → evaluator auto-detects from the checkpoint's
+    # ``training_manifest.json``; explicit value overrides.
+    algorithm: str | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +51,7 @@ class BatchFailure:
     model_path: str
     bot_level: int
     error: str
+    seed: int = 42
 
 
 @dataclass
@@ -95,15 +101,18 @@ def _evaluate_single(task: BatchTask) -> EvalResult | BatchFailure:
     """Worker entrypoint — runs one evaluation in a child process."""
     try:
         evaluator = ModelEvaluator()
-        # SB3 loads the .zip regardless of suffix, but ModelEvaluator
-        # is happy with either, so pass through.
         return evaluator.evaluate(
-            task.model_path, bot_level=task.bot_level, n_games=task.n_games
+            task.model_path,
+            bot_level=task.bot_level,
+            n_games=task.n_games,
+            algorithm=task.algorithm,
+            seed=task.seed,
         )
     except Exception as exc:  # noqa: BLE001 — structured reporting, not swallowing
         return BatchFailure(
             model_path=task.model_path,
             bot_level=task.bot_level,
+            seed=task.seed,
             error=f"{type(exc).__name__}: {exc}",
         )
 
@@ -124,13 +133,22 @@ def run_batch(
     n_games: int = DEFAULT_N_GAMES,
     workers: int | None = None,
     executor_factory=None,
+    seeds: list[int] | tuple[int, ...] = DEFAULT_SEEDS,
+    algorithm: str | None = None,
 ) -> BatchReport:
-    """Run all (checkpoint, level) tasks in parallel and collect results.
+    """Run all (checkpoint, level, seed) tasks in parallel.
 
-    `executor_factory` is injectable so tests can use a synchronous or
-    thread-based executor instead of spawning processes. When None
-    (the default), the module-level ProcessPoolExecutor is resolved at
-    call time so monkeypatching works.
+    ``seeds`` expands the task space — one evaluation per (ckpt,
+    level, seed) combination. Default ``(42,)`` preserves the
+    pre-Sprint-5 single-seed behaviour.
+
+    ``algorithm`` is passed through to the evaluator. ``None``
+    lets the evaluator auto-detect from each checkpoint's adjacent
+    ``training_manifest.json`` (works for heterogeneous runs in
+    one batch).
+
+    ``executor_factory`` is injectable so tests can use a
+    synchronous or thread-based executor.
     """
     if executor_factory is None:
         executor_factory = ProcessPoolExecutor
@@ -144,10 +162,17 @@ def run_batch(
     if invalid:
         raise ValueError(f"Invalid bot levels {invalid}; expected subset of {ALL_LEVELS}")
 
+    if not seeds:
+        raise ValueError("seeds must contain at least one seed")
+
     tasks = [
-        BatchTask(model_path=cp, bot_level=lvl, n_games=n_games)
+        BatchTask(
+            model_path=cp, bot_level=lvl, n_games=n_games,
+            seed=seed, algorithm=algorithm,
+        )
         for cp in checkpoints
         for lvl in levels
+        for seed in seeds
     ]
     n_workers = _resolve_worker_count(workers, len(tasks))
 
@@ -167,9 +192,10 @@ def run_batch(
             else:
                 report.results.append(outcome)
 
-    # Stable ordering for callers
+    # Stable ordering for callers — include seed so multi-seed
+    # reports group deterministically.
     report.results.sort(key=lambda r: (r.model_path, r.bot_level))
-    report.failures.sort(key=lambda f: (f.model_path, f.bot_level))
+    report.failures.sort(key=lambda f: (f.model_path, f.bot_level, f.seed))
     return report
 
 
@@ -221,6 +247,31 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Parallel workers (default: min(cpu_count, n_tasks))",
     )
+    parser.add_argument(
+        "--seeds",
+        type=int,
+        nargs="+",
+        default=list(DEFAULT_SEEDS),
+        help=(
+            f"Seeds to evaluate each (checkpoint, level) pair against "
+            f"(default: {list(DEFAULT_SEEDS)}). Multiple seeds run "
+            f"independent games per combination — useful for curve "
+            f"variance estimates. Each seed offsets env.reset + torch "
+            f"/ numpy RNGs."
+        ),
+    )
+    parser.add_argument(
+        "--algorithm",
+        type=str,
+        default=None,
+        choices=["ppo", "sac", "dreamer_v3"],
+        help=(
+            "Algorithm to use when loading each checkpoint. When "
+            "omitted, the evaluator reads ``training_manifest.json`` "
+            "next to each checkpoint; if no manifest is found, falls "
+            "back to ``ppo`` for pre-Sprint-5 compatibility."
+        ),
+    )
     return parser
 
 
@@ -234,16 +285,20 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     logger.info(
-        "Evaluating %d checkpoints against levels %s (n_games=%d)",
+        "Evaluating %d checkpoints × %d levels × %d seeds (n_games=%d, algorithm=%s)",
         len(checkpoints),
-        args.levels,
+        len(args.levels),
+        len(args.seeds),
         args.n_games,
+        args.algorithm or "auto",
     )
     report = run_batch(
         checkpoints,
         levels=args.levels,
         n_games=args.n_games,
         workers=args.workers,
+        seeds=args.seeds,
+        algorithm=args.algorithm,
     )
     print(format_batch_summary(report))
     return 0 if report.ok else 2
@@ -256,6 +311,7 @@ if __name__ == "__main__":
 __all__ = [
     "ALL_LEVELS",
     "DEFAULT_N_GAMES",
+    "DEFAULT_SEEDS",
     "BatchTask",
     "BatchFailure",
     "BatchReport",
