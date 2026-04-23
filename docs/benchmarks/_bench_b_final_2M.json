@@ -1,0 +1,211 @@
+{
+  "aggregated": {
+    "1": {
+      "avg_rally_mean": 49.614,
+      "ci95_high": 0.9876721198328542,
+      "ci95_low": 0.9610387448516022,
+      "dominance_mean": 0.8648729835202875,
+      "n_seeds": 5,
+      "trials": 500,
+      "win_rate": 0.978,
+      "wins": 489
+    },
+    "3": {
+      "avg_rally_mean": 121.53399999999999,
+      "ci95_high": 0.2478455799000591,
+      "ci95_low": 0.17657669884786484,
+      "dominance_mean": 0.2980431360214924,
+      "n_seeds": 5,
+      "trials": 500,
+      "win_rate": 0.21,
+      "wins": 105
+    },
+    "5": {
+      "avg_rally_mean": 109.33599999999998,
+      "ci95_high": 0.007624618530903363,
+      "ci95_low": 0.0,
+      "dominance_mean": 0.10793479170473042,
+      "n_seeds": 5,
+      "trials": 500,
+      "win_rate": 0.0,
+      "wins": 0
+    }
+  },
+  "algorithm": "dreamer_v3",
+  "checkpoint": "/home/yoon/.claude-squad/worktrees/bench/v200-dreamer/models/bench/B/3cb6ffd9-7d49-4906-8f16-83ec43f534a2/bench-B__3cb6ffd9__final.zip",
+  "elapsed_seconds": 215.60476207733154,
+  "failures": [],
+  "levels": [
+    1,
+    3,
+    5
+  ],
+  "n_games_per_seed": 100,
+  "per_level_per_seed": {
+    "1": [
+      {
+        "avg_opp_score": 6.07,
+        "avg_rally": 48.12,
+        "avg_score": 14.91,
+        "dominance": 0.8602707340324118,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.96,
+        "wins": 96
+      },
+      {
+        "avg_opp_score": 6.72,
+        "avg_rally": 49.45,
+        "avg_score": 14.89,
+        "dominance": 0.8576131420638593,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.97,
+        "wins": 97
+      },
+      {
+        "avg_opp_score": 6.87,
+        "avg_rally": 51.32,
+        "avg_score": 14.9,
+        "dominance": 0.861771244832338,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.98,
+        "wins": 98
+      },
+      {
+        "avg_opp_score": 6.67,
+        "avg_rally": 49.85,
+        "avg_score": 14.97,
+        "dominance": 0.8707097966728281,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.99,
+        "wins": 99
+      },
+      {
+        "avg_opp_score": 6.42,
+        "avg_rally": 49.33,
+        "avg_score": 14.98,
+        "dominance": 0.874,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.99,
+        "wins": 99
+      }
+    ],
+    "3": [
+      {
+        "avg_opp_score": 14.35,
+        "avg_rally": 121.89,
+        "avg_score": 10.69,
+        "dominance": 0.2967667731629393,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.21,
+        "wins": 21
+      },
+      {
+        "avg_opp_score": 14.09,
+        "avg_rally": 119.98,
+        "avg_score": 10.61,
+        "dominance": 0.3158218623481781,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.24,
+        "wins": 24
+      },
+      {
+        "avg_opp_score": 14.24,
+        "avg_rally": 119.7,
+        "avg_score": 10.68,
+        "dominance": 0.26742857142857146,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.16,
+        "wins": 16
+      },
+      {
+        "avg_opp_score": 14.32,
+        "avg_rally": 122.86,
+        "avg_score": 11.02,
+        "dominance": 0.3179542225730071,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.24,
+        "wins": 24
+      },
+      {
+        "avg_opp_score": 14.36,
+        "avg_rally": 123.24,
+        "avg_score": 10.86,
+        "dominance": 0.2922442505947661,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.2,
+        "wins": 20
+      }
+    ],
+    "5": [
+      {
+        "avg_opp_score": 15.0,
+        "avg_rally": 107.7,
+        "avg_score": 5.39,
+        "dominance": 0.10573810691515449,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.0,
+        "wins": 0
+      },
+      {
+        "avg_opp_score": 15.0,
+        "avg_rally": 109.52,
+        "avg_score": 5.59,
+        "dominance": 0.10859640602234094,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.0,
+        "wins": 0
+      },
+      {
+        "avg_opp_score": 15.0,
+        "avg_rally": 109.16,
+        "avg_score": 5.43,
+        "dominance": 0.1063142437591777,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.0,
+        "wins": 0
+      },
+      {
+        "avg_opp_score": 15.0,
+        "avg_rally": 110.08,
+        "avg_score": 5.69,
+        "dominance": 0.11000483325277913,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.0,
+        "wins": 0
+      },
+      {
+        "avg_opp_score": 15.0,
+        "avg_rally": 110.22,
+        "avg_score": 5.62,
+        "dominance": 0.10902036857419982,
+        "n_games": 100,
+        "seed": null,
+        "win_rate": 0.0,
+        "wins": 0
+      }
+    ]
+  },
+  "seeds": [
+    101,
+    102,
+    103,
+    104,
+    105
+  ],
+  "step": 2000000,
+  "workers": 5
+}
