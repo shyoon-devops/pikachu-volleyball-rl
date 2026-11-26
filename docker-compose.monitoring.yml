@@ -5,7 +5,7 @@
 #   docker compose -f docker-compose.monitoring.yml up -d
 #
 # Ports:
-#   Grafana:    http://localhost:3100  (admin/pikachu)
+#   Grafana:    http://localhost:3100  (admin / $GRAFANA_ADMIN_PASSWORD)
 #   Prometheus: http://localhost:9090
 #   Loki:       http://localhost:3101
 #   Dozzle:     http://localhost:9999
@@ -43,7 +43,7 @@ services:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: pikachu
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD (see deploy.env.example)}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/overview.json
     ports:

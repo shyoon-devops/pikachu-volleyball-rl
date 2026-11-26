@@ -46,8 +46,8 @@ v0.2.4 재배포(dev/qa/prod) 완료 직후 실행한 디스크/이미지 정리
 ## Follow-up (non-blocking, queued)
 
 1. ~~**dev/qa 컨테이너 logging driver 에 rotation 추가**~~ — **DONE (Round 2 below)**
-2. **yoonbian-2 의 nginx access log rotation** — SSH 액세스 없어서 이번 작업 범위 제외
-3. **crontab 등록**: `0 5 * * * /home/yoon/.../scripts/disk-cleanup.sh >> /var/log/pikachu-disk-cleanup.log 2>&1`
+2. **frontend host 의 nginx access log rotation** — SSH 액세스 없어서 이번 작업 범위 제외
+3. **crontab 등록**: `0 5 * * * <remote-home>/.../scripts/disk-cleanup.sh >> /var/log/pikachu-disk-cleanup.log 2>&1`
 
 ---
 

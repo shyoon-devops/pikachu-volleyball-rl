@@ -54,7 +54,7 @@ docker compose up --build
 
 ```
 ┌─────────────────────────────────────────┐      ┌─────────────────────────────────────────┐
-│   yoonbian-2 (192.168.0.248)            │      │   GPU server (192.168.0.250)            │
+│   frontend host (<frontend-host>)            │      │   GPU server (<gpu-host>)            │
 │   ─────────────────────────────         │      │   ─────────────────────────────         │
 │   nginx (static + reverse proxy)        │◀────▶│   Backend (FastAPI)                     │
 │   Built frontend (React 19 / Vite)      │      │   REST · WebSocket Hub · Services       │
@@ -77,7 +77,9 @@ docker compose up --build
 ```
 
 Nginx configs: `frontend/nginx-dev.conf`, `frontend/nginx-qa.conf`, `frontend/nginx-prod.conf` (per-env API/WS upstream).
-Frontend 배포: `scripts/deploy-frontend.sh` — 로컬 빌드 후 yoonbian-2 rsync + nginx reload.
+> 게임 에셋(스프라이트, 사운드)은 저장소에 포함하지 않습니다. `npm run dev`/`npm run build` 전에 `frontend/scripts/fetch-assets.mjs`가 원본 저장소의 고정 커밋에서 내려받고 SHA-256으로 검증합니다. 배포 호스트, SSH 키, CORS, Grafana 비밀번호는 `deploy.env.example`을 복사한 `deploy.env`(git 제외) 또는 GitHub Actions 변수로 설정합니다.
+
+Frontend 배포: `scripts/deploy-frontend.sh` — 로컬 빌드 후 frontend host rsync + nginx reload.
 
 ## Tech Stack
 
@@ -103,15 +105,15 @@ Frontend 배포: `scripts/deploy-frontend.sh` — 로컬 빌드 후 yoonbian-2 r
 
 **Model Evaluator (E1-E10)** — Full stack: Elo rating (L1/L3/L5 anchors), dominance score, baseline comparator, best-model auto-selection, parallel batch CLI, markdown report generator with charts + Elo leaderboard. Async `/api/evaluation/run` with `/status/{id}` polling.
 
-**Multi-Environment** — dev/qa/prod split across two hosts. Backend + MongoDB on GPU server via Docker Compose, frontend served via nginx on yoonbian-2. `deploy-frontend.sh` auto-advances `github/<env>` ref post-deploy.
+**Multi-Environment** — dev/qa/prod split across two hosts. Backend + MongoDB on GPU server via Docker Compose, frontend served via nginx on frontend host. `deploy-frontend.sh` auto-advances `github/<env>` ref post-deploy.
 
 > **Authoritative port source:** [`docs/VERSIONS.yml`](docs/VERSIONS.yml). The table below reflects curl-verified state as of 2026-04-12. If it drifts from VERSIONS.yml, VERSIONS.yml wins. Any port change requires a PR updating VERSIONS.yml, this README, and `docs/DEPLOYMENT-STATUS.md` **before** the deploy — see [WORKFLOW.md § Port Change Policy](docs/WORKFLOW.md#port-change-policy).
 
-| Environment | Backend (GPU, 192.168.0.250) | Frontend (yoonbian-2, 192.168.0.248) | MongoDB | Status (2026-04-12 curl) |
+| Environment | Backend (GPU, <gpu-host>) | Frontend (frontend host, <frontend-host>) | MongoDB | Status (2026-04-12 curl) |
 |-------------|------------------------------|---------------------------------------|---------|--------------------------|
-| dev | `:8001` | http://192.168.0.248:3000 | `:27018` (docs, unverified) | backend up, /health/live+ready ok |
-| qa | `:8002` | http://192.168.0.248:3001 | `:27019` (docs, unverified) | **backend DOWN** — #38 |
-| prod | `:8003` | http://192.168.0.248:3002 | `:27020` (per ops, unverified) | backend up but **pre-BE-3 code** — #37/#38 |
+| dev | `:8001` | http://<frontend-host>:3000 | `:27018` (docs, unverified) | backend up, /health/live+ready ok |
+| qa | `:8002` | http://<frontend-host>:3001 | `:27019` (docs, unverified) | **backend DOWN** — #38 |
+| prod | `:8003` | http://<frontend-host>:3002 | `:27020` (per ops, unverified) | backend up but **pre-BE-3 code** — #37/#38 |
 
 Frontend ports `:3000/:3001/:3002` currently serve a byte-identical bundle (`index-CAYlGd5L.js`). DevOps is confirming whether this is intended single-dist-multi-port or accidental overwrite (#38).
 
@@ -169,7 +171,7 @@ cd frontend && npm run test              # Frontend
 
 ## Deployment
 
-Two-server workflow — backend + MongoDB 은 GPU 서버 Docker Compose, frontend 는 yoonbian-2 nginx 정적 서빙.
+Two-server workflow — backend + MongoDB 은 GPU 서버 Docker Compose, frontend 는 frontend host nginx 정적 서빙.
 
 ```bash
 # Backend (GPU server)
@@ -177,8 +179,8 @@ scripts/deploy-dev.sh            # backend compose up (dev)
 scripts/deploy-qa.sh             # backend compose up (qa)
 scripts/deploy-prod.sh           # backend compose up (prod)
 
-# Frontend (from any machine that can reach yoonbian-2 via SSH)
-scripts/deploy-frontend.sh dev   # build + rsync → yoonbian-2:/var/www/...
+# Frontend (from any machine that can reach frontend host via SSH)
+scripts/deploy-frontend.sh dev   # build + rsync → frontend host:/var/www/...
 scripts/deploy-frontend.sh qa
 scripts/deploy-frontend.sh prod
 

@@ -65,7 +65,7 @@ for i in "${!ENVS[@]}"; do
     echo "--- ${ENV_UPPER} ---"
     echo "  MongoDB  (:${MONGO_PORT})  : $(check_container "$PROJECT" mongodb)"
     echo "  Backend  (:${BACKEND_PORT})  : $(check_container "$PROJECT" backend)"
-    echo "  Frontend (:${FRONTEND_PORT})  : $(check_health "http://192.168.0.248:${FRONTEND_PORT}")"
+    echo "  Frontend (:${FRONTEND_PORT})  : $(check_health "http://${FRONTEND_HOST}:${FRONTEND_PORT}")"
     echo "  API      : $(check_health "http://localhost:${BACKEND_PORT}/api/health")"
     echo ""
 done

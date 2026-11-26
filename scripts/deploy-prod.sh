@@ -9,7 +9,7 @@ cd "$PROJECT_DIR"
 
 echo "=== Deploying PROD environment ==="
 echo "  Backend:  http://localhost:8003"
-echo "  Frontend: http://192.168.0.248:3002"
+echo "  Frontend: http://${FRONTEND_HOST}:3002"
 echo "  MongoDB:  localhost:27020"
 echo ""
 

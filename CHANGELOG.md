@@ -509,7 +509,7 @@ Sprint 1 완료분 + 팀 자발적 품질 보강 + BE-2/BE-3 조기 착수분. �
 - prod 승인 → 승격 → main 머지 + `v0.2.1` 태그
 
 ### Infrastructure (v0.2.1 scope, 이전 섹션에서 누락)
-- **Two-server architecture split** (`75fb4292`): Backend + MongoDB → GPU 서버 (192.168.0.250), Frontend → yoonbian-2 (192.168.0.248) nginx 정적 서빙. docker-compose 에서 `frontend` 서비스 제거, `frontend/nginx-{dev,qa,prod}.conf` 3종 + `scripts/deploy-frontend.sh` 추가. CORS_ORIGINS 환경별 갱신
+- **Two-server architecture split** (`75fb4292`): Backend + MongoDB → GPU 서버 (<gpu-host>), Frontend → frontend host (<frontend-host>) nginx 정적 서빙. docker-compose 에서 `frontend` 서비스 제거, `frontend/nginx-{dev,qa,prod}.conf` 3종 + `scripts/deploy-frontend.sh` 추가. CORS_ORIGINS 환경별 갱신
 - **WSL2 docker.exe 감지** (`2acaabb5`): 모든 deploy 스크립트 (`deploy-{dev,qa,prod}.sh`)에 WSL2 환경 docker 바이너리 경로 감지 로직 추가
 - **Training 스레드 예외 로깅** (`52d2ee39`): 훈련 스레드 예외를 silent swallow 하지 않고 구조화 로그로 기록 — 과거 silent-failure 패턴 제거
 - **테스트 파일 unused import 정리** (`a2c23296`)

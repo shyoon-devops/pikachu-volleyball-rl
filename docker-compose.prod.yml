@@ -31,6 +31,8 @@ services:
       - replays_prod:/app/replays
     env_file: .env.prod
     environment:
+      CORS_ORIGINS: ${CORS_ORIGINS_PROD:-http://localhost:3002}
+    environment:
       - MPLCONFIGDIR=/tmp/matplotlib
     depends_on:
       mongodb:
@@ -55,7 +57,7 @@ services:
         max-size: "10m"
         max-file: "5"
 
-  # Frontend runs on yoonbian-2 (192.168.0.248:3002) via nginx
+  # Frontend runs on a separate host (port 3002) via nginx
   # Deploy with: bash scripts/deploy-frontend.sh prod
 
 volumes:

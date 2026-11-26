@@ -10,10 +10,15 @@ for arg in "$@"; do
     [[ "$arg" == "--no-push" ]] && NO_PUSH=true
 done
 
-SSH_KEY="$HOME/.ssh/id_ed25519_yoonbian-2"
-SSH_HOST="yoon@192.168.0.248"
+source "$SCRIPT_DIR/_common.sh"
+: "${FRONTEND_SSH_HOST:?set FRONTEND_SSH_HOST (see deploy.env.example)}"
+: "${FRONTEND_REMOTE_BASE:?set FRONTEND_REMOTE_BASE (see deploy.env.example)}"
+: "${BACKEND_HOST:?set BACKEND_HOST (see deploy.env.example)}"
+SSH_KEY="${FRONTEND_SSH_KEY:-$HOME/.ssh/id_ed25519}"
+SSH_KEY="${SSH_KEY/#\~/$HOME}"
+SSH_HOST="$FRONTEND_SSH_HOST"
 SSH_CMD="ssh -i $SSH_KEY $SSH_HOST"
-REMOTE_DIR="/home/yoon/pikachu-frontend/${ENV}/dist"
+REMOTE_DIR="${FRONTEND_REMOTE_BASE}/${ENV}/dist"
 
 # Validate environment
 case "$ENV" in
@@ -26,7 +31,7 @@ cd "$PROJECT_DIR"
 DEPLOY_SHA="$(git rev-parse HEAD)"
 DEPLOY_SHORT="$(git rev-parse --short HEAD)"
 
-echo "=== Deploying Frontend ($ENV) to yoonbian-2 ==="
+echo "=== Deploying Frontend ($ENV) to the frontend host ==="
 echo "    Source SHA: $DEPLOY_SHORT ($DEPLOY_SHA)"
 echo ""
 
@@ -41,7 +46,7 @@ echo "[2/6] Preparing remote directory..."
 $SSH_CMD "mkdir -p $REMOTE_DIR"
 
 # 3. Sync build output
-echo "[3/6] Syncing dist/ to yoonbian-2..."
+echo "[3/6] Syncing dist/ to the frontend host..."
 rsync -avz --delete \
     dist/ \
     "$SSH_HOST:$REMOTE_DIR/" \
@@ -49,8 +54,8 @@ rsync -avz --delete \
 
 # 4. Fix permissions for nginx (www-data) access
 echo "[4/6] Setting permissions..."
-$SSH_CMD "chmod o+x /home/yoon /home/yoon/pikachu-frontend && \
-    chmod -R o+rX /home/yoon/pikachu-frontend/"
+$SSH_CMD "chmod o+x \"$(dirname "$FRONTEND_REMOTE_BASE")\" \"$FRONTEND_REMOTE_BASE\" && \
+    chmod -R o+rX \"$FRONTEND_REMOTE_BASE/\""
 
 # 5. Deploy nginx config
 echo "[5/6] Deploying nginx config..."
@@ -60,7 +65,11 @@ if [ ! -f "$NGINX_CONF" ]; then
     exit 1
 fi
 
-scp -i "$SSH_KEY" "$NGINX_CONF" "$SSH_HOST:/tmp/pikachu-${ENV}.conf"
+RENDERED_CONF="$(mktemp)"
+sed -e "s#__FRONTEND_REMOTE_BASE__#${FRONTEND_REMOTE_BASE}#g" \
+    -e "s#__BACKEND_HOST__#${BACKEND_HOST}#g" "$NGINX_CONF" > "$RENDERED_CONF"
+scp -i "$SSH_KEY" "$RENDERED_CONF" "$SSH_HOST:/tmp/pikachu-${ENV}.conf"
+rm -f "$RENDERED_CONF"
 $SSH_CMD "sudo cp /tmp/pikachu-${ENV}.conf /etc/nginx/sites-available/pikachu-${ENV} && \
     sudo ln -sf /etc/nginx/sites-available/pikachu-${ENV} /etc/nginx/sites-enabled/ && \
     sudo nginx -t && \
@@ -101,5 +110,5 @@ else
 fi
 
 echo ""
-echo "=== Frontend ($ENV) deployed to yoonbian-2 ==="
+echo "=== Frontend ($ENV) deployed to the frontend host ==="
 echo "    Runtime SHA: $DEPLOY_SHORT"

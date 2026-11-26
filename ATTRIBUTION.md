@@ -72,8 +72,10 @@ Read this before redistributing, forking, or publishing.
 
 ### Assets (byte-identical copies)
 
-The following files currently under `frontend/public/assets/` are
-**byte-identical copies** of files from
+The following files are **not committed to this repository**. They are
+downloaded at build time by `frontend/scripts/fetch-assets.mjs` (run by
+`npm run dev` / `npm run build`) from a pinned upstream commit and checked
+against SHA-256 hashes. They are **byte-identical copies** of files from
 `gorisanson/pikachu-volleyball`'s `src/resources/assets/`:
 
 | File | Upstream path |

@@ -24,7 +24,7 @@
 #   * 0f32235e feat(rl): rebalance reward weights
 #
 # PM promotion checklist:
-#   1. New frontend bundle hash at http://192.168.0.248:3001/
+#   1. New frontend bundle hash at the QA frontend URL
 #   2. All 4 backend suites pass (expected 48 pass / 0 fail / 3 skip)
 #   3. Deterministic fails resolved (/api/models probes in test_burst_triggers_429)
 #   4. Rate-limit exemption verified on /api/health AND /api/metrics
@@ -35,10 +35,10 @@
 
 set -u  # Don't set -e — we want to collect all results, not abort on first fail
 
-REPO=/home/yoon/.claude-squad/worktrees/yoon/qa-engineer_18a54a027720e006
+REPO="${REPO:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)}"
 BACKEND=$REPO/backend
 QA_BACKEND_URL=http://localhost:8002
-QA_FRONTEND_URL=http://192.168.0.248:3001
+QA_FRONTEND_URL="${QA_FRONTEND_URL:-http://${FRONTEND_HOST:-localhost}:3001}"
 
 log() { printf "\n\033[1;34m=== %s ===\033[0m\n" "$*"; }
 pass() { printf "\033[32m✅ %s\033[0m\n" "$*"; }

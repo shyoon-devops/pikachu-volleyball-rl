@@ -31,6 +31,8 @@ services:
       - models_dev:/app/models
       - replays_dev:/app/replays
     env_file: .env.dev
+    environment:
+      CORS_ORIGINS: ${CORS_ORIGINS_DEV:-http://localhost:3000}
     depends_on:
       mongodb:
         condition: service_healthy
@@ -57,7 +59,7 @@ services:
         max-size: "10m"
         max-file: "5"
 
-  # Frontend runs on yoonbian-2 (192.168.0.248:3000) via nginx
+  # Frontend runs on a separate host (port 3000) via nginx
   # Deploy with: bash scripts/deploy-frontend.sh dev
   #
   # For training (no --reload, no source mount):

@@ -10,7 +10,7 @@
 
 ## 1. Verified Runtime State (curl probe + DevOps images, 2026-04-12 23:55)
 
-### Backend (GPU server, 192.168.0.250)
+### Backend (GPU server, <gpu-host>)
 | Port | Status | Version (runtime) | `/api/health/live` | Uptime | Image digest | Role |
 |------|--------|-------------------|--------------------|--------|--------------|------|
 | `:8001` | **UP** | v0.2.5 (`cd1e6a39`) | `{"status":"live"}` ✅ | ~14min | `sha256:d577fb9a…` | **dev** (PR #42 revert → BE rebuild 완료) |
@@ -24,7 +24,7 @@ Runtime 신 코드 검증 (PM curl + DevOps 보고):
 - `/api/training/metrics/timeseries` cap 10000 + `log_interval=256` (callbacks.py:88)
 - Bot L1-L5 aggression/net_bias 활성
 
-### Frontend (yoonbian-2, 192.168.0.248)
+### Frontend (frontend host, <frontend-host>)
 | Port | Status | Bundle | Role |
 |------|--------|--------|------|
 | `:3000` | **UP** | `assets/index-CFGidFNF.js` | **dev** |

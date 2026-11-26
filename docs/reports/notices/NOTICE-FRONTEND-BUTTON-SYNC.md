@@ -6,7 +6,7 @@
 
 ## Summary
 
-User-reported critical bugs on dev (`http://192.168.0.248:3000/`):
+User-reported critical bugs on dev (`http://<frontend-host>:3000/`):
 
 1. **Stop** button doesn't reflect in UI
 2. **Pause** button doesn't do anything
