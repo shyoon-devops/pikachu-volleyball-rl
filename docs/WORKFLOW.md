@@ -6,9 +6,9 @@
 
 | Environment | Backend host | Backend port | Frontend host | Frontend port | MongoDB | Purpose |
 |-------------|--------------|--------------|---------------|---------------|---------|---------|
-| **dev** | GPU (192.168.0.250) | `:8001` | yoonbian-2 (192.168.0.248) | `:3000` | `:27018` | 개발 & 로컬 테스트 |
-| **qa** | GPU (192.168.0.250) | `:8002` | yoonbian-2 (192.168.0.248) | `:3001` | `:27019` | QA 테스트 & 검증 |
-| **prod** | GPU (192.168.0.250) | `:8003` | yoonbian-2 (192.168.0.248) | `:3002` | `:27020` | 프로덕션 (훈련 & 평가) |
+| **dev** | GPU (<gpu-host>) | `:8001` | frontend host (<frontend-host>) | `:3000` | `:27018` | 개발 & 로컬 테스트 |
+| **qa** | GPU (<gpu-host>) | `:8002` | frontend host (<frontend-host>) | `:3001` | `:27019` | QA 테스트 & 검증 |
+| **prod** | GPU (<gpu-host>) | `:8003` | frontend host (<frontend-host>) | `:3002` | `:27020` | 프로덕션 (훈련 & 평가) |
 
 포트/아키텍처는 2026-04-12 에 two-server 구조 + 새 포트로 이행했습니다. 이전 문서의 `:8000 / :5173 / :27017` 기재는 더 이상 유효하지 않습니다.
 
@@ -248,7 +248,7 @@ PM 이 그동안 태그만 만들고 Release 를 만들지 않았음. 이 날짜
 - 백엔드 listen port
 - 프런트엔드 서빙 port
 - MongoDB port
-- 호스트 (GPU 서버 ↔ yoonbian-2 등)
+- 호스트 (GPU 서버 ↔ frontend host 등)
 
 ### 절차
 1. **배포 전 PR**: DevOps 는 다음 파일을 **동일 PR** 에서 새 포트로 갱신합니다.

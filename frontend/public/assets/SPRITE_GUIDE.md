@@ -1,5 +1,7 @@
 # Sprite Sheet Guide — Pikachu Volleyball
 
+> The sprite sheet and sound files are not stored in git. `npm run assets` (also run automatically before `dev`, `build`, and `test:e2e`) downloads them from `gorisanson/pikachu-volleyball` at a pinned commit. See `ATTRIBUTION.md`.
+
 Source: [gorisanson/pikachu-volleyball](https://github.com/gorisanson/pikachu-volleyball)
 
 ## Sprite Sheet

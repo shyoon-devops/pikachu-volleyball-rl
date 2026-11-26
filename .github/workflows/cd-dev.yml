@@ -11,6 +11,14 @@ concurrency:
 jobs:
   deploy-dev:
     runs-on: self-hosted
+    env:
+      FRONTEND_HOST: ${{ vars.FRONTEND_HOST }}
+      FRONTEND_SSH_HOST: ${{ vars.FRONTEND_SSH_HOST }}
+      FRONTEND_SSH_KEY: ${{ vars.FRONTEND_SSH_KEY }}
+      FRONTEND_REMOTE_BASE: ${{ vars.FRONTEND_REMOTE_BASE }}
+      BACKEND_HOST: ${{ vars.BACKEND_HOST }}
+      CORS_ORIGINS_DEV: ${{ vars.CORS_ORIGINS_DEV }}
+      CORS_ORIGINS_PROD: ${{ vars.CORS_ORIGINS_PROD }}
     environment: development
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +35,7 @@ jobs:
           echo "Waiting for healthy status..."
           timeout 60 bash -c 'until curl -sf http://localhost:8001/api/health; do sleep 3; done'
 
-      - name: Deploy frontend to yoonbian-2
+      - name: Deploy frontend
         run: bash scripts/deploy-frontend.sh dev
 
       - name: Verify deployment
@@ -35,6 +43,6 @@ jobs:
           echo "Backend health:"
           curl -sf http://localhost:8001/api/health
           echo ""
-          echo "Frontend proxy (yoonbian-2):"
-          ssh -o ConnectTimeout=5 -i ~/.ssh/id_ed25519_yoonbian-2 yoon@192.168.0.248 \
+          echo "Frontend proxy:"
+          ssh -o ConnectTimeout=5 -i "${FRONTEND_SSH_KEY/#\~/$HOME}" "$FRONTEND_SSH_HOST" \
             "curl -sf --connect-timeout 5 http://localhost:3000/api/health"

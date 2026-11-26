@@ -47,8 +47,8 @@ made two implicit assumptions:
 
 Neither was enforced anywhere. Engineers merging via GitHub UI (web merge,
 squash merge, etc.) never touched the dev host. `deploy-frontend.sh dev`
-rebuilt only the FE bundle on `yoonbian-2`, not the dev backend container on
-`192.168.0.250`. The window between a dev merge and the next promote could
+rebuilt only the FE bundle on `frontend host`, not the dev backend container on
+`<gpu-host>`. The window between a dev merge and the next promote could
 (and did) stretch past 15 hours without anyone noticing, because the dev
 `/api/health` endpoint continued to return `200 OK` — healthy, just stale.
 

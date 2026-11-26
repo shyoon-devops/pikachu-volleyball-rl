@@ -28,3 +28,15 @@ backups/
 .idea/
 *.swp
 *.swo
+
+# Upstream game assets are fetched at build time (frontend/scripts/fetch-assets.mjs),
+# not redistributed. See ATTRIBUTION.md.
+frontend/public/assets/sprite_sheet.png
+frontend/public/assets/sprite_sheet.json
+frontend/public/assets/sounds/
+
+# Local deployment settings (copy from deploy.env.example)
+deploy.env
+
+# Tool artifacts
+.playwright-mcp/

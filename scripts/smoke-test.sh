@@ -8,7 +8,7 @@
 set -uo pipefail
 
 ENV="${1:-}"
-FE_HOST="${FE_HOST:-192.168.0.248}"
+FE_HOST="${FE_HOST:-${FRONTEND_HOST:-localhost}}"
 shift || true
 while [ $# -gt 0 ]; do
     case "$1" in

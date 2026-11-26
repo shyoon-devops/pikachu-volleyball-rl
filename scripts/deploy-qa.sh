@@ -9,7 +9,7 @@ cd "$PROJECT_DIR"
 
 echo "=== Deploying QA environment ==="
 echo "  Backend:  http://localhost:8002"
-echo "  Frontend: http://192.168.0.248:3001"
+echo "  Frontend: http://${FRONTEND_HOST}:3001"
 echo "  MongoDB:  localhost:27019"
 echo ""
 

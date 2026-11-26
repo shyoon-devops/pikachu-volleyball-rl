@@ -4,11 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "assets": "node scripts/fetch-assets.mjs",
+    "predev": "npm run assets",
     "dev": "vite",
+    "prebuild": "npm run assets",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretest:e2e": "npm run assets",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
     "preview": "vite preview"

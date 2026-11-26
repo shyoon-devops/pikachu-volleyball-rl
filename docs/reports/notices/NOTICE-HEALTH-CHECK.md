@@ -34,7 +34,7 @@ docker logs pikachu-rl-dev-backend-1 --tail 30
 
 pyproject.toml에 패키지를 추가했으면 **Docker 이미지 재빌드 필수**:
 ```bash
-cd /home/yoon/.claude-squad/worktrees/yoon/devops-engineer_18a549f15750edca
+cd <remote-home>/.claude-squad/worktrees/yoon/devops-engineer_18a549f15750edca
 docker compose -f docker-compose.dev.yml build backend
 docker compose -f docker-compose.dev.yml up -d backend
 ```

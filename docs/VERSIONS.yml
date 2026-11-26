@@ -7,7 +7,7 @@
 # Verification protocol:
 #   backend_commit     : source of truth is the git SHA baked into the container image at build time
 #                        (e.g. LABEL org.opencontainers.image.revision, /etc/app-version, or API /api/version if later added)
-#   frontend_commit    : git SHA of the source used for the build rsynced to yoonbian-2
+#   frontend_commit    : git SHA of the source used for the build rsynced to frontend host
 #   frontend_bundle    : primary bundle filename from index.html (e.g. assets/index-<hash>.js)
 #   backend_image      : `docker inspect <container> --format '{{.Image}}'`
 #   last_deployed_at   : ISO-8601 in Asia/Seoul
@@ -91,8 +91,8 @@ release_history:
 
 environments:
   dev:
-    host_backend: 192.168.0.250
-    host_frontend: 192.168.0.248
+    host_backend: <gpu-host>
+    host_frontend: <frontend-host>
     backend:
       port: 8001
       status: up                              # P0 hotfix — match-end freeze tick (cd1e6a39)
@@ -127,8 +127,8 @@ environments:
     deploy_pending: false                     # all 3 envs in sync at cd1e6a39
 
   qa:
-    host_backend: 192.168.0.250
-    host_frontend: 192.168.0.248
+    host_backend: <gpu-host>
+    host_frontend: <frontend-host>
     backend:
       port: 8002
       status: up                              # P0 hotfix — match-end freeze tick (cd1e6a39)
@@ -171,8 +171,8 @@ environments:
       clean stop at step=10000). REST mutation paths all 200 OK.
 
   prod:
-    host_backend: 192.168.0.250
-    host_frontend: 192.168.0.248
+    host_backend: <gpu-host>
+    host_frontend: <frontend-host>
     backend:
       port: 8003
       status: up                              # P0 hotfix — match-end freeze tick (cd1e6a39)
